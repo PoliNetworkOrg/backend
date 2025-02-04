@@ -2,15 +2,23 @@
   "name": "backend",
   "version": "0.1.0",
   "description": "PoliNetwork backend",
-  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "tsc && node dist/server.js"
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/index.js",
   },
   "keywords": [],
   "author": "PoliNetwork APS",
   "license": "ISC",
   "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsc-alias": "^1.8.10",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@trpc/server": "^10.45.2",
+    "fastify": "^5.2.1",
+    "zod": "^3.24.1"
   }
 }
