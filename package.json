@@ -2,7 +2,11 @@
   "name": "@polinetwork/backend",
   "version": "0.1.0",
   "description": "PoliNetwork backend server",
-  "types": "./dist/index.d.ts",
+  "main": "lib/index.js",      
+  "types": "lib/index.d.ts",  
+  "module": "lib/index.esm.js",  
+  "files": ["lib"],             
+  "private": false,              
   "scripts": {
     "build:server": "tsc",
     "build:npm": "tsup",

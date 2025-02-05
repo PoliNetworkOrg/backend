@@ -18,6 +18,7 @@ db.sqlite
 
 .vscode-test
 .idea
+/lib
 
 /node_modules
 /.pnp
