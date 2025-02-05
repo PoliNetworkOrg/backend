@@ -5,15 +5,18 @@ import {
 import fastify from "fastify";
 import { createContext } from "./context";
 import { appRouter, type AppRouter } from "./router";
+import { CONSTANTS } from "./constants";
 
 const isDev = process.env.NODE_ENV === 'development';
+console.log("isDev", isDev ? "YES" : "NO");
 
 const server = fastify({
   maxParamLength: 5000,
+  logger: true,
 });
 
 server.register(fastifyTRPCPlugin, {
-  prefix: "/trpc",
+  prefix: CONSTANTS.TRPC_PATH,
   trpcOptions: {
     router: appRouter,
     createContext,
@@ -37,9 +40,12 @@ if (isDev) {
 
 server.get("/", (_, res) => res.send("hi"));
 
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+
 (async () => {
   try {
-    await server.listen({ port: 3000 });
+    await server.listen({ port: PORT });
+    console.log("listening on port: ", PORT)
   } catch (err) {
     server.log.error(err);
     process.exit(1);
