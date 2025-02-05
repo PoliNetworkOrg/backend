@@ -1,11 +1,13 @@
 {
-  "name": "backend",
+  "name": "@polinetwork/backend",
   "version": "0.1.0",
-  "description": "PoliNetwork backend",
+  "description": "PoliNetwork backend server",
+  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build:server": "tsc",
+    "build:npm": "tsup",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/index.js",
+    "start": "node dist/index.js"
   },
   "keywords": [],
   "author": "PoliNetwork APS",
@@ -13,6 +15,7 @@
   "devDependencies": {
     "@types/node": "^22.13.1",
     "tsc-alias": "^1.8.10",
+    "tsup": "^8.3.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   },

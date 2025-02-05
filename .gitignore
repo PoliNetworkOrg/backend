@@ -11,6 +11,7 @@ lerna-debug.log*
 .DS_Store
 *.pem
 db.sqlite
+*.tgz
 
 .env
 .env*.local
