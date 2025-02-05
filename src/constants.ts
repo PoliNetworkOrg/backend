@@ -1,3 +1,1 @@
-export const CONSTANTS = {
-  TRPC_PATH: "/trpc"
-} as const;
+export const TRPC_PATH = "/api/trpc";

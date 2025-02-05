@@ -5,7 +5,7 @@ import {
 import fastify from "fastify";
 import { createContext } from "./context";
 import { appRouter, type AppRouter } from "./router";
-import { CONSTANTS } from "./constants";
+import { TRPC_PATH } from "./constants";
 
 const isDev = process.env.NODE_ENV === 'development';
 console.log("isDev", isDev ? "YES" : "NO");
@@ -16,7 +16,7 @@ const server = fastify({
 });
 
 server.register(fastifyTRPCPlugin, {
-  prefix: CONSTANTS.TRPC_PATH,
+  prefix: TRPC_PATH,
   trpcOptions: {
     router: appRouter,
     createContext,
