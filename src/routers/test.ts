@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure } from "../trpc";
+import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { DB, SCHEMA } from "src/db";
 
 export const testRouter = createTRPCRouter({
