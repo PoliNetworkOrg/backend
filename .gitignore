@@ -18,9 +18,9 @@ db.sqlite
 
 .vscode-test
 .idea
-/lib
+**/lib
 
-/node_modules
+**/node_modules
 /.pnp
 .pnp.js
 /dist
