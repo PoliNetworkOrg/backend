@@ -1,0 +1,31 @@
+{
+  "name": "@polinetwork/backend",
+  "version": "0.2.0",
+  "description": "Utils to interact with the backend.",
+  "keywords": [],
+  "author": "PoliNetwork APS",
+  "license": "ISC",
+  "types": "dist/index.d.ts",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.cjs",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "cd ../backend && pnpm install && pnpm run build:npm && cd ../package && copyfiles -u 3 ../backend/lib/* dist",
+    "prepublishOnly": "pnpm run build"
+  },
+  "devDependencies": {
+    "copyfiles": "^2.4.1",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.3.6",
+    "typescript": "^4.9.4"
+  }
+}

@@ -1,21 +1,15 @@
 {
   "compilerOptions": {
     "target": "esnext",
-    "module": "commonjs",
-    "outDir": "dist",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "declarationMap": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "allowJs": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "declaration": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["./src/*"]
-    },
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
 }
