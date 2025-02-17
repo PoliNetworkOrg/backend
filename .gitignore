@@ -18,11 +18,11 @@ db.sqlite
 
 .vscode-test
 .idea
-**/lib
 
 **/node_modules
-/.pnp
+**/.pnp
 .pnp.js
-/dist
+**/dist
+**/lib
 
 /coverage

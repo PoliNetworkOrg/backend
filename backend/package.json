@@ -1,20 +1,17 @@
 {
-  "name": "@polinetwork/backend",
-  "version": "0.1.0",
+  "name": "backend",
+  "version": "0.2.0",
   "description": "PoliNetwork backend server",
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
-  "module": "lib/index.esm.js",
-  "files": [
-    "lib"
-  ],
-  "private": false,
+  "private": true,
+  "keywords": [],
+  "author": "PoliNetwork APS",
+  "license": "ISC",
+  "type": "module",
   "scripts": {
     "build:server": "NODE_ENV=production tsc",
     "build:npm": "NODE_ENV=production tsup",
     "dev": "NODE_ENV=development tsx watch src/server.ts",
     "start": "NODE_ENV=production node dist/index.js",
-    "prepublishOnly": "pnpm run build:npm",
     "db:tg:push": "drizzle-kit push --config drizzle.config.tg.ts",
     "db:tg:generate": "drizzle-kit generate --config drizzle.config.tg.ts",
     "db:tg:migrate": "drizzle-kit migrate --config drizzle.config.tg.ts",
@@ -22,16 +19,12 @@
     "db:web:generate": "drizzle-kit generate --config drizzle.config.web.ts",
     "db:web:migrate": "drizzle-kit migrate --config drizzle.config.web.ts"
   },
-  "keywords": [],
-  "author": "PoliNetwork APS",
-  "license": "ISC",
   "devDependencies": {
     "@types/node": "^22.13.1",
     "@types/pg": "^8.11.11",
     "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.4",
     "superjson": "^2.2.2",
-    "tsc-alias": "^1.8.10",
     "tsup": "^8.3.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
