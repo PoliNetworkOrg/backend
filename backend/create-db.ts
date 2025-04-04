@@ -7,6 +7,7 @@ const client = new pg.Client({
   port: parseInt(process.env.DB_PORT!),
   user: process.env.DB_USER!,
   password: process.env.DB_PASS!,
+  database: undefined,
 });
 
 try {
