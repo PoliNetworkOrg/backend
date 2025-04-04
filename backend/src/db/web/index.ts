@@ -1,6 +1,5 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { makeConnection } from "../connection";
-import "dotenv/config"
 import * as testSchema from "./schema/test";
 
 const schema = { ...testSchema }

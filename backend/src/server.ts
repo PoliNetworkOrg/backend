@@ -5,7 +5,6 @@ import {
 import fastify from "fastify";
 import { appRouter, type AppRouter } from "./routers";
 import { TRPC_PATH } from "./constants";
-import "dotenv/config";
 import { JsonSchemaToTsProvider } from "@fastify/type-provider-json-schema-to-ts";
 import { DB } from "./db";
 import { createTRPCContext } from "./trpc";

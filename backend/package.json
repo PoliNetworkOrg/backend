@@ -8,10 +8,10 @@
   "license": "ISC",
   "type": "module",
   "scripts": {
-    "build:server": "NODE_ENV=production tsc",
-    "build:npm": "NODE_ENV=production tsup",
-    "dev": "NODE_ENV=development tsx watch src/server.ts",
-    "start": "NODE_ENV=production node dist/index.js",
+    "build": "NODE_ENV=production tsup --config tsup.node.config.ts",
+    "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
+    "dev": "NODE_ENV=development tsx watch --clear-screen=false --env-file=.env src/server.ts",
+    "start": "NODE_ENV=production node dist/server.js",
     "db:tg:push": "drizzle-kit push --config drizzle.config.tg.ts",
     "db:tg:generate": "drizzle-kit generate --config drizzle.config.tg.ts",
     "db:tg:migrate": "drizzle-kit migrate --config drizzle.config.tg.ts",
@@ -22,7 +22,6 @@
   "devDependencies": {
     "@types/node": "^22.13.1",
     "@types/pg": "^8.11.11",
-    "dotenv": "^16.4.7",
     "drizzle-kit": "^0.30.4",
     "superjson": "^2.2.2",
     "tsup": "^8.3.6",
