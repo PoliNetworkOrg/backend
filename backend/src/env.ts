@@ -1,15 +1,16 @@
 import { createEnv } from "@t3-oss/env-core";
 import { z } from "zod";
 
+// coerce is needed for non-string values, because k8s supports only string env
 export const env = createEnv({
   server: {
-    PORT: z.number().min(1).max(65535).default(3000),
+    PORT: z.coerce.number().min(1).max(65535).default(3000),
     DB_HOST: z.string().min(1),
-    DB_PORT: z.number().min(1).max(65535).default(5432),
+    DB_PORT: z.coerce.number().min(1).max(65535).default(5432),
     DB_USER: z.string().min(1),
     DB_PASS: z.string().min(1),
     DB_NAME: z.string().min(3).default("polinetwork_backend"),
-    NODE_ENV: z.enum(["development", "production"]).default("development")
+    NODE_ENV: z.enum(["development", "production"]).default("development"),
   },
 
   runtimeEnv: process.env,
