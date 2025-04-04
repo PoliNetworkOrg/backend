@@ -47,7 +47,7 @@ const PORT = env.PORT;
 
 (async () => {
   try {
-    await server.listen({ port: PORT });
+    await server.listen({ port: PORT, host: "0.0.0.0" });
     const q1 = await DB.select().from(SCHEMA.TG.test);
     const q2 = await DB.select().from(SCHEMA.WEB.test);
     console.log("db working: ", q1, q2);
