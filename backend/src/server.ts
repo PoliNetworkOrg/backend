@@ -6,7 +6,7 @@ import fastify from "fastify";
 import { appRouter, type AppRouter } from "./routers";
 import { TRPC_PATH } from "./constants";
 import { JsonSchemaToTsProvider } from "@fastify/type-provider-json-schema-to-ts";
-import { DB } from "./db";
+import { DB, SCHEMA } from "./db";
 import { createTRPCContext } from "./trpc";
 
 const isDev = process.env.NODE_ENV === "development";
@@ -47,8 +47,8 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 (async () => {
   try {
     await server.listen({ port: PORT });
-    const q1 = await DB.WEB.query.testTable.findMany();
-    const q2 = await DB.TG.query.testTable.findMany();
+    const q1 = await DB.select().from(SCHEMA.TG.test);
+    const q2 = await DB.select().from(SCHEMA.WEB.test);
     console.log("db working: ", q1, q2);
     console.log("listening on port: ", PORT);
   } catch (err) {

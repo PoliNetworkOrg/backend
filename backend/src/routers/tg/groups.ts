@@ -5,7 +5,7 @@ import { z } from "zod";
 
 export default createTRPCRouter({
   getAll: publicProcedure.query(async () => {
-    const results = await DB.TG.select().from(SCHEMA.TG.groups);
+    const results = await DB.select().from(SCHEMA.TG.groups);
     return results;
   }),
 
@@ -16,10 +16,11 @@ export default createTRPCRouter({
       }),
     )
     .query(async ({ input }) => {
-      return await DB.TG.query.groups.findMany({
-        where: (t) =>
+      return await DB.select()
+        .from(SCHEMA.TG.groups)
+        .where((t) =>
           and(...input.query.split(" ").map((q) => ilike(t.title, `%${q}%`))),
-      });
+        );
     }),
 
   getById: publicProcedure
@@ -29,9 +30,10 @@ export default createTRPCRouter({
       }),
     )
     .query(async ({ input }) => {
-      return await DB.TG.query.groups.findFirst({
-        where: (t) => eq(t.telegramId, input.telegramId),
-      });
+      return await DB.select()
+        .from(SCHEMA.TG.groups)
+        .limit(1)
+        .where((t) => eq(t.telegramId, input.telegramId));
     }),
 
   create: publicProcedure
@@ -45,7 +47,7 @@ export default createTRPCRouter({
       ),
     )
     .mutation(async ({ input }) => {
-      const rows = await DB.TG.insert(SCHEMA.TG.groups)
+      const rows = await DB.insert(SCHEMA.TG.groups)
         .values(input)
         .returning();
       return rows.map((r) => r.id);

@@ -1,11 +1,12 @@
 import type { Config } from "drizzle-kit";
 
 export default {
-	schema: "./src/db/web/schema/*",
-	out: "./drizzle/web",
+	schema: "./src/db/schema/*",
+	out: "./drizzle",
   dialect: "postgresql",
+  verbose: true,
 	dbCredentials: {
-    database: process.env.DB_NAME_WEB!,
+    database: process.env.DB_NAME!,
     host: process.env.DB_HOST!,
     port: parseInt(process.env.DB_PORT!),
     user: process.env.DB_USER!,
@@ -13,3 +14,4 @@ export default {
     ssl: false,
 	},
 } satisfies Config;
+

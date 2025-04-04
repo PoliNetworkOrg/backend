@@ -7,11 +7,11 @@ export const testRouter = createTRPCRouter({
     .input(z.object({ dbName: z.enum(["web", "tg"]) }))
     .query(async ({ input }) => {
       if (input.dbName === "tg") {
-        const q = await DB.TG.select().from(SCHEMA.TG.testTable).limit(50);
+        const q = await DB.select().from(SCHEMA.TG.test).limit(50);
         return q.map((e) => e.text);
       }
 
-      const q = await DB.WEB.select().from(SCHEMA.WEB.testTable).limit(50);
+      const q = await DB.select().from(SCHEMA.WEB.test).limit(50);
       return q.map((e) => e.text);
     }),
 
@@ -19,11 +19,11 @@ export const testRouter = createTRPCRouter({
     .input(z.object({ text: z.string(), dbName: z.enum(["web", "tg"]) }))
     .mutation(async ({ input }) => {
       if (input.dbName === "tg") {
-        await DB.TG.insert(SCHEMA.TG.testTable).values({ text: input.text });
+        await DB.insert(SCHEMA.TG.test).values({ text: input.text });
         return true;
       }
 
-      await DB.WEB.insert(SCHEMA.WEB.testTable).values({ text: input.text });
+      await DB.insert(SCHEMA.WEB.test).values({ text: input.text });
       return true;
     }),
 });

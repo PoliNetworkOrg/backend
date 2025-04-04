@@ -1,14 +1,9 @@
-import web from "./web"
-import tg from "./tg"
+import { schema as webSchema } from "./schema/web";
+import { schema as tgSchema } from "./schema/tg";
+import { db } from "./db";
 
-export const DB_NAMES = [web.dbName, tg.dbName]
- 
-export const DB = {
-  WEB: web.db,
-  TG: tg.db,
-}
-
+export const DB = db;
 export const SCHEMA = {
-  WEB: web.schema,
-  TG: tg.schema,
-}
+  WEB: webSchema,
+  TG: tgSchema,
+};
