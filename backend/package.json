@@ -14,8 +14,7 @@
     "start": "NODE_ENV=production node dist/server.js",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:create": "node --experimental-strip-types --experimental-transform-types create-db.ts"
+    "db:migrate": "drizzle-kit migrate"
   },
   "devDependencies": {
     "@types/node": "^22.13.1",
