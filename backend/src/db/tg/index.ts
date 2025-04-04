@@ -3,10 +3,11 @@ import { makeConnection } from "../connection";
 import * as testSchema from "./schema/test"
 import * as groupsSchema from "./schema/groups"
 
+const dbName = process.env.DB_NAME_TG!
 const schema = { ...groupsSchema, ...testSchema }
 const db = drizzle({
-  connection: makeConnection(process.env.DB_NAME_TG!),
+  connection: makeConnection(dbName),
   schema,
 });
 
-export default { db, schema };
+export default { db, dbName, schema }

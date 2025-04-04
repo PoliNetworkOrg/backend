@@ -11,7 +11,10 @@
     "build": "NODE_ENV=production tsup --config tsup.node.config.ts",
     "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
     "dev": "NODE_ENV=development tsx watch --clear-screen=false --env-file=.env src/server.ts",
+    "prestart": "tsx scripts/init.ts && pnpm run db:push",
     "start": "NODE_ENV=production node dist/server.js",
+    "start:prod": "pnpm run prestart && pnpm run start",
+    "db:push": "pnpm run db:tg:push && pnpm run db:web:push",
     "db:tg:push": "drizzle-kit push --config drizzle.config.tg.ts",
     "db:tg:generate": "drizzle-kit generate --config drizzle.config.tg.ts",
     "db:tg:migrate": "drizzle-kit migrate --config drizzle.config.tg.ts",
@@ -35,5 +38,6 @@
     "fastify": "^5.2.1",
     "pg": "^8.13.2",
     "zod": "^3.24.1"
-  }
+  },
+  "packageManager": "pnpm@10.6.5+sha512.cdf928fca20832cd59ec53826492b7dc25dc524d4370b6b4adbf65803d32efaa6c1c88147c0ae4e8d579a6c9eec715757b50d4fa35eea179d868eada4ed043af"
 }
