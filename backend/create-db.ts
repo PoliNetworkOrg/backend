@@ -15,15 +15,10 @@ async function createDb() {
     if (!dbName) throw new Error("No DB_NAME was provided");
 
     await client.connect();
-    const exists = await client
-      .query(`SELECT 1 FROM pg_database WHERE datname='${dbName}'`)
-      .then(({ rowCount }) => rowCount && rowCount === 1)
-      .catch(() => false);
-
-    if (!exists) await client.query(`CREATE DATABASE ${dbName}`);
-    console.log(`Database ${dbName} ${exists ? "already exists" : "created"}`);
+    await client.query(`CREATE DATABASE ${dbName}`);
+    console.log(`Database ${dbName} created or already existing`);
   } catch (err) {
-    console.error(err);
+    console.error(err, dbName);
   } finally {
     client.end();
   }
