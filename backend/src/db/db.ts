@@ -1,13 +1,14 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { schema } from "./schema";
+import { env } from "@/env";
 
 export const db = drizzle({
   connection: {
-    database: process.env.DB_NAME!,
-    host: process.env.DB_HOST!,
-    port: parseInt(process.env.DB_PORT!),
-    user: process.env.DB_USER!,
-    password: process.env.DB_PASS!,
+    database: env.DB_NAME,
+    host: env.DB_HOST,
+    port: env.DB_PORT,
+    user: env.DB_USER,
+    password: env.DB_PASS,
     ssl: false,
   },
   schema,

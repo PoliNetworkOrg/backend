@@ -28,11 +28,12 @@
   },
   "dependencies": {
     "@fastify/type-provider-json-schema-to-ts": "^5.0.0",
+    "@t3-oss/env-core": "^0.12.0",
     "@trpc/server": "11.0.0-rc.772",
     "drizzle-orm": "^0.39.3",
     "fastify": "^5.2.1",
     "pg": "^8.13.2",
-    "zod": "^3.24.1"
+    "zod": "^3.24.2"
   },
   "packageManager": "pnpm@10.6.5+sha512.cdf928fca20832cd59ec53826492b7dc25dc524d4370b6b4adbf65803d32efaa6c1c88147c0ae4e8d579a6c9eec715757b50d4fa35eea179d868eada4ed043af"
 }

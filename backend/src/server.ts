@@ -8,8 +8,9 @@ import { TRPC_PATH } from "./constants";
 import { JsonSchemaToTsProvider } from "@fastify/type-provider-json-schema-to-ts";
 import { DB, SCHEMA } from "./db";
 import { createTRPCContext } from "./trpc";
+import { env } from "./env";
 
-const isDev = process.env.NODE_ENV === "development";
+const isDev = env.NODE_ENV === "development";
 console.log("isDev", isDev ? "YES" : "NO");
 
 const server = fastify({
@@ -42,7 +43,7 @@ if (isDev) {
 
 server.get("/", (_, res) => res.send("hi"));
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+const PORT = env.PORT;
 
 (async () => {
   try {
