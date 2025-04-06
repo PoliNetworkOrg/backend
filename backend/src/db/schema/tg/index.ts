@@ -1,4 +1,5 @@
-import * as groups from "./groups"
-import * as test from "./test"
+import * as groups from "./groups";
+import * as test from "./test";
+import * as permissions from "./permissions";
 
-export const schema = {...groups, ...test}
+export const schema = { ...groups, ...test, ...permissions };
