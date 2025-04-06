@@ -10,13 +10,15 @@ import { DB, SCHEMA } from "./db";
 import { createTRPCContext } from "./trpc";
 import { env } from "./env";
 
-const isDev = env.NODE_ENV === "development";
-console.log("isDev", isDev ? "YES" : "NO");
-
 const server = fastify({
   maxParamLength: 5000,
-  logger: true,
+  logger: {
+    level: env.LOG_LEVEL,
+  },
 }).withTypeProvider<JsonSchemaToTsProvider>();
+
+const isDev = env.NODE_ENV === "development";
+server.log.debug(`isDev ${isDev ? "YES" : "NO"}`);
 
 server.register(fastifyTRPCPlugin, {
   prefix: TRPC_PATH,
@@ -25,7 +27,7 @@ server.register(fastifyTRPCPlugin, {
     createContext: createTRPCContext,
     onError({ path, error }) {
       // report to error monitoring
-      console.error(`Error in tRPC handler on path '${path}':`, error);
+      server.log.error({error}, `Error in tRPC handler on path '${path}':`);
     },
   } satisfies FastifyTRPCPluginOptions<AppRouter>["trpcOptions"],
 });
@@ -50,8 +52,8 @@ const PORT = env.PORT;
     await server.listen({ port: PORT, host: "0.0.0.0" });
     const q1 = await DB.select().from(SCHEMA.TG.test);
     const q2 = await DB.select().from(SCHEMA.WEB.test);
-    console.log("db working: ", q1, q2);
-    console.log("listening on port: ", PORT);
+    server.log.info({q1, q2}, "db working:",);
+    server.log.info(`listening on port: ${PORT}`);
   } catch (err) {
     server.log.error(err);
     process.exit(1);

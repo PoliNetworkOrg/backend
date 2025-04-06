@@ -11,6 +11,7 @@ export const env = createEnv({
     DB_PASS: z.string().min(1),
     DB_NAME: z.string().min(3).default("polinetwork_backend"),
     NODE_ENV: z.enum(["development", "production"]).default("development"),
+    LOG_LEVEL: z.string().default("DEBUG"),
   },
 
   runtimeEnv: process.env,
