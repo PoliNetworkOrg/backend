@@ -1,16 +1,12 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { ZodError } from "zod";
-import { CreateFastifyContextOptions } from "@trpc/server/adapters/fastify";
+import { logger } from "./logger";
 
-export function createTRPCContext({ req, res }: CreateFastifyContextOptions) {
-  const hUserId = req.headers.userId;
-  const userId = typeof hUserId === "string" ? hUserId : "anonymous";
-  return { req, res, userId };
+type Context = {
+  userId?: string
 }
 
-export type TRPCContext = Awaited<ReturnType<typeof createTRPCContext>>;
-
-const t = initTRPC.context<TRPCContext>().create({
+const t = initTRPC.context<Context>().create({
   errorFormatter({ shape, error }) {
     return {
       ...shape,
@@ -36,14 +32,14 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 
   if (t._config.isDev) {
     // artificial delay in dev
-    const waitMs = Math.floor(Math.random() * 400) + 100;
+    const waitMs = Math.floor(Math.random() * 100) + 100;
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
 
   const result = await next();
 
   const end = Date.now();
-  console.log(`[TRPC] ${path} took ${end - start}ms to execute`);
+  logger.debug(`[TRPC] ${path} took ${end - start}ms to execute`);
 
   return result;
 });
