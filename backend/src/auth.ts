@@ -1,0 +1,31 @@
+import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { db } from "./db/db";
+import { SCHEMA } from "./db";
+import { env } from "./env";
+import { AUTH_PATH } from "./constants";
+
+export const auth = betterAuth({
+  basePath: AUTH_PATH,
+  baseURL: env.PUBLIC_URL,
+  trustedOrigins: env.TRUSTED_ORIGINS,
+  database: drizzleAdapter(db, {
+    provider: "pg",
+    schema: {
+      user: SCHEMA.AUTH.users,
+      account: SCHEMA.AUTH.accounts,
+      session: SCHEMA.AUTH.sessions,
+      verification: SCHEMA.AUTH.verifications,
+    }
+  }),
+  cookieCache: {
+    enabled: true,
+    maxAge: 5 * 60, // Cache duration in seconds
+  },
+  socialProviders: { 
+    github: { 
+      clientId: env.GITHUB_CLIENT_ID, 
+      clientSecret: env.GITHUB_CLIENT_SECRET, 
+    }, 
+  }, 
+});

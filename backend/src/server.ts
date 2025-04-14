@@ -1,17 +1,25 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { logger as loggerMiddlware } from "hono/logger";
 import { appRouter } from "./routers";
-import { TRPC_PATH } from "./constants";
+import { AUTH_PATH, TRPC_PATH } from "./constants";
 import { DB, SCHEMA } from "./db";
 import { env } from "./env";
 import { logger } from "./logger";
 import { trpcServer } from "@hono/trpc-server";
+import { auth } from "./auth";
 
 const app = new Hono();
-
 const isDev = env.NODE_ENV === "development";
 logger.debug(`isDev ${isDev ? "YES" : "NO"}`);
+if (isDev) {
+  app.use(
+    loggerMiddlware((msg, ...str) =>
+      logger.debug(str.length ? { props: str } : undefined, msg),
+    ),
+  );
+}
 
 app.use(
   `${TRPC_PATH}/*`,
@@ -22,9 +30,19 @@ app.use(
   }),
 );
 
-if (isDev) {
-app.use(loggerMiddlware((msg, ...str) => logger.debug(str.length ? {props: str} : undefined, msg)));
-}
+app.use(
+  `${AUTH_PATH}/*`,
+  cors({
+    origin: env.TRUSTED_ORIGINS,
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["POST", "GET", "OPTIONS"],
+    exposeHeaders: ["Content-Length"],
+    maxAge: 600,
+    credentials: true,
+  }),
+);
+
+app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw));
 
 app.get("/", (c) => c.text("hi"));
 
