@@ -13,13 +13,13 @@ importers:
         version: 1.14.1(hono@4.7.6)
       '@hono/trpc-server':
         specifier: ^0.3.4
-        version: 0.3.4(@trpc/server@11.0.0-rc.772(typescript@5.7.3))(hono@4.7.6)
+        version: 0.3.4(@trpc/server@11.1.0(typescript@5.7.3))(hono@4.7.6)
       '@t3-oss/env-core':
         specifier: ^0.12.0
         version: 0.12.0(typescript@5.7.3)(zod@3.24.2)
       '@trpc/server':
-        specifier: 11.0.0-rc.772
-        version: 11.0.0-rc.772(typescript@5.7.3)
+        specifier: 11.1.0
+        version: 11.1.0(typescript@5.7.3)
       better-auth:
         specifier: ^1.2.7
         version: 1.2.7
@@ -830,8 +830,8 @@ packages:
       zod:
         optional: true
 
-  '@trpc/server@11.0.0-rc.772':
-    resolution: {integrity: sha512-xZRL9Ks8zGSV+CHJct2dx6MgL2g9VIJUKoDxetH8s8iybQgBuZ5JUi6W25FcP6jIMz5AvsmU1KXu2ATsb6J/OQ==}
+  '@trpc/server@11.1.0':
+    resolution: {integrity: sha512-uAJ7ikejeujVkf53XFJ/0W8nr7bDjul+Szk5Rsepq97Hb/WS1RkRXdyX4KqAyCE9b1vDFCJVJwSxiIZdRtbTZQ==}
     peerDependencies:
       typescript: '>=5.7.2'
 
@@ -1837,9 +1837,9 @@ snapshots:
     dependencies:
       hono: 4.7.6
 
-  '@hono/trpc-server@0.3.4(@trpc/server@11.0.0-rc.772(typescript@5.7.3))(hono@4.7.6)':
+  '@hono/trpc-server@0.3.4(@trpc/server@11.1.0(typescript@5.7.3))(hono@4.7.6)':
     dependencies:
-      '@trpc/server': 11.0.0-rc.772(typescript@5.7.3)
+      '@trpc/server': 11.1.0(typescript@5.7.3)
       hono: 4.7.6
 
   '@isaacs/cliui@8.0.2':
@@ -1984,7 +1984,7 @@ snapshots:
       typescript: 5.7.3
       zod: 3.24.2
 
-  '@trpc/server@11.0.0-rc.772(typescript@5.7.3)':
+  '@trpc/server@11.1.0(typescript@5.7.3)':
     dependencies:
       typescript: 5.7.3
 
