@@ -18,18 +18,21 @@ export const auth = betterAuth({
       verification: SCHEMA.AUTH.verifications,
     },
   }),
-  advanced: {
-    crossSubDomainCookies: {
-      enabled: true,
-      domain: ".polinetwork.org", // Domain with a leading period
-    },
-    defaultCookieAttributes: {
-      secure: true,
-      httpOnly: true,
-      sameSite: "none", // Allows CORS-based cookie sharing across subdomains
-      partitioned: true, // New browser standards will mandate this for foreign cookies
-    },
-  },
+  advanced:
+    env.NODE_ENV === "production"
+      ? {
+          crossSubDomainCookies: {
+            enabled: true,
+            domain: ".polinetwork.org", // Domain with a leading period
+          },
+          defaultCookieAttributes: {
+            secure: true,
+            httpOnly: true,
+            sameSite: "none", // Allows CORS-based cookie sharing across subdomains
+            partitioned: true, // New browser standards will mandate this for foreign cookies
+          },
+        }
+      : undefined,
   cookieCache: {
     enabled: true,
     maxAge: 5 * 60, // Cache duration in seconds
