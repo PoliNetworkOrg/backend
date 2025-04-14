@@ -1,7 +1,8 @@
 import { createEnv } from "@t3-oss/env-core";
 import { z } from "zod";
+import { TRUSTED_ORIGINS } from "./constants";
 
-const PORT = 3000
+const PORT = 3000;
 
 // coerce is needed for non-string values, because k8s supports only string env
 export const env = createEnv({
@@ -16,6 +17,11 @@ export const env = createEnv({
     DB_PASS: z.string().min(1),
     DB_NAME: z.string().min(3).default("polinetwork_backend"),
     PUBLIC_URL: z.string().default(`http://localhost:${PORT}`),
+    TRUSTED_ORIGINS: z
+      .string()
+      .default(TRUSTED_ORIGINS.join(","))
+      .transform((s) => s.split(","))
+      .pipe(z.array(z.string())),
     NODE_ENV: z.enum(["development", "production"]).default("development"),
     LOG_LEVEL: z.string().default("DEBUG"),
   },

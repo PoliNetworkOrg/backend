@@ -3,10 +3,10 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "./db/db";
 import { SCHEMA } from "./db";
 import { env } from "./env";
-import { TRUSTED_ORIGINS, AUTH_PATH } from "./constants";
+import { AUTH_PATH } from "./constants";
 
 export const auth = betterAuth({
-  trustedOrigins: TRUSTED_ORIGINS,
+  trustedOrigins: env.TRUSTED_ORIGINS,
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
