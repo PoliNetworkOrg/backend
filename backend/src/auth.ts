@@ -6,6 +6,8 @@ import { env } from "./env";
 import { AUTH_PATH } from "./constants";
 
 export const auth = betterAuth({
+  basePath: AUTH_PATH,
+  baseURL: env.PUBLIC_URL,
   trustedOrigins: env.TRUSTED_ORIGINS,
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -16,8 +18,10 @@ export const auth = betterAuth({
       verification: SCHEMA.AUTH.verifications,
     }
   }),
-  basePath: AUTH_PATH,
-  baseURL: env.PUBLIC_URL,
+  cookieCache: {
+    enabled: true,
+    maxAge: 5 * 60, // Cache duration in seconds
+  },
   socialProviders: { 
     github: { 
       clientId: env.GITHUB_CLIENT_ID, 
