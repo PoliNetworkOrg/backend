@@ -1,6 +1,7 @@
 import { DB, SCHEMA } from "@/db";
-import { z, type BetterAuthPlugin } from "better-auth";
-import { createAuthEndpoint } from "better-auth/api";
+import { type BetterAuthPlugin } from "better-auth";
+import { z } from "zod";
+import { createAuthEndpoint, sessionMiddleware } from "better-auth/api";
 import crypto from "crypto";
 import { eq } from "drizzle-orm";
 
@@ -36,6 +37,8 @@ export const telegramPlugin = () => {
         "/telegram/link/start",
         {
           method: "POST",
+          use: [sessionMiddleware],
+          body: linkBody
         },
         async (ctx) => {
           const userId = ctx.context.session?.user.id;
@@ -44,14 +47,7 @@ export const telegramPlugin = () => {
               message: "You must be authenticated",
             });
 
-          const { data, success } = linkBody.safeParse(ctx.body);
-          if (!success)
-            return ctx.error("BAD_REQUEST", {
-              message:
-                "'telegramUsername' must be provided and must be a string",
-            });
-
-          const { telegramUsername } = data;
+          const { telegramUsername } = ctx.body;
           const [{ code, ttl }] = await DB.insert(SCHEMA.TG.link)
             .values({
               code: crypto
@@ -73,6 +69,7 @@ export const telegramPlugin = () => {
         "/telegram/link/verify/:code",
         {
           method: "GET",
+          use: [sessionMiddleware]
         },
         async (ctx) => {
           const userId = ctx.context.session?.user.id;

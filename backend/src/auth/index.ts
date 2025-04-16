@@ -4,11 +4,13 @@ import { db } from "@/db/db";
 import { SCHEMA } from "@/db";
 import { env } from "@/env";
 import { AUTH_PATH } from "@/constants";
+import { telegramPlugin } from "./plugins/telegram";
 
 export const auth = betterAuth({
   basePath: AUTH_PATH,
   baseURL: env.PUBLIC_URL,
   trustedOrigins: env.TRUSTED_ORIGINS,
+  plugins: [telegramPlugin()],
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
