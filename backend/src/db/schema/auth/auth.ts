@@ -5,7 +5,7 @@
 // IMPORTANT
 // here we use createTable util to add a prefix.
 // the cli doesn't use that, so double check what is diffing before changing
-import { text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { text, timestamp, boolean, bigint } from "drizzle-orm/pg-core";
 import { createTable } from "../create-table";
 
 export const users = createTable.auth("users", {
@@ -14,6 +14,8 @@ export const users = createTable.auth("users", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull(),
   image: text("image"),
+  telegramId: bigint("tg_id", { mode: "number" }),
+  telegramUsername: text("tg_username"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
