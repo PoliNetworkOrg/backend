@@ -7,4 +7,4 @@ RUN corepack enable
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 RUN pnpm run build
 EXPOSE 3000
-CMD ["sh","-c", "pnpm run db:push && pnpm run start"]
+CMD ["sh","-c", "pnpm run db:migrate && pnpm run start"]

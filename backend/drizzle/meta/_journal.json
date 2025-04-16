@@ -8,6 +8,13 @@
       "when": 1744817282619,
       "tag": "0000_illegal_anita_blake",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1744821363691,
+      "tag": "0001_curvy_serpent_society",
+      "breakpoints": true
     }
   ]
 }

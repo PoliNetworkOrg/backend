@@ -1,6 +1,6 @@
 import { timeColumns } from "@/db/columns";
 import { createTable } from "../create-table";
-import { bigint, index, integer, text } from "drizzle-orm/pg-core";
+import { bigint, integer, text } from "drizzle-orm/pg-core";
 import { users } from "../auth/auth";
 
 export const link = createTable.tg(
@@ -14,5 +14,4 @@ export const link = createTable.tg(
 
     ...timeColumns,
   },
-  (t) => [index("telegram_id_idx").on(t.telegramId)],
 );
