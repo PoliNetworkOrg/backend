@@ -33,7 +33,7 @@ export const telegramPlugin = () => {
     },
     endpoints: {
       startLink: createAuthEndpoint(
-        "/telegram/link",
+        "/telegram/link/start",
         {
           method: "POST",
         },
@@ -70,7 +70,7 @@ export const telegramPlugin = () => {
         },
       ),
       verifyLink: createAuthEndpoint(
-        "/telegram/link/:code",
+        "/telegram/link/verify/:code",
         {
           method: "GET",
         },
@@ -81,8 +81,8 @@ export const telegramPlugin = () => {
               message: "You must be authenticated",
             });
 
-          const code = ctx.params.code;
-          if (code.length !== CODE_LENGTH || /^\d+$/.test(code))
+          const code = ctx.params?.code;
+          if (!code || code.length !== CODE_LENGTH || /^\d+$/.test(code))
             return ctx.error("BAD_REQUEST", {
               message: "The code must be a 6-digit string",
             });
