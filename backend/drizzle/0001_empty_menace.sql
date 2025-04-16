@@ -5,7 +5,8 @@ CREATE TABLE "tg_link" (
 	"tg_username" text NOT NULL,
 	"tg_id" bigint,
 	"updated_at" timestamp (3),
-	"created_at" timestamp (3) DEFAULT now() NOT NULL
+	"created_at" timestamp (3) DEFAULT now() NOT NULL,
+	CONSTRAINT "tg_link_tg_id_unique" UNIQUE("tg_id")
 );
 --> statement-breakpoint
 ALTER TABLE "auth_users" ADD COLUMN "tg_id" bigint;--> statement-breakpoint

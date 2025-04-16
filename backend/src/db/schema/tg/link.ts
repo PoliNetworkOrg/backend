@@ -10,7 +10,7 @@ export const link = createTable.tg(
     ttl: integer("ttl").notNull(),
     userId: text("user_id").notNull().references(() => users.id),
     telegramUsername: text("tg_username").notNull(),
-    telegramId: bigint("tg_id", { mode: "number" }),
+    telegramId: bigint("tg_id", { mode: "number" }).unique(),
 
     ...timeColumns,
   },

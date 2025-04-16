@@ -1,5 +1,5 @@
 {
-  "id": "b73771f1-f31c-4b06-9610-491366eefcfe",
+  "id": "ed4d5775-023a-4e4c-8ab4-c50106cd7efc",
   "prevId": "caf43188-2f4c-4b07-8de7-6bfac83a8c34",
   "version": "7",
   "dialect": "postgresql",
@@ -466,7 +466,15 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "tg_link_tg_id_unique": {
+          "name": "tg_link_tg_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tg_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
