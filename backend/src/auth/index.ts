@@ -1,9 +1,9 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "./db/db";
-import { SCHEMA } from "./db";
-import { env } from "./env";
-import { AUTH_PATH } from "./constants";
+import { db } from "@/db/db";
+import { SCHEMA } from "@/db";
+import { env } from "@/env";
+import { AUTH_PATH } from "@/constants";
 
 export const auth = betterAuth({
   basePath: AUTH_PATH,
