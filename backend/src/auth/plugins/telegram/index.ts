@@ -38,7 +38,7 @@ export const telegramPlugin = () => {
         {
           method: "POST",
           use: [sessionMiddleware],
-          body: linkBody
+          body: linkBody,
         },
         async (ctx) => {
           const userId = ctx.context.session?.user.id;
@@ -66,10 +66,13 @@ export const telegramPlugin = () => {
         },
       ),
       verifyLink: createAuthEndpoint(
-        "/telegram/link/verify/:code",
+        "/telegram/link/verify",
         {
           method: "GET",
-          use: [sessionMiddleware]
+          use: [sessionMiddleware],
+          query: z.object({
+            code: z.string().length(CODE_LENGTH).regex(/^\d+$/),
+          }),
         },
         async (ctx) => {
           const userId = ctx.context.session?.user.id;
@@ -78,12 +81,7 @@ export const telegramPlugin = () => {
               message: "You must be authenticated",
             });
 
-          const code = ctx.params?.code;
-          if (!code || code.length !== CODE_LENGTH || /^\d+$/.test(code))
-            return ctx.error("BAD_REQUEST", {
-              message: "The code must be a 6-digit string",
-            });
-
+          const code = ctx.query.code;
           const res = await DB.select()
             .from(SCHEMA.TG.link)
             .where((t) => eq(t.code, code));
