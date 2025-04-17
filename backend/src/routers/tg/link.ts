@@ -1,7 +1,7 @@
 import { DB, SCHEMA } from "@/db";
 import { logger } from "@/logger";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 export default createTRPCRouter({
@@ -19,27 +19,37 @@ export default createTRPCRouter({
       try {
         const { code, telegramId, telegramUsername } = input;
         const s = SCHEMA.TG.link;
-        const res = await DB.update(s)
-          .set({ telegramId })
-          .where(
-            and(eq(s.code, code), eq(s.telegramUsername, telegramUsername)),
-          )
-          .returning();
+        const rows = await DB.select().from(s).where(eq(s.code, code));
+        if (!rows || rows.length === 0)
+          return { success: false, error: "Not found" };
 
-        if (res.length !== 1) return { success: false };
+        const {
+          userId,
+          telegramUsername: savedTgUsername,
+          ttl,
+          createdAt,
+        } = rows[0];
+        if (savedTgUsername !== telegramUsername)
+          return { success: false, error: "Username mismatch" };
+
+        if (createdAt.getTime() + ttl * 1000 < Date.now())
+          return { success: false, error: "Expired code" };
+
+        await DB.update(s).set({ telegramId }).where(eq(s.code, code));
 
         const u = SCHEMA.AUTH.users;
-        await DB.update(u)
+        await DB.update(u) // update the auth.user table
           .set({ telegramId, telegramUsername })
-          .where(eq(u.id, res[0].userId));
+          .where(eq(u.id, userId));
 
-        return { success: true };
+        return { success: true, error: undefined };
       } catch (e) {
         logger.error(
           e,
-          "There was an error while linking telegram to user table",
+          "There was an unexpected error while linking telegram to user table",
         );
-        return { success: false };
+        if (e instanceof Error) return { success: false, error: e.message };
+        return { success: false, error: JSON.stringify(e) };
       }
     }),
 });
