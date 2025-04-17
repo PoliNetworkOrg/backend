@@ -100,7 +100,14 @@ export const telegramPlugin = () => {
           const expireTime = row.createdAt.getTime() + row.ttl * 1000;
           const expired = Date.now() >= expireTime;
 
-          return ctx.json({ expired, verified: !!row.telegramId });
+          const verified = !!row.telegramId;
+          if (verified) {
+            await DB.delete(SCHEMA.TG.link).where(
+              eq(SCHEMA.TG.link.code, code),
+            );
+          }
+
+          return ctx.json({ expired, verified });
         },
       ),
     },
