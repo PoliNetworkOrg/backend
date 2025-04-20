@@ -1,12 +1,14 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { ZodError } from "zod";
 import { logger } from "./logger";
+import superjson from "superjson";
 
 type Context = {
-  userId?: string
-}
+  userId?: string;
+};
 
 const t = initTRPC.context<Context>().create({
+  transformer: superjson,
   errorFormatter({ shape, error }) {
     return {
       ...shape,
