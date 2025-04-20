@@ -9,6 +9,7 @@ import { env } from "./env";
 import { logger } from "./logger";
 import { trpcServer } from "@hono/trpc-server";
 import { auth } from "./auth";
+import { cron } from "./cron";
 
 const app = new Hono();
 const isDev = env.NODE_ENV === "development";
@@ -54,6 +55,7 @@ app.get("/", (c) => c.text("hi"));
     const q1 = await DB.select().from(SCHEMA.TG.test);
     const q2 = await DB.select().from(SCHEMA.WEB.test);
     logger.info({ q1, q2 }, "db working:");
+    cron()
   } catch (err) {
     logger.error(err);
     process.exit(1);

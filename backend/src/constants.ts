@@ -9,3 +9,5 @@ export const TRUSTED_ORIGINS = [
   "http://localhost:5174",
   "http://localhost:5175",
 ]
+
+export const MESSAGES_RETENTION_DAYS = 7
