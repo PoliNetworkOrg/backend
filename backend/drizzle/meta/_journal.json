@@ -15,6 +15,13 @@
       "when": 1744821501093,
       "tag": "0001_empty_menace",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1745104846515,
+      "tag": "0002_chilly_molly_hayes",
+      "breakpoints": true
     }
   ]
 }

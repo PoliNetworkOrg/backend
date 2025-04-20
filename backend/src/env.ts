@@ -17,6 +17,11 @@ export const env = createEnv({
     DB_PASS: z.string().min(1),
     DB_NAME: z.string().min(3).default("polinetwork_backend"),
     PUBLIC_URL: z.string().default(`http://localhost:${PORT}`),
+    ENCRYPTION_KEY: z
+      .string()
+      .regex(/^[A-Fa-f0-9]+$/, "The string must be a valid hex string")
+      .length(64),
+
     TRUSTED_ORIGINS: z
       .string()
       .default(TRUSTED_ORIGINS.join(","))
@@ -27,7 +32,6 @@ export const env = createEnv({
   },
 
   runtimeEnv: process.env,
-
   /**
    * By default, this library will feed the environment variables directly to
    * the Zod validator.
