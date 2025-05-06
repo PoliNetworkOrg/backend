@@ -11,10 +11,11 @@ export const USER_ROLE = {
   ADMIN: "admin",
   HR: "hr",
   DIRETTIVO: "direttivo",
+  CREATOR: "creator",
   OWNER: "owner",
 } as const;
 
-export const ARRAY_USER_ROLE = [USER_ROLE.ADMIN, USER_ROLE.HR, USER_ROLE.DIRETTIVO, USER_ROLE.OWNER] as const
+export const ARRAY_USER_ROLE = [USER_ROLE.ADMIN, USER_ROLE.HR, USER_ROLE.DIRETTIVO, USER_ROLE.OWNER, USER_ROLE.CREATOR] as const
 export type TUserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE];
 
 export const permissions = createTable.tg(

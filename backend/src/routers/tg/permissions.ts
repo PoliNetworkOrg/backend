@@ -1,5 +1,9 @@
 import { DB, SCHEMA } from "@/db";
-import { ARRAY_USER_ROLE } from "@/db/schema/tg/permissions";
+import {
+  ARRAY_USER_ROLE,
+  TUserRole,
+  USER_ROLE,
+} from "@/db/schema/tg/permissions";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -74,5 +78,40 @@ export default createTRPCRouter({
           addedBy: input.adderId,
         })
         .onConflictDoNothing();
+    }),
+
+  canAddBot: publicProcedure
+    .input(
+      z.object({
+        userId: z.number(),
+      }),
+    )
+    .output(
+      z.union([
+        z.object({ allowed: z.boolean(), error: z.null() }),
+        z.object({
+          allowed: z.literal(false),
+          error: z.enum(["NOT_FOUND"]),
+        }),
+      ]),
+    )
+    .query(async ({ input }) => {
+      const res = await DB.select({ role: s.permissions.role })
+        .from(s.permissions)
+        .where(eq(s.permissions.userId, input.userId))
+        .limit(1);
+
+      if (!res[0]) return { error: "NOT_FOUND", allowed: false };
+      const { role } = res[0];
+      const allowed = (
+        [
+          USER_ROLE.HR,
+          USER_ROLE.OWNER,
+          USER_ROLE.CREATOR,
+          USER_ROLE.DIRETTIVO,
+        ] as TUserRole[]
+      ).includes(role);
+
+      return { error: null, allowed };
     }),
 });
