@@ -1,16 +1,14 @@
 import { timeColumns } from "@/db/columns";
 import { createTable } from "../create-table";
-import { bigint, index, integer, varchar } from "drizzle-orm/pg-core";
+import { bigint, varchar } from "drizzle-orm/pg-core";
 
 export const groups = createTable.tg(
   "groups",
   {
-    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-    telegramId: bigint("telegram_id", { mode: "number" }).unique().notNull(),
+    telegramId: bigint("telegram_id", { mode: "number" }).primaryKey(),
     title: varchar("title").notNull(),
     link: varchar("link", { length: 128 }),
 
     ...timeColumns,
   },
-  (t) => [index("telegram_id_idx").on(t.telegramId)],
 );

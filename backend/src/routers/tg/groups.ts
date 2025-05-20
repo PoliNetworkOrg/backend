@@ -49,7 +49,8 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       const rows = await DB.insert(SCHEMA.TG.groups)
         .values(input)
+        .onConflictDoNothing()
         .returning();
-      return rows.map((r) => r.id);
+      return rows.map((r) => r.telegramId);
     }),
 });
