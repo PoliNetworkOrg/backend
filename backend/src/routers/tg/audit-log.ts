@@ -17,9 +17,7 @@ export default createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
-      await DB.insert(SCHEMA.TG.auditLog)
-        .values(input)
-        .onConflictDoNothing();
+      await DB.insert(SCHEMA.TG.auditLog).values(input).onConflictDoNothing();
     }),
 
   getById: publicProcedure
@@ -29,8 +27,14 @@ export default createTRPCRouter({
       }),
     )
     .query(async ({ input }) => {
-      return await DB.select()
+      const res = await DB.select()
         .from(SCHEMA.TG.auditLog)
-        .where((t) => eq(t.targetId, input.targetId));
+        .where((t) => eq(t.targetId, input.targetId))
+        .leftJoin(
+          SCHEMA.TG.groups,
+          eq(SCHEMA.TG.auditLog.groupId, SCHEMA.TG.groups.telegramId),
+        );
+
+      return res.map((e) => ({ ...e.audit_log, groupTitle: e.groups?.title }));
     }),
 });
