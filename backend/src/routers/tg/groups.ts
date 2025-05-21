@@ -1,11 +1,12 @@
 import { DB, SCHEMA } from "@/db";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
-import { and, eq, ilike } from "drizzle-orm";
+import { and, eq, ilike, sql } from "drizzle-orm";
 import { z } from "zod";
 
+const GROUPS = SCHEMA.TG.groups;
 export default createTRPCRouter({
   getAll: publicProcedure.query(async () => {
-    const results = await DB.select().from(SCHEMA.TG.groups);
+    const results = await DB.select().from(GROUPS);
     return results;
   }),
 
@@ -17,7 +18,7 @@ export default createTRPCRouter({
     )
     .query(async ({ input }) => {
       return await DB.select()
-        .from(SCHEMA.TG.groups)
+        .from(GROUPS)
         .where((t) =>
           and(...input.query.split(" ").map((q) => ilike(t.title, `%${q}%`))),
         );
@@ -31,7 +32,7 @@ export default createTRPCRouter({
     )
     .query(async ({ input }) => {
       return await DB.select()
-        .from(SCHEMA.TG.groups)
+        .from(GROUPS)
         .limit(1)
         .where((t) => eq(t.telegramId, input.telegramId));
     }),
@@ -46,11 +47,32 @@ export default createTRPCRouter({
         }),
       ),
     )
+    .output(z.array(z.number()))
     .mutation(async ({ input }) => {
-      const rows = await DB.insert(SCHEMA.TG.groups)
+      const rows = await DB.insert(GROUPS)
         .values(input)
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: GROUPS.telegramId,
+          set: {
+            title: sql.raw(`excluded.${GROUPS.title.name}`),
+            link: sql.raw(`excluded.${GROUPS.link.name}`),
+          },
+        })
         .returning();
       return rows.map((r) => r.telegramId);
+    }),
+
+  delete: publicProcedure
+    .input(
+      z.object({
+        telegramId: z.number(),
+      }),
+    )
+    .output(z.boolean())
+    .mutation(async ({ input }) => {
+      const rows = await DB.delete(GROUPS)
+        .where(eq(GROUPS.telegramId, input.telegramId))
+        .returning();
+      return rows.length === 1;
     }),
 });
