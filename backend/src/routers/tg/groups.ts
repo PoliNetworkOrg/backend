@@ -1,7 +1,7 @@
 import { DB, SCHEMA } from "@/db";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { and, eq, ilike, sql } from "drizzle-orm";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const GROUPS = SCHEMA.TG.groups;
 export default createTRPCRouter({
@@ -43,7 +43,7 @@ export default createTRPCRouter({
         z.object({
           title: z.string(),
           telegramId: z.number(),
-          link: z.string().url(),
+          link: z.url({ hostname: /^t\.me$/ }),
         }),
       ),
     )

@@ -6,7 +6,7 @@ import {
 } from "@/db/schema/tg/permissions";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { and, eq } from "drizzle-orm";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const s = SCHEMA.TG;
 

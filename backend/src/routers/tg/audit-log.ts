@@ -2,7 +2,7 @@ import { DB, SCHEMA } from "@/db";
 import { ARRAY_AUDIT_TYPE } from "@/db/schema/tg/audit-log";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { eq } from "drizzle-orm";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 export default createTRPCRouter({
   create: publicProcedure

@@ -3,7 +3,7 @@ import { logger } from "@/logger";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { decrypt, encrypt } from "@/utils/encrypt";
 import { and, eq } from "drizzle-orm";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const s = SCHEMA.TG;
 const message = z.object({
