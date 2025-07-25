@@ -52,10 +52,18 @@ app.get("/", (c) => c.text("hi"));
     serve({ port: env.PORT, hostname: "0.0.0.0", fetch: app.fetch }, (addr) =>
       logger.info(`Server running on ${addr.address}:${addr.port}`),
     );
-    const q1 = await DB.select().from(SCHEMA.TG.test);
-    const q2 = await DB.select().from(SCHEMA.WEB.test);
-    logger.info({ q1, q2 }, "db working:");
-    cron()
+
+    // db test with 5s timeout
+    Promise.race([
+      DB.select().from(SCHEMA.TG.test),
+      new Promise((_, rej) => {
+        setTimeout(rej, 5000);
+      }),
+    ])
+      .then((res) => logger.info({ res }, "DB working. Select * from tg_test:"))
+      .catch(() => logger.error("DB not working!"));
+
+    cron();
   } catch (err) {
     logger.error(err);
     process.exit(1);
