@@ -1,6 +1,6 @@
 import { DB, SCHEMA } from "@/db";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
-import { and, eq, ilike, sql } from "drizzle-orm";
+import { eq, sql, ilike } from "drizzle-orm";
 import { z } from "zod/v4";
 
 const GROUPS = SCHEMA.TG.groups;
@@ -13,15 +13,27 @@ export default createTRPCRouter({
   search: publicProcedure
     .input(
       z.object({
-        query: z.string(),
+        query: z.string().min(1).max(100),
+        limit: z.number().min(1).max(20).default(6),
       }),
     )
     .query(async ({ input }) => {
-      return await DB.select()
+      const { query, limit } = input;
+
+      const likeQuery = query.split(" ").join("%")
+      const results = await DB.select({
+        telegramId: GROUPS.telegramId,
+        title: GROUPS.title,
+        link: GROUPS.link,
+      })
         .from(GROUPS)
-        .where((t) =>
-          and(...input.query.split(" ").map((q) => ilike(t.title, `%${q}%`))),
-        );
+        .where(t => ilike(t.title, `%${likeQuery}%`))
+        .limit(limit);
+
+      return {
+        groups: results,
+        count: results.length,
+      };
     }),
 
   getById: publicProcedure
