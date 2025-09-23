@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
-import { DB, SCHEMA } from "src/db";
+import { DB, SCHEMA } from "@/db";
 
 export const testRouter = createTRPCRouter({
   dbQuery: publicProcedure
