@@ -18,7 +18,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "devDependencies": {
-    "@types/node": "^22.13.1",
+    "@types/node": "^24.5.2",
     "@types/pg": "^8.11.11",
     "drizzle-kit": "^0.31.4",
     "pino-pretty": "^13.0.0",
@@ -41,5 +41,8 @@
     "pino": "^9.6.0",
     "zod": "^4.1.11"
   },
-  "packageManager": "pnpm@10.6.5+sha512.cdf928fca20832cd59ec53826492b7dc25dc524d4370b6b4adbf65803d32efaa6c1c88147c0ae4e8d579a6c9eec715757b50d4fa35eea179d868eada4ed043af"
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": ">=24.5.2"
+  }
 }
