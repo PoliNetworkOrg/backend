@@ -9,17 +9,17 @@ importers:
   .:
     dependencies:
       '@hono/node-server':
-        specifier: ^1.14.1
-        version: 1.14.1(hono@4.7.6)
+        specifier: ^1.19.4
+        version: 1.19.4(hono@4.7.6)
       '@hono/trpc-server':
-        specifier: ^0.3.4
-        version: 0.3.4(@trpc/server@11.1.1(typescript@5.7.3))(hono@4.7.6)
+        specifier: ^0.4.0
+        version: 0.4.0(@trpc/server@11.5.1(typescript@5.7.3))(hono@4.7.6)
       '@t3-oss/env-core':
         specifier: ^0.13.8
         version: 0.13.8(typescript@5.7.3)(zod@4.1.11)
       '@trpc/server':
-        specifier: 11.1.1
-        version: 11.1.1(typescript@5.7.3)
+        specifier: 11.5.1
+        version: 11.5.1(typescript@5.7.3)
       better-auth:
         specifier: ^1.2.7
         version: 1.2.7
@@ -674,14 +674,14 @@ packages:
   '@hexagon/base64@1.1.28':
     resolution: {integrity: sha512-lhqDEAvWixy3bZ+UOYbPwUbBkwBq5C1LAJ/xPC8Oi+lL54oyakv/npbA0aU2hgCsx/1NUd4IBvV03+aUBWxerw==}
 
-  '@hono/node-server@1.14.1':
-    resolution: {integrity: sha512-vmbuM+HPinjWzPe7FFPWMMQMsbKE9gDPhaH0FFdqbGpkT5lp++tcWDTxwBl5EgS5y6JVgIaCdjeHRfQ4XRBRjQ==}
+  '@hono/node-server@1.19.4':
+    resolution: {integrity: sha512-AWKQZ/YkHUBSHeL/5Ld8FWgUs6wFf4TxGYxqp9wLZxRdFuHBpXmgOq+CuDoL4vllkZLzovCf5HBJnypiy3EtHA==}
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
 
-  '@hono/trpc-server@0.3.4':
-    resolution: {integrity: sha512-xFOPjUPnII70FgicDzOJy1ufIoBTu8eF578zGiDOrYOrYN8CJe140s9buzuPkX+SwJRYK8LjEBHywqZtxdm8aA==}
+  '@hono/trpc-server@0.4.0':
+    resolution: {integrity: sha512-LGlJfCmNIGMwcknZEIYdujVMs9OkNVazhpOhaz3kTWOXvNL660VOHpvvktosCiJrajyBY1RtIJKQ+IKaQvNuSg==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
@@ -857,8 +857,8 @@ packages:
       zod:
         optional: true
 
-  '@trpc/server@11.1.1':
-    resolution: {integrity: sha512-ZjPN3ypBHvGMAlMgeZPrxlRcH/3dn4AK0s5Ph1z+E6uiAvIQVCj7ZoMlXeeBsIy4THGDAk953jHVW2kMnlbb4g==}
+  '@trpc/server@11.5.1':
+    resolution: {integrity: sha512-KIDzHRS5m8U1ncPwjgtOtPWK9lNO0kYL7b+lnvKXRqowSAQIEC/z6y7g/dkt4Aqv3DKI/STLydt2/afrP1QrxQ==}
     peerDependencies:
       typescript: '>=5.7.2'
 
@@ -1931,13 +1931,13 @@ snapshots:
 
   '@hexagon/base64@1.1.28': {}
 
-  '@hono/node-server@1.14.1(hono@4.7.6)':
+  '@hono/node-server@1.19.4(hono@4.7.6)':
     dependencies:
       hono: 4.7.6
 
-  '@hono/trpc-server@0.3.4(@trpc/server@11.1.1(typescript@5.7.3))(hono@4.7.6)':
+  '@hono/trpc-server@0.4.0(@trpc/server@11.5.1(typescript@5.7.3))(hono@4.7.6)':
     dependencies:
-      '@trpc/server': 11.1.1(typescript@5.7.3)
+      '@trpc/server': 11.5.1(typescript@5.7.3)
       hono: 4.7.6
 
   '@isaacs/cliui@8.0.2':
@@ -2082,7 +2082,7 @@ snapshots:
       typescript: 5.7.3
       zod: 4.1.11
 
-  '@trpc/server@11.1.1(typescript@5.7.3)':
+  '@trpc/server@11.5.1(typescript@5.7.3)':
     dependencies:
       typescript: 5.7.3
 
