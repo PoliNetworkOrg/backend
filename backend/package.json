@@ -35,7 +35,7 @@
     "better-auth": "^1.2.7",
     "croner": "^9.1.0",
     "drizzle-orm": "^0.44.5",
-    "hono": "^4.7.6",
+    "hono": "^4.9.8",
     "node-html-parser": "^7.0.1",
     "pg": "^8.16.3",
     "pino": "^9.11.0",
