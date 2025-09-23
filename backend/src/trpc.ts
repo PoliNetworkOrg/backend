@@ -1,5 +1,5 @@
 import { initTRPC, TRPCError } from "@trpc/server";
-import { z, ZodError } from "zod";
+import { z, ZodError } from "zod/v4";
 import { logger } from "./logger";
 import superjson from "superjson";
 
@@ -24,11 +24,12 @@ const t = initTRPC.context<Context>().create({
 export const createTRPCRouter = t.router;
 
 /**
- *  iddleware for timing procedure execution and adding an artificial delay in development.
+ * Middleware for timing procedure execution and adding an artificial delay in development.
  *
- *  ou can remove this if you don't like it, but it can help catch unwanted waterfalls by simulating
- *  etwork latency that would occur in production but not in local development.
- */ const timingMiddleware = t.middleware(async ({ next, path }) => {
+ * You can remove this if you don't like it, but it can help catch unwanted waterfalls by simulating
+ * network latency that would occur in production but not in local development.
+ */
+const timingMiddleware = t.middleware(async ({ next, path }) => {
   const start = Date.now();
 
   if (t._config.isDev) {
@@ -46,12 +47,13 @@ export const createTRPCRouter = t.router;
 });
 
 /**
- *  ublic (unauthenticated) procedure
+ * Public (unauthenticated) procedure
  *
- *  his is the base piece you use to build new queries and mutations on your tRPC API. It does not
- *  uarantee that a user querying is authorized, but you can still access user session data if they
- *  re logged in.
- */ export const publicProcedure = t.procedure.use(timingMiddleware);
+ * This is the base piece you use to build new queries and mutations on your tRPC API. It does not
+ * guarantee that a user querying is authorized, but you can still access user session data if they
+ * are logged in.
+ */
+export const publicProcedure = t.procedure.use(timingMiddleware);
 
 const enforceUserIsAuthed = t.middleware(async ({ ctx, next }) => {
   if (!ctx.userId || ctx.userId === "anonymous") {
@@ -68,3 +70,5 @@ const enforceUserIsAuthed = t.middleware(async ({ ctx, next }) => {
 });
 
 export const protectedProcedure = t.procedure.use(enforceUserIsAuthed);
+
+
