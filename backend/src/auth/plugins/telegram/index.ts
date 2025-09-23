@@ -1,6 +1,6 @@
 import { DB, SCHEMA } from "@/db";
 import { type BetterAuthPlugin } from "better-auth";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { createAuthEndpoint, sessionMiddleware } from "better-auth/api";
 import crypto from "crypto";
 import { eq } from "drizzle-orm";

@@ -1,7 +1,7 @@
 import { DB, SCHEMA } from "@/db";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { eq, sql, ilike } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 const GROUPS = SCHEMA.TG.groups;
 export default createTRPCRouter({

@@ -16,7 +16,7 @@ importers:
         version: 0.3.4(@trpc/server@11.1.1(typescript@5.7.3))(hono@4.7.6)
       '@t3-oss/env-core':
         specifier: ^0.12.0
-        version: 0.12.0(typescript@5.7.3)(zod@3.25.30)
+        version: 0.12.0(typescript@5.7.3)(zod@4.1.11)
       '@trpc/server':
         specifier: 11.1.1
         version: 11.1.1(typescript@5.7.3)
@@ -42,8 +42,8 @@ importers:
         specifier: ^9.6.0
         version: 9.6.0
       zod:
-        specifier: ^3.25.30
-        version: 3.25.30
+        specifier: ^4.1.11
+        version: 4.1.11
     devDependencies:
       '@types/node':
         specifier: ^22.13.1
@@ -1572,8 +1572,11 @@ packages:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
 
-  zod@3.25.30:
-    resolution: {integrity: sha512-VolhdEtu6TJr/fzGuHA/SZ5ixvXqA6ADOG9VRcQ3rdOKmF5hkmcJbyaQjUH5BgmpA9gej++zYRX7zjSmdReIwA==}
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
+  zod@4.1.11:
+    resolution: {integrity: sha512-WPsqwxITS2tzx1bzhIKsEs19ABD5vmCVa4xBo2tq/SrV4RNZtfws1EnCWQXM6yh8bD08a1idvkB5MZSBiZsjwg==}
 
 snapshots:
 
@@ -2026,10 +2029,10 @@ snapshots:
       '@peculiar/asn1-schema': 2.3.15
       '@peculiar/asn1-x509': 2.3.15
 
-  '@t3-oss/env-core@0.12.0(typescript@5.7.3)(zod@3.25.30)':
+  '@t3-oss/env-core@0.12.0(typescript@5.7.3)(zod@4.1.11)':
     optionalDependencies:
       typescript: 5.7.3
-      zod: 3.25.30
+      zod: 4.1.11
 
   '@trpc/server@11.1.1(typescript@5.7.3)':
     dependencies:
@@ -2082,7 +2085,7 @@ snapshots:
       jose: 5.10.0
       kysely: 0.27.6
       nanostores: 0.11.4
-      zod: 3.25.30
+      zod: 3.25.76
 
   better-call@1.0.8:
     dependencies:
@@ -2755,4 +2758,6 @@ snapshots:
 
   xtend@4.0.2: {}
 
-  zod@3.25.30: {}
+  zod@3.25.76: {}
+
+  zod@4.1.11: {}

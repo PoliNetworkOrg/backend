@@ -2,7 +2,7 @@ import { DB, SCHEMA } from "@/db";
 import { logger } from "@/logger";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { eq } from "drizzle-orm";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 export default createTRPCRouter({
   link: publicProcedure

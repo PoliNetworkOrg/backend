@@ -12,6 +12,7 @@
     "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
     "dev": "NODE_ENV=development tsx watch --clear-screen=false --env-file=.env src/server.ts | pino-pretty",
     "start": "NODE_ENV=production node dist/server.js",
+    "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
@@ -38,7 +39,7 @@
     "node-html-parser": "^7.0.1",
     "pg": "^8.13.2",
     "pino": "^9.6.0",
-    "zod": "^3.25.30"
+    "zod": "^4.1.11"
   },
   "packageManager": "pnpm@10.6.5+sha512.cdf928fca20832cd59ec53826492b7dc25dc524d4370b6b4adbf65803d32efaa6c1c88147c0ae4e8d579a6c9eec715757b50d4fa35eea179d868eada4ed043af"
 }
