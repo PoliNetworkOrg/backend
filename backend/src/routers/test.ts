@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/trpc";
 import { DB, SCHEMA } from "@/db";
 

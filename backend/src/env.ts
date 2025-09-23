@@ -1,5 +1,5 @@
 import { createEnv } from "@t3-oss/env-core";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { TRUSTED_ORIGINS } from "./constants";
 
 const PORT = 3000;
