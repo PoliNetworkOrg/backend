@@ -15,7 +15,9 @@
     "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "check": "biome check",
+    "check:fix": "biome check --write"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.4",
