@@ -20,9 +20,13 @@ jobs:
         with:
           node-version-file: "backend/package.json"
           cache: pnpm
+          cache-dependency-path: "backend/pnpm-lock.yaml"
       - name: Install Dependencies
+        working-directory: backend
         run: pnpm install --frozen-lockfile
       - name: Typecheck
+        working-directory: backend
         run: pnpm run typecheck
       - name: Run Biome
+        working-directory: backend
         run: pnpm exec biome ci .
