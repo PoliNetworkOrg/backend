@@ -1,5 +1,5 @@
-import { schema as tgSchema } from "./tg";
-import { schema as webSchema } from "./web";
-import { schema as authSchema } from "./auth";
+import { schema as authSchema } from "./auth"
+import { schema as tgSchema } from "./tg"
+import { schema as webSchema } from "./web"
 
-export const schema = { ...tgSchema, ...webSchema, ...authSchema };
+export const schema = { ...tgSchema, ...webSchema, ...authSchema }

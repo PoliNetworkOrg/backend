@@ -1,2 +1,2 @@
-import * as test from "./test";
-export const schema = { ...test };
+import * as test from "./test"
+export const schema = { ...test }

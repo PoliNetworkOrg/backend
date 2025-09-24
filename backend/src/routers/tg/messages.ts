@@ -1,30 +1,30 @@
-import { DB, SCHEMA } from "@/db";
-import { logger } from "@/logger";
-import { createTRPCRouter, publicProcedure } from "@/trpc";
-import { decrypt, encrypt } from "@/utils/encrypt";
-import { and, eq } from "drizzle-orm";
-import { z } from "zod";
+import { and, eq } from "drizzle-orm"
+import { z } from "zod"
+import { DB, SCHEMA } from "@/db"
+import { logger } from "@/logger"
+import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { decrypt, encrypt } from "@/utils/encrypt"
 
-const s = SCHEMA.TG;
+const s = SCHEMA.TG
 const message = z.object({
   chatId: z.number(),
   messageId: z.number(),
   authorId: z.number(),
   message: z.string(),
   timestamp: z.date(),
-});
-type Message = z.infer<typeof message>;
+})
+type Message = z.infer<typeof message>
 
 function padChatId(chatId: number): number {
-  if (chatId < 0) return chatId;
+  if (chatId < 0) return chatId
 
-  const str = chatId.toString();
-  if (str.length === 13) return -chatId;
+  const str = chatId.toString()
+  if (str.length === 13) return -chatId
 
-  const padding = "1" + "0".repeat(12 - str.length);
+  const padding = `1${"0".repeat(12 - str.length)}`
 
   // Prepend the padding to the input string
-  return parseInt(`-${padding}${chatId}`);
+  return parseInt(`-${padding}${chatId}`, 10)
 }
 
 export default createTRPCRouter({
@@ -37,35 +37,30 @@ export default createTRPCRouter({
           message: z.null(),
           error: z.enum(["NOT_FOUND", "DECRYPT_ERROR"]),
         }),
-      ]),
+      ])
     )
     .query(async ({ input }) => {
       const [res] = await DB.select()
         .from(s.messages)
-        .where(
-          and(
-            eq(s.messages.chatId, padChatId(input.chatId)),
-            eq(s.messages.messageId, input.messageId),
-          ),
-        )
-        .limit(1);
+        .where(and(eq(s.messages.chatId, padChatId(input.chatId)), eq(s.messages.messageId, input.messageId)))
+        .limit(1)
 
-      if (!res) return { message: null, error: "NOT_FOUND" };
+      if (!res) return { message: null, error: "NOT_FOUND" }
 
       try {
-        const encryptedMessage = await decrypt(res.message);
+        const encryptedMessage = await decrypt(res.message)
         const message: Message = {
           message: encryptedMessage,
           timestamp: res.timestamp,
           authorId: res.authorId,
           chatId: res.chatId,
           messageId: res.messageId,
-        };
+        }
 
-        return { message, error: null };
+        return { message, error: null }
       } catch (err) {
-        logger.error(err, "error while decrypting a telegram message");
-        return { message: null, error: "DECRYPT_ERROR" };
+        logger.error(err, "error while decrypting a telegram message")
+        return { message: null, error: "DECRYPT_ERROR" }
       }
     }),
 
@@ -77,18 +72,16 @@ export default createTRPCRouter({
         const messages = input.messages.map(async (m) => ({
           ...m,
           message: await encrypt(m.message),
-        }));
-        const awaitedMessages = await Promise.all(messages);
-        await DB.insert(s.messages)
-          .values(awaitedMessages)
-          .onConflictDoNothing();
-        return { error: null };
+        }))
+        const awaitedMessages = await Promise.all(messages)
+        await DB.insert(s.messages).values(awaitedMessages).onConflictDoNothing()
+        return { error: null }
       } catch (err) {
         logger.error(
           err,
-          `error while encrypting ${input.messages.length > 1 ? "some telegram messages" : "a telegam message"}`,
-        );
-        return { error: "ENCRYPT_ERROR" };
+          `error while encrypting ${input.messages.length > 1 ? "some telegram messages" : "a telegam message"}`
+        )
+        return { error: "ENCRYPT_ERROR" }
       }
     }),
-});
+})

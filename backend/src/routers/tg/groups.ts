@@ -1,13 +1,13 @@
-import { DB, SCHEMA } from "@/db";
-import { createTRPCRouter, publicProcedure } from "@/trpc";
-import { eq, sql, ilike } from "drizzle-orm";
-import { z } from "zod";
+import { eq, ilike, sql } from "drizzle-orm"
+import { z } from "zod"
+import { DB, SCHEMA } from "@/db"
+import { createTRPCRouter, publicProcedure } from "@/trpc"
 
-const GROUPS = SCHEMA.TG.groups;
+const GROUPS = SCHEMA.TG.groups
 export default createTRPCRouter({
   getAll: publicProcedure.query(async () => {
-    const results = await DB.select().from(GROUPS);
-    return results;
+    const results = await DB.select().from(GROUPS)
+    return results
   }),
 
   search: publicProcedure
@@ -15,10 +15,10 @@ export default createTRPCRouter({
       z.object({
         query: z.string().min(1).max(100),
         limit: z.number().min(1).max(20).default(6),
-      }),
+      })
     )
     .query(async ({ input }) => {
-      const { query, limit } = input;
+      const { query, limit } = input
 
       const likeQuery = query.split(" ").join("%")
       const results = await DB.select({
@@ -27,26 +27,26 @@ export default createTRPCRouter({
         link: GROUPS.link,
       })
         .from(GROUPS)
-        .where(t => ilike(t.title, `%${likeQuery}%`))
-        .limit(limit);
+        .where((t) => ilike(t.title, `%${likeQuery}%`))
+        .limit(limit)
 
       return {
         groups: results,
         count: results.length,
-      };
+      }
     }),
 
   getById: publicProcedure
     .input(
       z.object({
         telegramId: z.number(),
-      }),
+      })
     )
     .query(async ({ input }) => {
       return await DB.select()
         .from(GROUPS)
         .limit(1)
-        .where((t) => eq(t.telegramId, input.telegramId));
+        .where((t) => eq(t.telegramId, input.telegramId))
     }),
 
   create: publicProcedure
@@ -56,8 +56,8 @@ export default createTRPCRouter({
           title: z.string(),
           telegramId: z.number(),
           link: z.url({ hostname: /^t\.me$/ }),
-        }),
-      ),
+        })
+      )
     )
     .output(z.array(z.number()))
     .mutation(async ({ input }) => {
@@ -70,21 +70,19 @@ export default createTRPCRouter({
             link: sql.raw(`excluded.${GROUPS.link.name}`),
           },
         })
-        .returning();
-      return rows.map((r) => r.telegramId);
+        .returning()
+      return rows.map((r) => r.telegramId)
     }),
 
   delete: publicProcedure
     .input(
       z.object({
         telegramId: z.number(),
-      }),
+      })
     )
     .output(z.boolean())
     .mutation(async ({ input }) => {
-      const rows = await DB.delete(GROUPS)
-        .where(eq(GROUPS.telegramId, input.telegramId))
-        .returning();
-      return rows.length === 1;
+      const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.telegramId)).returning()
+      return rows.length === 1
     }),
-});
+})
