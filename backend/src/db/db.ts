@@ -1,6 +1,6 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { schema } from "./schema";
-import { env } from "@/env";
+import { drizzle } from "drizzle-orm/node-postgres"
+import { env } from "@/env"
+import { schema } from "./schema"
 
 export const db = drizzle({
   connection: {
@@ -12,4 +12,4 @@ export const db = drizzle({
     ssl: false,
   },
   schema,
-});
+})

@@ -1,6 +1,6 @@
-import { timeColumns } from "@/db/columns";
-import { createTable } from "../create-table";
-import { bigint, index, integer, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, index, integer, timestamp, varchar } from "drizzle-orm/pg-core"
+import { timeColumns } from "@/db/columns"
+import { createTable } from "../create-table"
 
 export const AUDIT_TYPE = {
   BAN: "ban",
@@ -8,8 +8,8 @@ export const AUDIT_TYPE = {
   MUTE: "mute",
   BAN_ALL: "ban_all",
   MUTE_ALL: "mute_all",
-} as const;
-export type TAuditType = (typeof AUDIT_TYPE)[keyof typeof AUDIT_TYPE];
+} as const
+export type TAuditType = (typeof AUDIT_TYPE)[keyof typeof AUDIT_TYPE]
 
 export const ARRAY_AUDIT_TYPE = [
   AUDIT_TYPE.BAN,
@@ -17,7 +17,7 @@ export const ARRAY_AUDIT_TYPE = [
   AUDIT_TYPE.MUTE,
   AUDIT_TYPE.BAN_ALL,
   AUDIT_TYPE.MUTE_ALL,
-] as const;
+] as const
 
 export const auditLog = createTable.tg(
   "audit_log",
@@ -32,5 +32,5 @@ export const auditLog = createTable.tg(
 
     ...timeColumns,
   },
-  (t) => [index("auditlog_adminid_idx").on(t.adminId)],
-);
+  (t) => [index("auditlog_adminid_idx").on(t.adminId)]
+)

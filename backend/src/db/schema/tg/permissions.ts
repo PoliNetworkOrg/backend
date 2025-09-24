@@ -1,11 +1,6 @@
-import { timeColumns } from "@/db/columns";
-import { createTable } from "../create-table";
-import {
-  bigint,
-  index,
-  primaryKey,
-  varchar,
-} from "drizzle-orm/pg-core";
+import { bigint, index, primaryKey, varchar } from "drizzle-orm/pg-core"
+import { timeColumns } from "@/db/columns"
+import { createTable } from "../create-table"
 
 export const USER_ROLE = {
   ADMIN: "admin",
@@ -13,25 +8,25 @@ export const USER_ROLE = {
   DIRETTIVO: "direttivo",
   CREATOR: "creator",
   OWNER: "owner",
-} as const;
+} as const
 
-export const ARRAY_USER_ROLE = [USER_ROLE.ADMIN, USER_ROLE.HR, USER_ROLE.DIRETTIVO, USER_ROLE.OWNER, USER_ROLE.CREATOR] as const
-export type TUserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE];
+export const ARRAY_USER_ROLE = [
+  USER_ROLE.ADMIN,
+  USER_ROLE.HR,
+  USER_ROLE.DIRETTIVO,
+  USER_ROLE.OWNER,
+  USER_ROLE.CREATOR,
+] as const
+export type TUserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE]
 
-export const permissions = createTable.tg(
-  "permissions",
-  {
-    userId: bigint("user_id", { mode: "number" }).primaryKey(),
-    role: varchar("role", { length: 128 })
-      .$type<TUserRole>()
-      .default(USER_ROLE.ADMIN)
-      .notNull(),
-    addedBy: bigint("added_by_id", { mode: "number" }).notNull(),
-    modifiedBy: bigint("modified_by_id", { mode: "number" }),
+export const permissions = createTable.tg("permissions", {
+  userId: bigint("user_id", { mode: "number" }).primaryKey(),
+  role: varchar("role", { length: 128 }).$type<TUserRole>().default(USER_ROLE.ADMIN).notNull(),
+  addedBy: bigint("added_by_id", { mode: "number" }).notNull(),
+  modifiedBy: bigint("modified_by_id", { mode: "number" }),
 
-    ...timeColumns,
-  },
-);
+  ...timeColumns,
+})
 
 export const groupAdmins = createTable.tg(
   "group_admins",
@@ -42,8 +37,5 @@ export const groupAdmins = createTable.tg(
 
     ...timeColumns,
   },
-  (t) => [
-    primaryKey({ columns: [t.userId, t.groupId] }),
-    index("user_id_idx").on(t.userId),
-  ],
-);
+  (t) => [primaryKey({ columns: [t.userId, t.groupId] }), index("user_id_idx").on(t.userId)]
+)

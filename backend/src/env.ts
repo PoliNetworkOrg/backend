@@ -1,8 +1,8 @@
-import { createEnv } from "@t3-oss/env-core";
-import { z } from "zod";
-import { TRUSTED_ORIGINS } from "./constants";
+import { createEnv } from "@t3-oss/env-core"
+import { z } from "zod"
+import { TRUSTED_ORIGINS } from "./constants"
 
-const PORT = 3000;
+const PORT = 3000
 
 // coerce is needed for non-string values, because k8s supports only string env
 export const env = createEnv({
@@ -46,4 +46,4 @@ export const env = createEnv({
    * explicitly specify this option as true.
    */
   emptyStringAsUndefined: true,
-});
+})

@@ -5,8 +5,8 @@
 // IMPORTANT
 // here we use createTable util to add a prefix.
 // the cli doesn't use that, so double check what is diffing before changing
-import { text, timestamp, boolean, bigint } from "drizzle-orm/pg-core";
-import { createTable } from "../create-table";
+import { bigint, boolean, text, timestamp } from "drizzle-orm/pg-core"
+import { createTable } from "../create-table"
 
 export const users = createTable.auth("users", {
   id: text("id").primaryKey(),
@@ -18,7 +18,7 @@ export const users = createTable.auth("users", {
   telegramUsername: text("tg_username"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
-});
+})
 
 export const sessions = createTable.auth("sessions", {
   id: text("id").primaryKey(),
@@ -31,7 +31,7 @@ export const sessions = createTable.auth("sessions", {
   userId: text("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-});
+})
 
 export const accounts = createTable.auth("accounts", {
   id: text("id").primaryKey(),
@@ -49,7 +49,7 @@ export const accounts = createTable.auth("accounts", {
   password: text("password"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
-});
+})
 
 export const verifications = createTable.auth("verifications", {
   id: text("id").primaryKey(),
@@ -58,4 +58,4 @@ export const verifications = createTable.auth("verifications", {
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at"),
   updatedAt: timestamp("updated_at"),
-});
+})

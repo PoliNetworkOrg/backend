@@ -1,10 +1,10 @@
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "@/db/db";
-import { SCHEMA } from "@/db";
-import { env } from "@/env";
-import { AUTH_PATH } from "@/constants";
-import { telegramPlugin } from "./plugins/telegram";
+import { betterAuth } from "better-auth"
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { AUTH_PATH } from "@/constants"
+import { SCHEMA } from "@/db"
+import { db } from "@/db/db"
+import { env } from "@/env"
+import { telegramPlugin } from "./plugins/telegram"
 
 export const auth = betterAuth({
   basePath: AUTH_PATH,
@@ -45,4 +45,4 @@ export const auth = betterAuth({
       clientSecret: env.GITHUB_CLIENT_SECRET,
     },
   },
-});
+})

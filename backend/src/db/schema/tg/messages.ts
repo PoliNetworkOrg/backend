@@ -1,6 +1,6 @@
-import { timeColumns } from "@/db/columns";
-import { createTable } from "../create-table";
-import { bigint, primaryKey, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, primaryKey, timestamp, varchar } from "drizzle-orm/pg-core"
+import { timeColumns } from "@/db/columns"
+import { createTable } from "../create-table"
 
 export const messages = createTable.tg(
   "messages",
@@ -16,5 +16,5 @@ export const messages = createTable.tg(
     message: varchar("message", { length: 8704 }).notNull(),
     createdAt: timeColumns.createdAt,
   },
-  (t) => [primaryKey({ columns: [t.chatId, t.messageId] })],
-);
+  (t) => [primaryKey({ columns: [t.chatId, t.messageId] })]
+)

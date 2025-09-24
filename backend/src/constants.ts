@@ -1,5 +1,5 @@
-export const TRPC_PATH = "/api/trpc";
-export const AUTH_PATH = "/api/auth";
+export const TRPC_PATH = "/api/trpc"
+export const AUTH_PATH = "/api/auth"
 
 export const TRUSTED_ORIGINS = [
   "http://localhost:3001",
