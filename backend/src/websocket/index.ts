@@ -40,17 +40,15 @@ export class WebsocketServer {
     }
 
     return new Promise((res) => {
-      tgSocket.emit(
-        "ban",
-        { userId, chatId, durationInSeconds },
-        () => {
-          res(true)
-        },
-        (err) => {
+      tgSocket.emit("ban", { userId, chatId, durationInSeconds }, (err) => {
+        if (err) {
           logger.error({ err }, "[WS] Error occured while executing ban_all in telegram bot")
           res(false)
+        } else {
+          logger.info("[WS] CALLBACK OK")
+          res(true)
         }
-      )
+      })
     })
   }
 }
