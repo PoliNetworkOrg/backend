@@ -44,12 +44,6 @@ app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
 
-// TODO: REMOVE BEFORE MERGE, used only for testing here
-app.get("/ban", async (c) => {
-  const ok = await WSS.ban(992285066, -1002404957288)
-  return c.text(`OK: ${ok}`)
-})
-
 const server = serve({ port: env.PORT, hostname: "0.0.0.0", fetch: app.fetch }, (addr) =>
   logger.info(`Server running on ${addr.address}:${addr.port}`)
 )
