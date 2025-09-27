@@ -1,4 +1,4 @@
-import { bigint, index, primaryKey, varchar } from "drizzle-orm/pg-core"
+import { bigint, index, primaryKey, text, varchar } from "drizzle-orm/pg-core"
 import { timeColumns } from "@/db/columns"
 import { createTable } from "../create-table"
 
@@ -23,7 +23,7 @@ export type TUserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE]
 
 export const permissions = createTable.tg("permissions", {
   userId: bigint("user_id", { mode: "number" }).primaryKey(),
-  roles: varchar("roles", { length: 128 }).array().$type<TUserRole[]>().default([USER_ROLE.ADMIN]).notNull(),
+  roles: text("roles").array().$type<TUserRole[]>().default([USER_ROLE.ADMIN]).notNull(),
   addedBy: bigint("added_by_id", { mode: "number" }).notNull(),
   modifiedBy: bigint("modified_by_id", { mode: "number" }),
 

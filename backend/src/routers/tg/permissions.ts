@@ -86,17 +86,17 @@ export default createTRPCRouter({
         const adder = q.find((e) => e.userId === input.adderId)
         const existing = q.find((e) => e.userId === input.userId)
 
-        // check if adder is not in permission table or doesn't have permissions
-        if (!adder || !adder.roles.some((a) => CAN_ASSIGN.includes(a))) return { error: "UNAUTHORIZED" }
-
-        // if adder is self-assigning roles, he must be president or owner (ref CAN_SELF_ASSIGN)
-        if (adder.userId === input.userId && !adder.roles.some((a) => CAN_SELF_ASSIGN.includes(a)))
-          return { error: "UNAUTHORIZED_SELF_ASSIGN" }
-
-        // president and owner are special role
-        // only owners can perform this role update
-        if ((input.role === "president" || input.role === "owner") && !adder.roles.includes("owner"))
-          return { error: "UNAUTHORIZED" }
+        // // check if adder is not in permission table or doesn't have permissions
+        // if (!adder || !adder.roles.some((a) => CAN_ASSIGN.includes(a))) return { error: "UNAUTHORIZED" }
+        //
+        // // if adder is self-assigning roles, he must be president or owner (ref CAN_SELF_ASSIGN)
+        // if (adder.userId === input.userId && !adder.roles.some((a) => CAN_SELF_ASSIGN.includes(a)))
+        //   return { error: "UNAUTHORIZED_SELF_ASSIGN" }
+        //
+        // // president and owner are special role
+        // // only owners can perform this role update
+        // if ((input.role === "president" || input.role === "owner") && !adder.roles.includes("owner"))
+        //   return { error: "UNAUTHORIZED" }
 
         // check if it's the first time the target is added to permissions table
         if (!existing) {
