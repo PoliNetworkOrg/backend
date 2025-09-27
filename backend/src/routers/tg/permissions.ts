@@ -1,7 +1,7 @@
 import { and, arrayContains, eq, inArray } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { ARRAY_USER_ROLE, type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
+import { ARRAY_USER_ROLE, permissions, type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
@@ -25,6 +25,33 @@ export default createTRPCRouter({
       roles: res ? res.roles : "user",
     }
   }),
+
+  getDirettivo: publicProcedure
+    .output(
+      z.object({
+        members: z.array(z.object(permissions.$inferSelect)),
+        error: z.union([
+          z.null(),
+          z.enum(["EMPTY", "NOT_ENOUGH_MEMBERS", "TOO_MANY_MEMBERS", "INTERNAL_SERVER_ERROR"]),
+        ]),
+      })
+    )
+    .query(async () => {
+      try {
+        const res = await DB.select()
+          .from(s.permissions)
+          .where(arrayContains(s.permissions.roles, ["direttivo"]))
+
+        if (res.length === 0) return { error: "EMPTY", members: res }
+        if (res.length < 3) return { error: "NOT_ENOUGH_MEMBERS", members: res }
+        if (res.length > 9) return { error: "TOO_MANY_MEMBERS", members: res }
+
+        return { error: null, members: res }
+      } catch (error) {
+        logger.error({ error }, "Error while executing getDirettivo in tg.permissions router")
+        return { error: "INTERNAL_SERVER_ERROR", members: [] }
+      }
+    }),
 
   addRole: publicProcedure
     .input(
