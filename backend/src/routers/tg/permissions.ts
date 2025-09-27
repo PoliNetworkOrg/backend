@@ -1,7 +1,7 @@
 import { and, arrayContains, eq, inArray } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { ARRAY_USER_ROLE, permissions, type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
+import { ARRAY_USER_ROLE, type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
@@ -29,7 +29,12 @@ export default createTRPCRouter({
   getDirettivo: publicProcedure
     .output(
       z.object({
-        members: z.array(z.object(permissions.$inferSelect)),
+        members: z.array(
+          z.object({
+            userId: z.number(),
+            isPresident: z.boolean(),
+          })
+        ),
         error: z.union([
           z.null(),
           z.enum(["EMPTY", "NOT_ENOUGH_MEMBERS", "TOO_MANY_MEMBERS", "INTERNAL_SERVER_ERROR"]),
@@ -38,15 +43,17 @@ export default createTRPCRouter({
     )
     .query(async () => {
       try {
-        const res = await DB.select()
+        const res = await DB.select({ userId: s.permissions.userId, roles: s.permissions.roles })
           .from(s.permissions)
           .where(arrayContains(s.permissions.roles, ["direttivo"]))
 
-        if (res.length === 0) return { error: "EMPTY", members: res }
-        if (res.length < 3) return { error: "NOT_ENOUGH_MEMBERS", members: res }
-        if (res.length > 9) return { error: "TOO_MANY_MEMBERS", members: res }
+        const members = res.map((r) => ({ userId: r.userId, isPresident: r.roles.includes("president") }))
 
-        return { error: null, members: res }
+        if (res.length === 0) return { error: "EMPTY", members }
+        if (res.length < 3) return { error: "NOT_ENOUGH_MEMBERS", members }
+        if (res.length > 9) return { error: "TOO_MANY_MEMBERS", members }
+
+        return { error: null, members }
       } catch (error) {
         logger.error({ error }, "Error while executing getDirettivo in tg.permissions router")
         return { error: "INTERNAL_SERVER_ERROR", members: [] }
