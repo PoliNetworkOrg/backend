@@ -22,7 +22,7 @@ export default createTRPCRouter({
 
     return {
       userId: input.userId,
-      roles: res ? res.roles : "user",
+      roles: res ? res.roles : ["user"],
     }
   }),
 
