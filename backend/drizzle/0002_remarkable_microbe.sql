@@ -1,0 +1,1 @@
+ALTER TABLE "tg_permissions" RENAME COLUMN "role" TO "roles";
