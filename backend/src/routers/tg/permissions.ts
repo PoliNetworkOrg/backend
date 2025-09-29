@@ -12,19 +12,27 @@ const CAN_ASSIGN: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER, USER_ROLE
 const CAN_ADD_BOT: TUserRole[] = [USER_ROLE.HR, USER_ROLE.OWNER, USER_ROLE.CREATOR, USER_ROLE.DIRETTIVO]
 
 export default createTRPCRouter({
-  getRoles: publicProcedure.input(z.object({ userId: z.number() })).query(async ({ input }) => {
-    const [res] = await DB.select({
-      roles: s.permissions.roles,
-    })
-      .from(s.permissions)
-      .where(eq(s.permissions.userId, input.userId))
-      .limit(1)
+  getRoles: publicProcedure
+    .input(z.object({ userId: z.number() }))
+    .output(
+      z.object({
+        userId: z.number(),
+        roles: z.union([z.array(z.string<TUserRole>()), z.null()]),
+      })
+    )
+    .query(async ({ input }) => {
+      const [res] = await DB.select({
+        roles: s.permissions.roles,
+      })
+        .from(s.permissions)
+        .where(eq(s.permissions.userId, input.userId))
+        .limit(1)
 
-    return {
-      userId: input.userId,
-      roles: res ? res.roles : ["user"],
-    }
-  }),
+      return {
+        userId: input.userId,
+        roles: res ? res.roles : null,
+      }
+    }),
 
   getDirettivo: publicProcedure
     .output(
