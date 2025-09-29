@@ -1,4 +1,4 @@
-import { and, arrayContains, eq, inArray } from "drizzle-orm"
+import { and, arrayContains, eq, inArray, ne as neq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { ARRAY_USER_ROLE, type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
@@ -53,9 +53,9 @@ export default createTRPCRouter({
       try {
         const res = await DB.select({ userId: s.permissions.userId, roles: s.permissions.roles })
           .from(s.permissions)
-          .where(arrayContains(s.permissions.roles, ["direttivo"]))
+          .where(arrayContains(s.permissions.roles, [USER_ROLE.DIRETTIVO]))
 
-        const members = res.map((r) => ({ userId: r.userId, isPresident: r.roles.includes("president") }))
+        const members = res.map((r) => ({ userId: r.userId, isPresident: r.roles.includes(USER_ROLE.PRESIDENT) }))
 
         if (res.length === 0) return { error: "EMPTY", members }
         if (res.length < 3) return { error: "NOT_ENOUGH_MEMBERS", members }
@@ -77,12 +77,16 @@ export default createTRPCRouter({
       })
     )
     .output(
-      z.object({
-        error: z.union([
-          z.null(),
-          z.enum(["UNAUTHORIZED", "UNAUTHORIZED_SELF_ASSIGN", "DUPLICATE_ROLE", "INTERNAL_SERVER_ERROR"]),
-        ]),
-      })
+      z.union([
+        z.object({
+          roles: z.array(z.string<TUserRole>()),
+          error: z.null(),
+        }),
+        z.object({
+          roles: z.null().optional(),
+          error: z.union([z.null(), z.enum(["UNAUTHORIZED", "UNAUTHORIZED_SELF_ASSIGN", "INTERNAL_SERVER_ERROR"])]),
+        }),
+      ])
     )
     .mutation(async ({ input }) => {
       try {
@@ -92,7 +96,6 @@ export default createTRPCRouter({
           .where(inArray(s.permissions.userId, [input.userId, input.adderId]))
 
         const adder = q.find((e) => e.userId === input.adderId)
-        const existing = q.find((e) => e.userId === input.userId)
 
         // check if adder is not in permission table or doesn't have permissions
         if (!adder || !adder.roles.some((a) => CAN_ASSIGN.includes(a))) return { error: "UNAUTHORIZED" }
@@ -103,52 +106,56 @@ export default createTRPCRouter({
 
         // president and owner are special role
         // only owners can perform this role update
-        if ((input.role === "president" || input.role === "owner") && !adder.roles.includes("owner"))
+        if (
+          (input.role === USER_ROLE.PRESIDENT || input.role === USER_ROLE.OWNER) &&
+          !adder.roles.includes(USER_ROLE.OWNER)
+        )
           return { error: "UNAUTHORIZED" }
 
-        // check if it's the first time the target is added to permissions table
-        if (!existing) {
-          await DB.insert(s.permissions).values({
-            userId: input.userId,
-            roles: input.role === "president" ? [input.role, "direttivo"] : [input.role],
-            addedBy: input.adderId,
-          })
-          return { error: null }
-        }
+        const existingRoles = q.find((e) => e.userId === input.userId)?.roles ?? []
 
-        // if target already has this role, skip
-        if (existing.roles.includes(input.role)) return { error: "DUPLICATE_ROLE" }
+        // concat is the superpowered push
+        const roles = Array.from(
+          new Set(
+            existingRoles.concat(
+              input.role === USER_ROLE.PRESIDENT ? [USER_ROLE.PRESIDENT, USER_ROLE.DIRETTIVO] : input.role
+            )
+          )
+        )
 
         // we must check if there's already a president and change it
-        if (input.role === "president") {
-          const qOldPres = await DB.select()
-            .from(s.permissions)
-            .where(arrayContains(s.permissions.roles, ["president"]))
+        if (input.role === USER_ROLE.PRESIDENT) {
+          const updated = await DB.update(s.permissions)
+            .set({ roles: sql`array_remove(${s.permissions.roles}, ${USER_ROLE.PRESIDENT})` })
+            .where(
+              and(arrayContains(s.permissions.roles, [USER_ROLE.PRESIDENT]), neq(s.permissions.userId, input.userId))
+            )
+            .returning({ userId: s.permissions.userId })
 
-          if (qOldPres.length === 1) {
-            logger.warn("Role: an owner is changing the current president of PoliNetwork")
+          if (updated.length > 0) {
             // TODO: send email warning to adminorg email
-            await DB.update(s.permissions)
-              .set({ roles: qOldPres[0].roles.filter((r) => r !== "president") })
-              .where(eq(s.permissions.userId, qOldPres[0].userId))
-          }
-
-          // to avoid another mutation, we directly add "direttivo"
-          if (!existing.roles.includes("direttivo")) {
-            existing.roles.push("direttivo")
+            logger.warn(
+              { adderId: input.adderId, olds: updated.map((e) => e.userId), new: input.userId },
+              "Role: an owner is changing the current president of PoliNetwork"
+            )
           }
         }
 
-        // here we finally make the update
-        // first we push the new role to the roles array
-        existing.roles.push(input.role)
-        // then we update the DB entry with the updated roles array
-        await DB.update(s.permissions)
-          .set({
-            roles: existing.roles,
+        // then we upsert the DB entry with the updated roles array
+        await DB.insert(s.permissions)
+          .values({
+            userId: input.userId,
+            roles,
+            addedBy: input.adderId,
           })
-          .where(eq(s.permissions.userId, input.userId))
-        return { error: null }
+          .onConflictDoUpdate({
+            target: s.permissions.userId,
+            set: {
+              roles,
+            },
+          })
+
+        return { roles, error: null }
       } catch (error) {
         logger.error({ error }, "Error while executing addRole in tg.permissions router")
         return { error: "INTERNAL_SERVER_ERROR" }

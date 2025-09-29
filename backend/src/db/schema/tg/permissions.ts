@@ -1,4 +1,4 @@
-import { bigint, index, primaryKey, text, varchar } from "drizzle-orm/pg-core"
+import { bigint, index, primaryKey, text } from "drizzle-orm/pg-core"
 import { timeColumns } from "@/db/columns"
 import { createTable } from "../create-table"
 
