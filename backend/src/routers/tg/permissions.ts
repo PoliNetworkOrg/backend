@@ -7,9 +7,9 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 
 const s = SCHEMA.TG
 
-const CAN_SELF_ASSIGN: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER]
-const CAN_ASSIGN: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER, USER_ROLE.DIRETTIVO]
-const CAN_ADD_BOT: TUserRole[] = [USER_ROLE.HR, USER_ROLE.OWNER, USER_ROLE.CREATOR, USER_ROLE.DIRETTIVO]
+const CAN_SELF_ASSIGN: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER] as const
+const CAN_ASSIGN: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER, USER_ROLE.DIRETTIVO] as const
+const CAN_ADD_BOT: TUserRole[] = [USER_ROLE.HR, USER_ROLE.OWNER, USER_ROLE.CREATOR, USER_ROLE.DIRETTIVO] as const
 
 export default createTRPCRouter({
   getRoles: publicProcedure
@@ -158,6 +158,76 @@ export default createTRPCRouter({
         return { roles, error: null }
       } catch (error) {
         logger.error({ error }, "Error while executing addRole in tg.permissions router")
+        return { error: "INTERNAL_SERVER_ERROR" }
+      }
+    }),
+
+  removeRole: publicProcedure
+    .input(
+      z.object({
+        userId: z.number(),
+        role: z.enum(ARRAY_USER_ROLE),
+        removerId: z.number(),
+      })
+    )
+    .output(
+      z.union([
+        z.object({
+          roles: z.array(z.string<TUserRole>()),
+          error: z.null(),
+        }),
+        z.object({
+          roles: z.null().optional(),
+          error: z.union([
+            z.null(),
+            z.enum(["UNAUTHORIZED", "NOT_FOUND", "UNAUTHORIZED_SELF_ASSIGN", "INTERNAL_SERVER_ERROR"]),
+          ]),
+        }),
+      ])
+    )
+    .mutation(async ({ input }) => {
+      try {
+        // get current permissions of remover and target
+        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.removerId))
+        if (q.length === 0) return { error: "UNAUTHORIZED" }
+
+        const remover = q[0]
+
+        // check if remover is not in permission table or doesn't have permissions
+        if (!remover.roles.some((a) => CAN_ASSIGN.includes(a))) return { error: "UNAUTHORIZED" }
+
+        // if remover is self-removing roles, he must be president or owner (ref CAN_SELF_ASSIGN)
+        if (remover.userId === input.userId && !remover.roles.some((a) => CAN_SELF_ASSIGN.includes(a)))
+          return { error: "UNAUTHORIZED_SELF_ASSIGN" }
+
+        // president and owner are special role
+        // only owners can perform this role update
+        if (
+          (input.role === USER_ROLE.PRESIDENT || input.role === USER_ROLE.OWNER) &&
+          !remover.roles.includes(USER_ROLE.OWNER)
+        )
+          return { error: "UNAUTHORIZED" }
+
+        const affected = await DB.update(s.permissions)
+          .set({ roles: sql`array_remove(${s.permissions.roles}, ${input.role})` })
+          .where(eq(s.permissions.userId, input.userId))
+          .returning({ roles: s.permissions.roles })
+
+        if (affected.length === 0) return { error: "NOT_FOUND" }
+        let roles = affected[0].roles
+
+        if (input.role === USER_ROLE.DIRETTIVO) {
+          const presAffected = await DB.update(s.permissions)
+            .set({ roles: sql`array_remove(${s.permissions.roles}, ${USER_ROLE.PRESIDENT})` })
+            .where(eq(s.permissions.userId, input.userId))
+            .returning({ roles: s.permissions.roles })
+
+          if (presAffected.length !== 0) roles = presAffected[0].roles
+        }
+
+        return { roles, error: null }
+      } catch (error) {
+        logger.error({ error }, "Error while executing removeRole in tg.permissions router")
         return { error: "INTERNAL_SERVER_ERROR" }
       }
     }),
