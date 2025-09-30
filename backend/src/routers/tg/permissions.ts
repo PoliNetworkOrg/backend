@@ -84,7 +84,7 @@ export default createTRPCRouter({
         }),
         z.object({
           roles: z.null().optional(),
-          error: z.union([z.null(), z.enum(["UNAUTHORIZED", "UNAUTHORIZED_SELF_ASSIGN", "INTERNAL_SERVER_ERROR"])]),
+          error: z.enum(["UNAUTHORIZED", "UNAUTHORIZED_SELF_ASSIGN", "INTERNAL_SERVER_ERROR"]),
         }),
       ])
     )

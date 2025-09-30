@@ -3,7 +3,9 @@ import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
-import { decrypt, encrypt } from "@/utils/encrypt"
+import { Cipher, DecryptError } from "@/utils/cipher"
+
+const cipher = new Cipher("tg.messages")
 
 const s = SCHEMA.TG
 const message = z.object({
@@ -48,7 +50,7 @@ export default createTRPCRouter({
       if (!res) return { message: null, error: "NOT_FOUND" }
 
       try {
-        const encryptedMessage = await decrypt(res.message)
+        const encryptedMessage = await cipher.decrypt(res.message)
         const message: Message = {
           message: encryptedMessage,
           timestamp: res.timestamp,
@@ -71,7 +73,7 @@ export default createTRPCRouter({
       try {
         const messages = input.messages.map(async (m) => ({
           ...m,
-          message: await encrypt(m.message),
+          message: await cipher.encrypt(m.message),
         }))
         const awaitedMessages = await Promise.all(messages)
         await DB.insert(s.messages).values(awaitedMessages).onConflictDoNothing()
