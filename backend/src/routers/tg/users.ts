@@ -95,14 +95,22 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       try {
         const users: (typeof s.users.$inferInsert)[] = await Promise.all(
-          input.users.map(async (u) => ({
-            userId: u.id,
-            firstName: await cipher.encrypt(u.firstName),
-            lastName: u.lastName ? await cipher.encrypt(u.lastName) : undefined,
-            username: u.username ? await cipher.encrypt(u.username) : undefined,
-            isBot: u.isBot,
-            langCode: u.langCode,
-          }))
+          input.users.map(async (u) => {
+            const [firstName, lastName, username] = await Promise.all([
+              cipher.decrypt(u.firstName),
+              u.lastName ? cipher.decrypt(u.lastName) : undefined,
+              u.username ? cipher.decrypt(u.username) : undefined,
+            ])
+
+            return {
+              userId: u.id,
+              firstName,
+              lastName,
+              username,
+              isBot: u.isBot,
+              langCode: u.langCode,
+            }
+          })
         )
 
         const res = await DB.insert(s.users)
