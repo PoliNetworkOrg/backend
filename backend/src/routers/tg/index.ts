@@ -4,6 +4,7 @@ import groups from "./groups"
 import link from "./link"
 import messages from "./messages"
 import permissions from "./permissions"
+import users from "./users"
 
 export const tgRouter = createTRPCRouter({
   groups,
@@ -11,4 +12,5 @@ export const tgRouter = createTRPCRouter({
   link,
   messages,
   auditLog,
+  users,
 })
