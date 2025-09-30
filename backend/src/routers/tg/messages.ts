@@ -36,8 +36,8 @@ export default createTRPCRouter({
       z.union([
         z.object({ message, error: z.null() }),
         z.object({
-          message: z.null(),
-          error: z.enum(["NOT_FOUND", "DECRYPT_ERROR"]),
+          message: z.null().optional(),
+          error: z.enum(["NOT_FOUND", "DECRYPT_ERROR", "INTERNAL_SERVER_ERROR"]),
         }),
       ])
     )
@@ -60,9 +60,13 @@ export default createTRPCRouter({
         }
 
         return { message, error: null }
-      } catch (err) {
-        logger.error(err, "error while decrypting a telegram message")
-        return { message: null, error: "DECRYPT_ERROR" }
+      } catch (error) {
+        if (error instanceof DecryptError) {
+          logger.error(error, "error while decrypting a telegram message")
+          return { message: null, error: "DECRYPT_ERROR" }
+        }
+
+        return { error: "INTERNAL_SERVER_ERROR" }
       }
     }),
 
