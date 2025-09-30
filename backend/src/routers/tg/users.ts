@@ -55,9 +55,9 @@ export default createTRPCRouter({
         if (res.length === 0) return { error: "NOT_FOUND" }
 
         const [firstName, lastName, username] = await Promise.all([
-          await cipher.decrypt(res[0].firstName),
-          res[0].lastName ? await cipher.decrypt(res[0].lastName) : undefined,
-          res[0].username ? await cipher.decrypt(res[0].username) : undefined,
+          cipher.decrypt(res[0].firstName),
+          res[0].lastName ? cipher.decrypt(res[0].lastName) : undefined,
+          res[0].username ? cipher.decrypt(res[0].username) : undefined,
         ])
 
         const user: z.infer<typeof UserSchema> = {
