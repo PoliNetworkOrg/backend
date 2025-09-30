@@ -9,7 +9,7 @@ const IV_SIZE = 12 // Standard size for AES-GCM IV
 // Ensure the key is the correct size and in a usable format (Buffer)
 const ENCRYPTION_KEY_BUFFER = Buffer.from(env.ENCRYPTION_KEY, "hex")
 
-export class DecryptError extends Error { }
+export class DecryptError extends Error {}
 
 export class Cipher {
   private key: Buffer
