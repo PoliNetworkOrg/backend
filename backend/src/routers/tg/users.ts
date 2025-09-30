@@ -97,9 +97,9 @@ export default createTRPCRouter({
         const users: (typeof s.users.$inferInsert)[] = await Promise.all(
           input.users.map(async (u) => {
             const [firstName, lastName, username] = await Promise.all([
-              cipher.decrypt(u.firstName),
-              u.lastName ? cipher.decrypt(u.lastName) : undefined,
-              u.username ? cipher.decrypt(u.username) : undefined,
+              cipher.encrypt(u.firstName),
+              u.lastName ? cipher.encrypt(u.lastName) : undefined,
+              u.username ? cipher.encrypt(u.username) : undefined,
             ])
 
             return {
@@ -125,7 +125,11 @@ export default createTRPCRouter({
 
         return { error: null }
       } catch (error) {
-        logger.error(error, "error while updating a telegram user into table tg.users")
+        if (error instanceof DecryptError) {
+          logger.error(error, "error while encrypting a telegram user from table tg.users")
+          return { error: "ENCRYPT_ERROR" }
+        }
+
         return { error: "INTERNAL_SERVER_ERROR" }
       }
     }),
