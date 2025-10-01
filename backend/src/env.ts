@@ -20,7 +20,8 @@ export const env = createEnv({
     ENCRYPTION_KEY: z
       .string()
       .regex(/^[A-Fa-f0-9]+$/, "The string must be a valid hex string")
-      .length(64),
+      .min(64)
+      .max(1024),
 
     TRUSTED_ORIGINS: z
       .string()

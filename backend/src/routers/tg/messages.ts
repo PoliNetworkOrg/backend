@@ -3,7 +3,9 @@ import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
-import { decrypt, encrypt } from "@/utils/encrypt"
+import { Cipher, DecryptError } from "@/utils/cipher"
+
+const cipher = new Cipher("tg.messages")
 
 const s = SCHEMA.TG
 const message = z.object({
@@ -34,8 +36,8 @@ export default createTRPCRouter({
       z.union([
         z.object({ message, error: z.null() }),
         z.object({
-          message: z.null(),
-          error: z.enum(["NOT_FOUND", "DECRYPT_ERROR"]),
+          message: z.null().optional(),
+          error: z.enum(["NOT_FOUND", "DECRYPT_ERROR", "INTERNAL_SERVER_ERROR"]),
         }),
       ])
     )
@@ -48,7 +50,7 @@ export default createTRPCRouter({
       if (!res) return { message: null, error: "NOT_FOUND" }
 
       try {
-        const encryptedMessage = await decrypt(res.message)
+        const encryptedMessage = await cipher.decrypt(res.message)
         const message: Message = {
           message: encryptedMessage,
           timestamp: res.timestamp,
@@ -58,9 +60,13 @@ export default createTRPCRouter({
         }
 
         return { message, error: null }
-      } catch (err) {
-        logger.error(err, "error while decrypting a telegram message")
-        return { message: null, error: "DECRYPT_ERROR" }
+      } catch (error) {
+        if (error instanceof DecryptError) {
+          logger.error(error, "error while decrypting a telegram message")
+          return { message: null, error: "DECRYPT_ERROR" }
+        }
+
+        return { error: "INTERNAL_SERVER_ERROR" }
       }
     }),
 
@@ -71,7 +77,7 @@ export default createTRPCRouter({
       try {
         const messages = input.messages.map(async (m) => ({
           ...m,
-          message: await encrypt(m.message),
+          message: await cipher.encrypt(m.message),
         }))
         const awaitedMessages = await Promise.all(messages)
         await DB.insert(s.messages).values(awaitedMessages).onConflictDoNothing()
