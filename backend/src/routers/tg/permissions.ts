@@ -4,12 +4,19 @@ import { DB, SCHEMA } from "@/db"
 import { ARRAY_USER_ROLE, type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { decryptUser, TgUserSchema } from "@/utils/users"
 
 const s = SCHEMA.TG
 
 const CAN_SELF_ASSIGN: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER] as const
 const CAN_ASSIGN: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER, USER_ROLE.DIRETTIVO] as const
 const CAN_ADD_BOT: TUserRole[] = [USER_ROLE.HR, USER_ROLE.OWNER, USER_ROLE.CREATOR, USER_ROLE.DIRETTIVO] as const
+
+const direttivoMember = z.object({
+  userId: z.number(),
+  user: TgUserSchema.nullable(),
+  isPresident: z.boolean(),
+})
 
 export default createTRPCRouter({
   getRoles: publicProcedure
@@ -37,12 +44,7 @@ export default createTRPCRouter({
   getDirettivo: publicProcedure
     .output(
       z.object({
-        members: z.array(
-          z.object({
-            userId: z.number(),
-            isPresident: z.boolean(),
-          })
-        ),
+        members: z.array(direttivoMember),
         error: z.union([
           z.null(),
           z.enum(["EMPTY", "NOT_ENOUGH_MEMBERS", "TOO_MANY_MEMBERS", "INTERNAL_SERVER_ERROR"]),
@@ -51,11 +53,30 @@ export default createTRPCRouter({
     )
     .query(async () => {
       try {
-        const res = await DB.select({ userId: s.permissions.userId, roles: s.permissions.roles })
+        const res = await DB.select({ userId: s.permissions.userId, dbUser: s.users, roles: s.permissions.roles })
           .from(s.permissions)
           .where(arrayContains(s.permissions.roles, [USER_ROLE.DIRETTIVO]))
+          .leftJoin(s.users, eq(s.permissions.userId, s.users.userId))
 
-        const members = res.map((r) => ({ userId: r.userId, isPresident: r.roles.includes(USER_ROLE.PRESIDENT) }))
+        const members: z.infer<typeof direttivoMember>[] = await Promise.all(
+          res
+            .toSorted((a, b) => {
+              if (a.roles.includes(USER_ROLE.PRESIDENT) && b.roles.includes(USER_ROLE.PRESIDENT)) return 0
+              if (a.roles.includes(USER_ROLE.PRESIDENT)) return 1
+              if (b.roles.includes(USER_ROLE.PRESIDENT)) return -1
+              return 0
+            })
+            .map(async (r) => {
+              const isPresident = r.roles.includes(USER_ROLE.PRESIDENT)
+              const user = r.dbUser ? await decryptUser(r.dbUser) : null
+
+              return {
+                user,
+                userId: r.userId,
+                isPresident,
+              }
+            })
+        )
 
         if (res.length === 0) return { error: "EMPTY", members }
         if (res.length < 3) return { error: "NOT_ENOUGH_MEMBERS", members }
