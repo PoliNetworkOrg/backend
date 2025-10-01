@@ -15,7 +15,7 @@ export const TgUserSchema = z.object({
 
 export async function decryptUser(dbUser: typeof SCHEMA.TG.users.$inferSelect): Promise<z.infer<typeof TgUserSchema>> {
   const [firstName, lastName, username] = await Promise.all([
-    dbUser.firstName,
+    userCipher.decrypt(dbUser.firstName),
     dbUser.lastName ? userCipher.decrypt(dbUser.lastName) : undefined,
     dbUser.username ? userCipher.decrypt(dbUser.username) : undefined,
   ])

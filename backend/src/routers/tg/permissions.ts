@@ -43,13 +43,16 @@ export default createTRPCRouter({
 
   getDirettivo: publicProcedure
     .output(
-      z.object({
-        members: z.array(direttivoMember),
-        error: z.union([
-          z.null(),
-          z.enum(["EMPTY", "NOT_ENOUGH_MEMBERS", "TOO_MANY_MEMBERS", "INTERNAL_SERVER_ERROR"]),
-        ]),
-      })
+      z.union([
+        z.object({
+          members: z.array(direttivoMember),
+          error: z.null(),
+        }),
+        z.object({
+          members: z.null().optional(),
+          error: z.enum(["EMPTY", "NOT_ENOUGH_MEMBERS", "TOO_MANY_MEMBERS", "INTERNAL_SERVER_ERROR"]),
+        }),
+      ])
     )
     .query(async () => {
       try {
@@ -62,8 +65,8 @@ export default createTRPCRouter({
           res
             .toSorted((a, b) => {
               if (a.roles.includes(USER_ROLE.PRESIDENT) && b.roles.includes(USER_ROLE.PRESIDENT)) return 0
-              if (a.roles.includes(USER_ROLE.PRESIDENT)) return 1
-              if (b.roles.includes(USER_ROLE.PRESIDENT)) return -1
+              if (a.roles.includes(USER_ROLE.PRESIDENT)) return -1
+              if (b.roles.includes(USER_ROLE.PRESIDENT)) return 1
               return 0
             })
             .map(async (r) => {
@@ -78,14 +81,15 @@ export default createTRPCRouter({
             })
         )
 
-        if (res.length === 0) return { error: "EMPTY", members }
-        if (res.length < 3) return { error: "NOT_ENOUGH_MEMBERS", members }
-        if (res.length > 9) return { error: "TOO_MANY_MEMBERS", members }
+        if (res.length === 0) return { error: "EMPTY" }
+        if (res.length < 3) return { error: "NOT_ENOUGH_MEMBERS" }
+        if (res.length > 9) return { error: "TOO_MANY_MEMBERS" }
 
+        logger.debug({ members }, "getDirettivo")
         return { error: null, members }
       } catch (error) {
         logger.error({ error }, "Error while executing getDirettivo in tg.permissions router")
-        return { error: "INTERNAL_SERVER_ERROR", members: [] }
+        return { error: "INTERNAL_SERVER_ERROR" }
       }
     }),
 
