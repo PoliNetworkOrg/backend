@@ -32,7 +32,7 @@ export async function decryptUser(dbUser: typeof SCHEMA.TG.users.$inferSelect): 
 
 export async function encryptUser(tgUser: z.infer<typeof TgUserSchema>): Promise<typeof SCHEMA.TG.users.$inferInsert> {
   const [firstName, lastName, username] = await Promise.all([
-    tgUser.firstName,
+    userCipher.encrypt(tgUser.firstName),
     tgUser.lastName ? userCipher.encrypt(tgUser.lastName) : undefined,
     tgUser.username ? userCipher.encrypt(tgUser.username) : undefined,
   ])
