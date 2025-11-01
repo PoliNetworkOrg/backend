@@ -11,7 +11,7 @@ export interface SocketData {
   connectedAt: Date
 }
 
-export class WebsocketServer {
+export class WebSocketServer {
   private io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
 
   constructor(httpServer: ServerType, path: string = "/ws") {

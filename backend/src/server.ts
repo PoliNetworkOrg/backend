@@ -7,10 +7,12 @@ import { auth } from "./auth"
 import { AUTH_PATH, TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
+import { sendEmail } from "./emails"
+import WelcomeEmail from "./emails/templates/welcome"
 import { env } from "./env"
 import { logger } from "./logger"
 import { appRouter } from "./routers"
-import { WebsocketServer as WebSocketServer } from "./websocket"
+import { WebSocketServer } from "./websocket"
 
 const app = new Hono()
 const isDev = env.NODE_ENV === "development"
@@ -43,6 +45,24 @@ app.use(
 app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
+app.post("/test-email", async (c) => {
+  if (env.NODE_ENV === "production") return c.status(500)
+
+  await sendEmail({
+    to: "lorenzo.corallo@mail.polimi.it",
+    subject: "Welcome to PoliNetwork",
+    email: WelcomeEmail,
+    props: { email: "example@polinetwork.org", password: "R@123123123123as", assocNum: 12, firstName: "Lorenzo" },
+    forceProd: true,
+  })
+  // await sendEmail({
+  //   to: "test@example.org",
+  //   subject: "Welcome to PoliNetwork",
+  //   email: WelcomeEmail,
+  //   props: { email: "example@polinetwork.org", password: "R@123123123123as", assocNum: 12, firstName: "Lorenzo" },
+  // })
+  return c.text("Success!")
+})
 
 const server = serve({ port: env.PORT, hostname: "0.0.0.0", fetch: app.fetch }, (addr) =>
   logger.info(`Server running on ${addr.address}:${addr.port}`)
