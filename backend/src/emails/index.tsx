@@ -44,17 +44,17 @@ export async function sendEmail<P extends {} = {}>(options: {
     const html = await render(<options.email {...options.props} />)
     const res = isProd
       ? await transport.sendMail({
-        from: env.SMTP_USER,
-        to: options.to,
-        subject: options.subject,
-        html,
-      })
+          from: env.SMTP_USER,
+          to: options.to,
+          subject: options.subject,
+          html,
+        })
       : await testTransport.sendMail({
-        from: "Test PoliNetwork APS <noreply@example.com",
-        to: options.to,
-        subject: `[TEST] ${options.subject}`,
-        html,
-      })
+          from: "Test PoliNetwork APS <noreply@example.com",
+          to: options.to,
+          subject: `[TEST] ${options.subject}`,
+          html,
+        })
 
     if (isProd) {
       logger.debug({ subject: options.subject, to: options.to }, `[EMAIL] email sent successfully.`)
