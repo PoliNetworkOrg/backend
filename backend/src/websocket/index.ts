@@ -31,6 +31,10 @@ export class WebSocketServer {
     })
   }
 
+  close() {
+    this.io.close()
+  }
+
   async ban(userId: number, chatId: number, durationInSeconds?: number): Promise<boolean> {
     const sockets = await this.io.fetchSockets()
     const tgSocket = sockets.find((s) => s.data.type === "telegram")

@@ -38,29 +38,33 @@ export async function sendEmail<P extends {} = {}>(options: {
   props: P
   forceProd?: boolean
 }): Promise<void> {
-  const isProd = options.forceProd || env.NODE_ENV === "production"
+  try {
+    const isProd = options.forceProd || env.NODE_ENV === "production"
 
-  const html = await render(<options.email {...options.props} />)
-  const res = isProd
-    ? await transport.sendMail({
+    const html = await render(<options.email {...options.props} />)
+    const res = isProd
+      ? await transport.sendMail({
         from: env.SMTP_USER,
         to: options.to,
         subject: options.subject,
         html,
       })
-    : await testTransport.sendMail({
+      : await testTransport.sendMail({
         from: "Test PoliNetwork APS <noreply@example.com",
         to: options.to,
         subject: `[TEST] ${options.subject}`,
         html,
       })
 
-  if (isProd) {
-    logger.debug({ subject: options.subject, to: options.to }, `[EMAIL] email sent successfully.`)
-  } else {
-    logger.info(
-      { subject: options.subject, to: options.to },
-      `[EMAIL] fake email sent (dev). Preview URL: ${getTestMessageUrl(res)}`
-    )
+    if (isProd) {
+      logger.debug({ subject: options.subject, to: options.to }, `[EMAIL] email sent successfully.`)
+    } else {
+      logger.info(
+        { subject: options.subject, to: options.to },
+        `[EMAIL] fake email sent (dev). Preview URL: ${getTestMessageUrl(res)}`
+      )
+    }
+  } catch (err) {
+    logger.error({ subject: options.subject, to: options.to, err }, `[EMAIL] error while sending email`)
   }
 }
