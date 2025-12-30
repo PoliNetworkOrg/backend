@@ -14,6 +14,9 @@ importers:
       '@hono/trpc-server':
         specifier: ^0.4.0
         version: 0.4.0(@trpc/server@11.5.1(typescript@5.9.2))(hono@4.9.8)
+      '@hono/zod-validator':
+        specifier: ^0.7.6
+        version: 0.7.6(hono@4.9.8)(zod@4.1.11)
       '@react-email/components':
         specifier: 1.0.2
         version: 1.0.2(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -705,6 +708,12 @@ packages:
     peerDependencies:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
       hono: '>=4.*'
+
+  '@hono/zod-validator@0.7.6':
+    resolution: {integrity: sha512-Io1B6d011Gj1KknV4rXYz4le5+5EubcWEU/speUjuw9XMMIaP3n78yXLhjd2A3PXaXaUwEAluOiAyLqhBEJgsw==}
+    peerDependencies:
+      hono: '>=3.9.0'
+      zod: ^3.25.0 || ^4.0.0
 
   '@img/colour@1.0.0':
     resolution: {integrity: sha512-A5P/LfWGFSl6nsckYtjw9da+19jB8hkJ6ACTGcDfEJ0aE+l2n2El7dsVM7UVHZQ9s2lmYMWlrS21YLy2IR1LUw==}
@@ -4468,6 +4477,11 @@ snapshots:
     dependencies:
       '@trpc/server': 11.5.1(typescript@5.9.2)
       hono: 4.9.8
+
+  '@hono/zod-validator@0.7.6(hono@4.9.8)(zod@4.1.11)':
+    dependencies:
+      hono: 4.9.8
+      zod: 4.1.11
 
   '@img/colour@1.0.0': {}
 
