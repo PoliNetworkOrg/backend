@@ -5,11 +5,7 @@ import type { Organization } from "@microsoft/microsoft-graph-types"
 import { env } from "@/env"
 import { logger } from "@/logger"
 
-const credentials = new ClientSecretCredential(
-  env.AZURE_TENANT_ID,
-  env.AZURE_EMAIL_CLIENT_ID,
-  env.AZURE_EMAIL_CLIENT_SECRET
-)
+const credentials = new ClientSecretCredential(env.AZURE_TENANT_ID, env.AZURE_CLIENT_ID, env.AZURE_CLIENT_SECRET)
 
 const authProvider = new TokenCredentialAuthenticationProvider(credentials, {
   // the scopes are configured directly on the App Registration
