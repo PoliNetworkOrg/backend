@@ -15,6 +15,7 @@ import {
   Text,
 } from "@react-email/components"
 import type React from "react"
+import { Footer } from "../components/footer"
 
 type Props = {
   firstName: string
@@ -43,7 +44,7 @@ const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
           </Section>
 
           {/* Main Content Container */}
-          <Container className="mx-auto max-w-[600px] bg-white px-5">
+          <Container className="mx-auto bg-white px-5">
             <Heading className="m-0 text-center text-2xl font-bold leading-8">
               Welcome to <span className="whitespace-nowrap">PoliNetwork APS</span>
             </Heading>
@@ -63,7 +64,7 @@ const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
                 , enter the following credentials and follow the onboarding.
               </Text>
 
-              <Section className="py-4 px-2 bg-blue-100 rounded-md">
+              <Section className="p-4 bg-blue-100 rounded-md">
                 <Row>
                   <EmailWithoutHref email={props.email} />
                 </Row>
@@ -93,12 +94,7 @@ const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
             </Section>
           </Container>
 
-          {/* Footer */}
-          <Section className="pb-10 pt-5 text-center">
-            <Link href="https://polinetwork.org" className="text-xs text-gray-400 underline">
-              PoliNetwork APS
-            </Link>
-          </Section>
+          <Footer />
         </Body>
       </Tailwind>
     </Html>
