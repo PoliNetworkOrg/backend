@@ -90,7 +90,7 @@ const shutdown = async () => {
 
   isShuttingDown = true
   logger.info("[SERVER] Recieved shutdown signal, shutting down...")
-  server.close((err) => {
+  await WSS.close((err) => {
     if (err) {
       logger.error({ err }, "[SERVER] Shutdown error")
       process.exit(1)
@@ -103,6 +103,13 @@ const shutdown = async () => {
 
 process.on("SIGTERM", shutdown)
 process.on("SIGINT", shutdown)
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "!!! Uncaught Exception")
+})
+
+process.on("unhandledRejection", (err) => {
+  logger.error({ err }, "!!! Unhandled Rejection")
+})
 
 await Promise.race([
   DB.select().from(SCHEMA.TG.test),
