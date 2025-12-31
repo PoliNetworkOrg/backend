@@ -1,4 +1,4 @@
-import { EmailService } from "./service"
+import { sendEmail } from "@/azure/functions"
 import Welcome from "./templates/welcome"
 
 export async function sendWelcomeEmail(
@@ -7,8 +7,7 @@ export async function sendWelcomeEmail(
   memberInfo: { firstName: string; assocNumber: number },
   subject: string = "Welcome to PoliNetwork"
 ) {
-  const emailService = EmailService.getInstance()
-  await emailService.sendEmail(
+  await sendEmail(
     toAddress,
     subject,
     <Welcome
