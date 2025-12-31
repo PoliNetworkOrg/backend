@@ -5,7 +5,6 @@ import {
   Head,
   Heading,
   Html,
-  Img,
   Link,
   Preview,
   pixelBasedPreset,
@@ -16,6 +15,7 @@ import {
 } from "@react-email/components"
 import type React from "react"
 import { Footer } from "../components/footer"
+import { Logo } from "../components/logo"
 
 type Props = {
   firstName: string
@@ -32,16 +32,7 @@ const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
         <Preview>Congratulations! You joined PoliNetwork APS...</Preview>
 
         <Body className="m-0 bg-white p-0 font-sans text-base leading-normal">
-          {/* Logo Section */}
-          <Section className="py-10 text-center">
-            <Img
-              src="https://raw.githubusercontent.com/PoliNetworkOrg/Logo/a1e02bf150ac0b3c734a629901eada79fb4fd762/Logo.svg"
-              width="100"
-              height="100"
-              alt="PoliNetwork APS Logo"
-              className="mx-auto block"
-            />
-          </Section>
+          <Logo />
 
           {/* Main Content Container */}
           <Container className="mx-auto bg-white px-5">
