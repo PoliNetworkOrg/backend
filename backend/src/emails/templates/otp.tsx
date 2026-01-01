@@ -25,8 +25,10 @@ const OtpEmail: React.FC<Readonly<Props>> = ({ otp, expiresInMinutes }) => {
   return (
     <Html>
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
-        <Head />
-        <Preview>Your PoliNetwork verification code: {otp}</Preview>
+        <Head>
+          <meta name="format-detection" content="telephone=no" />
+        </Head>
+        <Preview>Your verification code is: {otp}</Preview>
 
         <Body className="m-0 bg-white p-0 font-sans text-base leading-normal">
           <Logo />

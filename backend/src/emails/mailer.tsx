@@ -1,5 +1,11 @@
 import { sendEmail } from "@/azure/functions"
+import OtpEmail from "./templates/otp"
 import Welcome from "./templates/welcome"
+
+export async function sendLoginOtpEmail(toAddress: string, otp: string) {
+  const subject = `${otp} is your login code`
+  await sendEmail(toAddress, subject, <OtpEmail otp={otp} />)
+}
 
 export async function sendWelcomeEmail(
   toAddress: string,
