@@ -4,7 +4,7 @@ import Welcome from "./templates/welcome"
 
 export async function sendLoginOtpEmail(toAddress: string, otp: string) {
   const subject = `${otp} is your login code`
-  await sendEmail(toAddress, subject, <OtpEmail otp={otp} />)
+  return sendEmail(toAddress, subject, <OtpEmail otp={otp} />)
 }
 
 export async function sendWelcomeEmail(
@@ -13,7 +13,7 @@ export async function sendWelcomeEmail(
   memberInfo: { firstName: string; assocNumber: number },
   subject: string = "Welcome to PoliNetwork"
 ) {
-  await sendEmail(
+  return sendEmail(
     toAddress,
     subject,
     <Welcome

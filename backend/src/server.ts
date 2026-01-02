@@ -47,7 +47,6 @@ app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
 
-// enable if need testing
 app.post(
   "/test/welcome-email",
   zValidator(
@@ -58,22 +57,16 @@ app.post(
     if (env.NODE_ENV === "production") return c.status(500)
 
     const { toAddress, firstName, lastName, assocNumber } = c.req.valid("json")
-    try {
-      await sendWelcomeEmail(
-        toAddress,
-        {
-          // temporary, just for test
-          email: `${firstName.split(" ").join("").toLowerCase()}.${lastName.split(" ").join("").toLowerCase()}@polinetwork.org`,
-          password: "R@123123123123as",
-        },
-        { firstName, assocNumber }
-      )
-      return c.json({ sent: true, err: null })
-    } catch (err) {
-      c.status(500)
-      logger.error({ err }, "ERROR in /test-email route")
-      return c.json({ sent: false, err })
-    }
+    const sent = await sendWelcomeEmail(
+      toAddress,
+      {
+        // temporary, just for test
+        email: `${firstName.split(" ").join("").toLowerCase()}.${lastName.split(" ").join("").toLowerCase()}@polinetwork.org`,
+        password: "R@123123123123as",
+      },
+      { firstName, assocNumber }
+    )
+    return c.json({ sent })
   }
 )
 
