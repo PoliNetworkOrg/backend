@@ -35,7 +35,7 @@ export async function sendEmail(to: string, subject: string, component: JSX.Elem
   const base64Encoded = mimeMessage.toString("base64")
 
   try {
-    client.api(`/users/${sender}/sendMail`).header("Content-Type", "text/plain").post(base64Encoded)
+    await client.api(`/users/${sender}/sendMail`).header("Content-Type", "text/plain").post(base64Encoded)
     logger.info({ subject, to }, "[Azure Graph API] Email sent")
 
     // localTransporter
