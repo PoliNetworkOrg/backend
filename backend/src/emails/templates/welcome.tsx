@@ -5,7 +5,6 @@ import {
   Head,
   Heading,
   Html,
-  Img,
   Link,
   Preview,
   pixelBasedPreset,
@@ -14,7 +13,9 @@ import {
   Tailwind,
   Text,
 } from "@react-email/components"
-import type React from "react"
+import { Footer } from "../components/footer"
+import { Logo } from "../components/logo"
+import type { EmailTemplate } from "../types"
 
 type Props = {
   firstName: string
@@ -23,7 +24,7 @@ type Props = {
   password: string
 }
 
-const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
+const WelcomeEmail: EmailTemplate<Props> = (props) => {
   return (
     <Html>
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
@@ -31,19 +32,10 @@ const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
         <Preview>Congratulations! You joined PoliNetwork APS...</Preview>
 
         <Body className="m-0 bg-white p-0 font-sans text-base leading-normal">
-          {/* Logo Section */}
-          <Section className="py-10 text-center">
-            <Img
-              src="https://raw.githubusercontent.com/PoliNetworkOrg/Logo/a1e02bf150ac0b3c734a629901eada79fb4fd762/Logo.svg"
-              width="100"
-              height="100"
-              alt="PoliNetwork APS Logo"
-              className="mx-auto block"
-            />
-          </Section>
+          <Logo />
 
           {/* Main Content Container */}
-          <Container className="mx-auto max-w-[600px] bg-white px-5">
+          <Container className="mx-auto bg-white px-5">
             <Heading className="m-0 text-center text-2xl font-bold leading-8">
               Welcome to <span className="whitespace-nowrap">PoliNetwork APS</span>
             </Heading>
@@ -63,7 +55,7 @@ const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
                 , enter the following credentials and follow the onboarding.
               </Text>
 
-              <Section className="py-4 px-2 bg-blue-100 rounded-md">
+              <Section className="p-4 bg-blue-100 rounded-md">
                 <Row>
                   <EmailWithoutHref email={props.email} />
                 </Row>
@@ -93,12 +85,7 @@ const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
             </Section>
           </Container>
 
-          {/* Footer */}
-          <Section className="pb-10 pt-5 text-center">
-            <Link href="https://polinetwork.org" className="text-xs text-gray-400 underline">
-              PoliNetwork APS
-            </Link>
-          </Section>
+          <Footer />
         </Body>
       </Tailwind>
     </Html>
@@ -118,12 +105,11 @@ const EmailWithoutHref = ({ email }: { email: string }) => {
   )
 }
 
-// @ts-expect-error idk how to make this work rn
 WelcomeEmail.PreviewProps = {
   firstName: "Mario",
   email: "mario.rossi@polinetwork.org",
   password: "R@123456789012ab",
   assocNum: 12,
-} satisfies Props
+}
 
 export default WelcomeEmail

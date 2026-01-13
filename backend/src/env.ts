@@ -35,12 +35,11 @@ export const env = createEnv({
     DB_PASS: z.string().min(1),
     DB_NAME: z.string().min(3).default("polinetwork_backend"),
 
-    // smtp server for automatic email send
-    SMTP_HOST: z.string().default("smtp.azurecomm.net"),
-    SMTP_PORT: z.coerce.number().min(1).max(65535).default(587),
-    SMTP_USER: z.email().default("noreply@polinetwork.org"),
-    SMTP_PASS: z.string(),
-    SMTP_TLS_VERSION: z.enum(["TLSv1.3", "TLSv1.2", "TLSv1.1", "TLSv1"]).default("TLSv1.2"),
+    // Azure
+    AZURE_TENANT_ID: z.string(),
+    AZURE_CLIENT_ID: z.string(),
+    AZURE_CLIENT_SECRET: z.string(),
+    AZURE_EMAIL_SENDER: z.email().default("noreply@polinetwork.org"),
 
     // env config
     NODE_ENV: z.enum(["development", "production"]).default("development"),

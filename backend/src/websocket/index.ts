@@ -31,8 +31,10 @@ export class WebSocketServer {
     })
   }
 
-  close() {
-    this.io.close()
+  close(): Promise<Error | null> {
+    return new Promise((res) => {
+      this.io.close((err) => res(err ?? null))
+    })
   }
 
   async ban(userId: number, chatId: number, durationInSeconds?: number): Promise<boolean> {

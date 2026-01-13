@@ -1,14 +1,15 @@
 import { serve } from "@hono/node-server"
 import { trpcServer } from "@hono/trpc-server"
+import { zValidator } from "@hono/zod-validator"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger as loggerMiddlware } from "hono/logger"
+import z from "zod"
 import { auth } from "./auth"
 import { AUTH_PATH, TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
-// import { sendEmail } from "./emails"
-// import WelcomeEmail from "./emails/templates/welcome"
+import { sendWelcomeEmail } from "./emails/mailer"
 import { env } from "./env"
 import { logger } from "./logger"
 import { appRouter } from "./routers"
@@ -45,24 +46,29 @@ app.use(
 app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
-// enable if need testing
-// app.post("/test-email", async (c) => {
-//   if (env.NODE_ENV === "production") return c.status(500)
-//
-//   await sendEmail({
-//     to: "@mail.polimi.it",
-//     subject: "Welcome to PoliNetwork",
-//     email: WelcomeEmail,
-//     props: {
-//       email: "@polinetwork.org",
-//       password: "R@123123123123as",
-//       assocNum: 69,
-//       firstName: "",
-//     },
-//     forceProd: true,
-//   })
-//   return c.text("Success!")
-// })
+
+app.post(
+  "/test/welcome-email",
+  zValidator(
+    "json",
+    z.object({ toAddress: z.email(), firstName: z.string(), lastName: z.string(), assocNumber: z.number() })
+  ),
+  async (c) => {
+    if (env.NODE_ENV === "production") return c.status(500)
+
+    const { toAddress, firstName, lastName, assocNumber } = c.req.valid("json")
+    const sent = await sendWelcomeEmail(
+      toAddress,
+      {
+        // temporary, just for test
+        email: `${firstName.split(" ").join("").toLowerCase()}.${lastName.split(" ").join("").toLowerCase()}@polinetwork.org`,
+        password: "R@123123123123as",
+      },
+      { firstName, assocNumber }
+    )
+    return c.json({ sent })
+  }
+)
 
 const server = serve({ port: env.PORT, hostname: "0.0.0.0", fetch: app.fetch }, (addr) =>
   logger.info(`Server running on ${addr.address}:${addr.port}`)
@@ -71,15 +77,32 @@ const server = serve({ port: env.PORT, hostname: "0.0.0.0", fetch: app.fetch }, 
 export const WSS = new WebSocketServer(server, WS_PATH)
 
 // Graceful shutdown for hot-reloading
-const shutdown = () => {
-  logger.info("Shutting down server...")
-  WSS.close()
-  server.close()
+let isShuttingDown = false
+const shutdown = async () => {
+  if (isShuttingDown) return
+
+  isShuttingDown = true
+  logger.info("[SERVER] Received shutdown signal, shutting down...")
+
+  const err = await WSS.close()
+  if (err) {
+    logger.error({ err }, "[SERVER] Shutdown error on WebSocketServer")
+    process.exit(1)
+  }
+
+  logger.info("[SERVER] Shutdown completed")
   process.exit(0)
 }
 
 process.on("SIGTERM", shutdown)
 process.on("SIGINT", shutdown)
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "!!! Uncaught Exception")
+})
+
+process.on("unhandledRejection", (err) => {
+  logger.error({ err }, "!!! Unhandled Rejection")
+})
 
 await Promise.race([
   DB.select().from(SCHEMA.TG.test),
