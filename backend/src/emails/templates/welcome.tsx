@@ -13,9 +13,9 @@ import {
   Tailwind,
   Text,
 } from "@react-email/components"
-import type React from "react"
 import { Footer } from "../components/footer"
 import { Logo } from "../components/logo"
+import type { EmailTemplate } from "../types"
 
 type Props = {
   firstName: string
@@ -24,7 +24,7 @@ type Props = {
   password: string
 }
 
-const WelcomeEmail: React.FC<Readonly<Props>> = (props) => {
+const WelcomeEmail: EmailTemplate<Props> = (props) => {
   return (
     <Html>
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
@@ -105,12 +105,11 @@ const EmailWithoutHref = ({ email }: { email: string }) => {
   )
 }
 
-// @ts-expect-error idk how to make this work rn
 WelcomeEmail.PreviewProps = {
   firstName: "Mario",
   email: "mario.rossi@polinetwork.org",
   password: "R@123456789012ab",
   assocNum: 12,
-} satisfies Props
+}
 
 export default WelcomeEmail

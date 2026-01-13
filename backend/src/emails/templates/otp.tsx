@@ -11,9 +11,9 @@ import {
   Tailwind,
   Text,
 } from "@react-email/components"
-import type React from "react"
 import { Footer } from "../components/footer"
 import { Logo } from "../components/logo"
+import type { EmailTemplate } from "../types"
 
 type Props = {
   otp: string
@@ -21,7 +21,7 @@ type Props = {
   // type: "LOGIN" // use it to differentiate OTPs
 }
 
-const OtpEmail: React.FC<Readonly<Props>> = ({ otp, expiresInMinutes }) => {
+const OtpEmail: EmailTemplate<Props> = ({ otp, expiresInMinutes }) => {
   return (
     <Html>
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
@@ -66,10 +66,9 @@ const OtpEmail: React.FC<Readonly<Props>> = ({ otp, expiresInMinutes }) => {
   )
 }
 
-// @ts-expect-error idk how to make this work rn
 OtpEmail.PreviewProps = {
   otp: "123456",
   expiresInMinutes: 10,
-} satisfies Props
+}
 
 export default OtpEmail

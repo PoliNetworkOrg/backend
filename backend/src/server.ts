@@ -82,16 +82,16 @@ const shutdown = async () => {
   if (isShuttingDown) return
 
   isShuttingDown = true
-  logger.info("[SERVER] Recieved shutdown signal, shutting down...")
-  await WSS.close((err) => {
-    if (err) {
-      logger.error({ err }, "[SERVER] Shutdown error")
-      process.exit(1)
-    }
+  logger.info("[SERVER] Received shutdown signal, shutting down...")
 
-    logger.info("[SERVER] Shutdown completed")
-    process.exit(0)
-  })
+  const err = await WSS.close()
+  if (err) {
+    logger.error({ err }, "[SERVER] Shutdown error on WebSocketServer")
+    process.exit(1)
+  }
+
+  logger.info("[SERVER] Shutdown completed")
+  process.exit(0)
 }
 
 process.on("SIGTERM", shutdown)
