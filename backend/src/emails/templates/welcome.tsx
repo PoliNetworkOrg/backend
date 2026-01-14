@@ -94,7 +94,8 @@ const WelcomeEmail: EmailTemplate<Props> = (props) => {
 
 const EmailWithoutHref = ({ email }: { email: string }) => {
   const [user, domain] = email.split("@")
-  const [domainName, domainTld] = domain.split(".")
+  const [domainName, ...domainTldParts] = domain.split(".")
+  const domainTld = domainTldParts.join(".")
   if (!domain || !domainTld) return <CodeInline className="break-all text-xs sm:text-sm">{email}</CodeInline> // fallback if something goes wrong
   return (
     <CodeInline className="break-all text-xs sm:text-sm">
