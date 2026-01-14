@@ -12,7 +12,7 @@ export async function sendEmail(to: string, subject: string, component: JSX.Elem
       { selector: '*[style*="display:none"i]', format: "skip" }, // prevent duplicate text
     ],
   })
-  const sender = env.AZURE_EMAIL_SENDER
+  const sender = encodeURIComponent(env.AZURE_EMAIL_SENDER)
 
   // To send multipart emails (both HTML and plain text) with Microsoft Graph API,
   // we need to send raw MIME content.
