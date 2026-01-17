@@ -11,7 +11,7 @@ export interface SocketData {
   connectedAt: Date
 }
 
-export class WebsocketServer {
+export class WebSocketServer {
   private io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
 
   constructor(httpServer: ServerType, path: string = "/ws") {
@@ -28,6 +28,12 @@ export class WebsocketServer {
       } else {
         logger.info("[WS] Generic socket connected")
       }
+    })
+  }
+
+  close(): Promise<Error | null> {
+    return new Promise((res) => {
+      this.io.close((err) => res(err ?? null))
     })
   }
 
