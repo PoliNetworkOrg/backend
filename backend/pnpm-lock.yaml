@@ -13,13 +13,13 @@ importers:
         version: 4.13.0
       '@hono/node-server':
         specifier: ^1.19.4
-        version: 1.19.4(hono@4.9.8)
+        version: 1.19.4(hono@4.11.4)
       '@hono/trpc-server':
         specifier: ^0.4.0
-        version: 0.4.0(@trpc/server@11.5.1(typescript@5.9.2))(hono@4.9.8)
+        version: 0.4.0(@trpc/server@11.5.1(typescript@5.9.2))(hono@4.11.4)
       '@hono/zod-validator':
         specifier: ^0.7.6
-        version: 0.7.6(hono@4.9.8)(zod@4.1.11)
+        version: 0.7.6(hono@4.11.4)(zod@4.1.11)
       '@microsoft/microsoft-graph-client':
         specifier: ^3.0.7
         version: 3.0.7(@azure/identity@4.13.0)
@@ -42,8 +42,8 @@ importers:
         specifier: ^0.44.5
         version: 0.44.5(@types/pg@8.15.5)(kysely@0.28.7)(pg@8.16.3)
       hono:
-        specifier: ^4.9.8
-        version: 4.9.8
+        specifier: ^4.11.4
+        version: 4.11.4
       node-html-parser:
         specifier: ^7.0.1
         version: 7.0.1
@@ -2030,8 +2030,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.9.8:
-    resolution: {integrity: sha512-JW8Bb4RFWD9iOKxg5PbUarBYGM99IcxFl2FPBo2gSJO11jjUDqlP1Bmfyqt8Z/dGhIQ63PMA9LdcLefXyIasyg==}
+  hono@4.11.4:
+    resolution: {integrity: sha512-U7tt8JsyrxSRKspfhtLET79pU8K+tInj5QZXs1jSugO1Vq5dFj3kmZsRldo29mTBfcjDRVRXrEZ6LS63Cog9ZA==}
     engines: {node: '>=16.9.0'}
 
   html-to-text@9.0.5:
@@ -2262,7 +2262,6 @@ packages:
   next@15.5.2:
     resolution: {integrity: sha512-H8Otr7abj1glFhbGnvUt3gz++0AF1+QoCXEBmd/6aKbfdFwrn0LpA836Ed5+00va/7HQSDD+mOoVhn3tNy3e/Q==}
     engines: {node: ^18.18.0 || ^19.8.0 || >= 20.0.0}
-    deprecated: This version has a security vulnerability. Please upgrade to a patched version. See https://nextjs.org/blog/CVE-2025-66478 for more details.
     hasBin: true
     peerDependencies:
       '@opentelemetry/api': ^1.1.0
@@ -3590,18 +3589,18 @@ snapshots:
 
   '@hexagon/base64@1.1.28': {}
 
-  '@hono/node-server@1.19.4(hono@4.9.8)':
+  '@hono/node-server@1.19.4(hono@4.11.4)':
     dependencies:
-      hono: 4.9.8
+      hono: 4.11.4
 
-  '@hono/trpc-server@0.4.0(@trpc/server@11.5.1(typescript@5.9.2))(hono@4.9.8)':
+  '@hono/trpc-server@0.4.0(@trpc/server@11.5.1(typescript@5.9.2))(hono@4.11.4)':
     dependencies:
       '@trpc/server': 11.5.1(typescript@5.9.2)
-      hono: 4.9.8
+      hono: 4.11.4
 
-  '@hono/zod-validator@0.7.6(hono@4.9.8)(zod@4.1.11)':
+  '@hono/zod-validator@0.7.6(hono@4.11.4)(zod@4.1.11)':
     dependencies:
-      hono: 4.9.8
+      hono: 4.11.4
       zod: 4.1.11
 
   '@img/colour@1.0.0':
@@ -4856,7 +4855,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.9.8: {}
+  hono@4.11.4: {}
 
   html-to-text@9.0.5:
     dependencies:
