@@ -1,9 +1,12 @@
 import { sendEmail } from "@/azure/functions"
+import { env } from "@/env"
 import OtpEmail from "./templates/otp"
 import Welcome from "./templates/welcome"
 
+const makeSubject = (subject: string) => (env.NODE_ENV === "development" ? `[DEV] ${subject}` : subject)
+
 export async function sendLoginOtpEmail(toAddress: string, otp: string) {
-  const subject = `Your login code for PoliNetwork`
+  const subject = makeSubject("Your login code for PoliNetwork")
   return sendEmail(toAddress, subject, <OtpEmail otp={otp} />)
 }
 
@@ -12,7 +15,7 @@ export async function sendWelcomeEmail(
   accountCredentials: { email: string; password: string },
   memberInfo: { firstName: string; assocNumber: number }
 ) {
-  const subject = `Welcome to PoliNetwork!`
+  const subject = makeSubject("Welcome to PoliNetwork!")
   return sendEmail(
     toAddress,
     subject,
