@@ -1,5 +1,5 @@
 import { render, toPlainText } from "@react-email/components"
-import MailComposer from "nodemailer/lib/mail-composer"
+import MailComposer from "nodemailer/lib/mail-composer/index.js"
 import type { JSX } from "react"
 import { env } from "@/env"
 import { logger } from "@/logger"

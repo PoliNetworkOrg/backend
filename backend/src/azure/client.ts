@@ -1,6 +1,6 @@
 import { ClientSecretCredential } from "@azure/identity"
 import { Client, type GraphError } from "@microsoft/microsoft-graph-client"
-import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials"
+import { TokenCredentialAuthenticationProvider } from "@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials/index.js"
 import type { Organization } from "@microsoft/microsoft-graph-types"
 import { env } from "@/env"
 import { logger } from "@/logger"
