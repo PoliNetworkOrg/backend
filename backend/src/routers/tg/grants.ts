@@ -75,10 +75,10 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       try {
         // get current permissions of adder and target
-        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.userId)).limit(1)
+        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.adderId)).limit(1)
 
         // check if adder is not in permission table or doesn't have permissions
-        if (!q?.length || q[0].roles.some((a) => CAN_MANAGE_GRANTS.includes(a)))
+        if (!q || q.length !== 1 || q[0].roles.every((a) => !CAN_MANAGE_GRANTS.includes(a)))
           return { success: false, error: "UNAUTHORIZED" }
 
         const now = new Date()
@@ -142,10 +142,10 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       try {
         // get current permissions of adder
-        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.userId)).limit(1)
+        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.interruptedById)).limit(1)
 
         // check if adder is not in permission table or doesn't have permissions
-        if (!q?.length || q[0].roles.some((a) => CAN_MANAGE_GRANTS.includes(a)))
+        if (!q || q.length !== 1 || q[0].roles.every((a) => !CAN_MANAGE_GRANTS.includes(a)))
           return { success: false, error: "UNAUTHORIZED" }
 
         const now = new Date()
