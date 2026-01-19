@@ -5,9 +5,9 @@ import Welcome from "./templates/welcome"
 
 const makeSubject = (subject: string) => (env.NODE_ENV === "development" ? `[DEV] ${subject}` : subject)
 
-export async function sendLoginOtpEmail(toAddress: string, otp: string) {
+export async function sendLoginOtpEmail(toAddress: string, otp: string, expiresInMinutes?: number) {
   const subject = makeSubject("Your login code for PoliNetwork")
-  return sendEmail(toAddress, subject, <OtpEmail otp={otp} />)
+  return sendEmail(toAddress, subject, <OtpEmail otp={otp} expiresInMinutes={expiresInMinutes} />)
 }
 
 export async function sendWelcomeEmail(
