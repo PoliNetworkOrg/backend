@@ -1,6 +1,6 @@
 import crypto from "node:crypto"
 import type { BetterAuthPlugin } from "better-auth"
-import { createAuthEndpoint, sessionMiddleware } from "better-auth/api"
+import { APIError, createAuthEndpoint, sessionMiddleware } from "better-auth/api"
 import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
@@ -41,7 +41,7 @@ export const telegramPlugin = () => {
         async (ctx) => {
           const userId = ctx.context.session?.user.id
           if (!userId)
-            return ctx.error("UNAUTHORIZED", {
+            throw new APIError("UNAUTHORIZED", {
               message: "You must be authenticated",
             })
 
@@ -75,7 +75,7 @@ export const telegramPlugin = () => {
         async (ctx) => {
           const userId = ctx.context.session?.user.id
           if (!userId)
-            return ctx.error("UNAUTHORIZED", {
+            throw new APIError("UNAUTHORIZED", {
               message: "You must be authenticated",
             })
 
@@ -84,14 +84,14 @@ export const telegramPlugin = () => {
             .from(SCHEMA.TG.link)
             .where((t) => eq(t.code, code))
           if (!res || res.length !== 1)
-            return ctx.error("NOT_FOUND", {
+            throw new APIError("NOT_FOUND", {
               message: "No link session with this code found",
             })
 
           const row = res[0]
 
           if (row.userId !== userId)
-            return ctx.error("FORBIDDEN", {
+            throw new APIError("FORBIDDEN", {
               message: "This link session does not belong to you",
             })
 
