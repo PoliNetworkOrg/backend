@@ -26,7 +26,11 @@ Requirements:
    bun install
    ```
 2. Setup environment variables (use `.env.example` and `./src/env.ts` for reference)
-3. Run the server
+3. Run the DB migration
+   ```sh
+   bun db:migrate
+   ```
+4. Run the server
    ```sh
    bun dev
    ```
