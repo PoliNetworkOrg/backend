@@ -28,10 +28,6 @@ export const env = createEnv({
       .min(64)
       .max(1024),
 
-    // auth providers
-    GITHUB_CLIENT_ID: z.string(),
-    GITHUB_CLIENT_SECRET: z.string(),
-
     // main postgres db
     DB_HOST: z.string().min(1),
     DB_PORT: z.coerce.number().min(1).max(65535).default(5432),

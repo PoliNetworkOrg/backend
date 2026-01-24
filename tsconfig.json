@@ -1,5 +1,5 @@
 {
-  "extends": "../tsconfig.base.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
     "paths": {
@@ -9,6 +9,6 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist", "lib"]
+  "exclude": ["node_modules", "dist", "lib", "package"]
 }
 

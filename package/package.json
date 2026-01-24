@@ -28,7 +28,7 @@
     }
   },
   "scripts": {
-    "build": "shx rm -rf ./dist && cd ../backend && bun install && bun run build:npm && cd ../package && shx cp -r ../backend/lib dist",
+    "build": "cd .. && bun install && bun run build:npm",
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {

@@ -14,11 +14,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - name: Install Dependencies
-        working-directory: backend
         run: bun install --frozen-lockfile
       - name: Typecheck
-        working-directory: backend
         run: bun run typecheck
       - name: Run Biome
-        working-directory: backend
         run: bun run biome ci .

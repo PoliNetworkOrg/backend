@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { env } from "@/env"
+import { logger } from "@/logger"
 import { schema } from "./schema"
 
 export const db = drizzle({
@@ -16,3 +17,5 @@ export const db = drizzle({
 })
 
 await migrate(db, { migrationsFolder: "./drizzle" })
+  .then(() => logger.info("[DB] Migration completed"))
+  .catch(() => logger.error("[DB] Migration error"))

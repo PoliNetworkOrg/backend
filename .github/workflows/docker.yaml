@@ -29,7 +29,6 @@ jobs:
       - name: Build the Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./backend/
           platforms: linux/amd64
           push: true
           tags: ghcr.io/polinetworkorg/backend:latest
