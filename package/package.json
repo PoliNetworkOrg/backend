@@ -1,6 +1,6 @@
 {
   "name": "@polinetwork/backend",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Utils to interact with the backend.",
   "repository": {
     "type": "git",
