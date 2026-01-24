@@ -16,8 +16,9 @@ Requirements:
 - Bun installed
 - A Postgres database
 - An Azure App Registration
-  NOTE: you can skip this by making `AZURE_*` env optional in `./src/env.ts`
-  and by removing all Azure related auth in `./src/azure/`
+  > [!NOTE]
+  > You can skip Azure by making `AZURE_*` env vars optional in `./src/env.ts`
+  > and by removing all Azure related auth in `./src/azure/`
 
 1. Install packages
    ```sh
