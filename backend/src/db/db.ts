@@ -1,4 +1,5 @@
-import { drizzle } from "drizzle-orm/node-postgres"
+import { drizzle } from "drizzle-orm/bun-sql"
+import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { env } from "@/env"
 import { schema } from "./schema"
 
@@ -13,3 +14,5 @@ export const db = drizzle({
   },
   schema,
 })
+
+await migrate(db, { migrationsFolder: "./drizzle" })

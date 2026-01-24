@@ -1,10 +1,15 @@
-FROM node:24-slim AS base
-COPY . /app
+FROM oven/bun:1-alpine AS base
 WORKDIR /app
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
-RUN pnpm run build
+
+FROM base AS install
+WORKDIR /build
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+COPY . .
+RUN bun run build
+
+FROM base AS release
+COPY --from=build /build/dist ./
+USER bun
 EXPOSE 3000
-CMD ["sh","-c", "pnpm run db:migrate && pnpm run start"]
+ENTRYPOINT ["bun", "run", "server.js"]

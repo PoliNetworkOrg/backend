@@ -1,4 +1,3 @@
-import { serve } from "@hono/node-server"
 import { trpcServer } from "@hono/trpc-server"
 import { zValidator } from "@hono/zod-validator"
 import { Hono } from "hono"
@@ -13,12 +12,21 @@ import { sendWelcomeEmail } from "./emails/mailer"
 import { env } from "./env"
 import { logger } from "./logger"
 import { appRouter } from "./routers"
-import { WebSocketServer } from "./websocket"
+import { WebSocketServer, engine as wssEngine } from "./websocket"
 
+export const WSS = new WebSocketServer()
 const app = new Hono()
-const isDev = env.NODE_ENV === "development"
-logger.debug(`isDev ${isDev ? "YES" : "NO"}`)
-if (isDev) {
+
+const server = Bun.serve({
+  port: env.PORT,
+  ...wssEngine.handler(),
+  fetch: app.fetch,
+})
+
+logger.info(`Server running on ${server.url}`)
+logger.debug({ valueFromT3: env.NODE_ENV, valueFromProcess: process.env.NODE_ENV ?? "undefined" }, "NODE_ENV")
+
+if (env.NODE_ENV === "development") {
   app.use(loggerMiddlware((msg, ...str) => logger.debug(str.length ? { props: str } : undefined, msg)))
 }
 
@@ -70,11 +78,9 @@ app.post(
   }
 )
 
-const server = serve({ port: env.PORT, hostname: "0.0.0.0", fetch: app.fetch }, (addr) =>
-  logger.info(`Server running on ${addr.address}:${addr.port}`)
-)
-
-export const WSS = new WebSocketServer(server, WS_PATH)
+app.all(`${WS_PATH}/`, (c) => {
+  return wssEngine.handleRequest(c.req.raw, server)
+})
 
 // Graceful shutdown for hot-reloading
 let isShuttingDown = false

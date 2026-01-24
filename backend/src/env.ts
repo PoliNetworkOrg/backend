@@ -3,6 +3,10 @@ import { z } from "zod"
 import { TRUSTED_ORIGINS } from "./constants"
 
 const PORT = 3000
+const NODE_ENV = z.enum(["development", "production", "test"])
+const nodeEnv: z.infer<typeof NODE_ENV> = process.env.NODE_ENV
+  ? (process.env.NODE_ENV as z.infer<typeof NODE_ENV>)
+  : "development"
 
 // coerce is needed for non-string values, because k8s supports only string env
 export const env = createEnv({
@@ -42,7 +46,7 @@ export const env = createEnv({
     AZURE_EMAIL_SENDER: z.email().default("noreply@polinetwork.org"),
 
     // env config
-    NODE_ENV: z.enum(["development", "production"]).default("development"),
+    NODE_ENV: NODE_ENV.default(nodeEnv),
     LOG_LEVEL: z.string().default("DEBUG"),
   },
 
