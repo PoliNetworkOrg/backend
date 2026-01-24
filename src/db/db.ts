@@ -18,4 +18,7 @@ export const db = drizzle({
 
 await migrate(db, { migrationsFolder: "./drizzle" })
   .then(() => logger.info("[DB] Migration completed"))
-  .catch(() => logger.error("[DB] Migration error"))
+  .catch((err) => {
+    logger.error({ err }, "[DB] Migration error")
+    throw err
+  })
