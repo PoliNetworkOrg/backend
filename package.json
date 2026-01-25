@@ -44,7 +44,7 @@
     "@hono/zod-validator": "^0.7.6",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@react-email/components": "1.0.2",
-    "@socket.io/bun-engine": "^0.1.0",
+    "@socket.io/bun-engine": "~0.1.0",
     "@t3-oss/env-core": "^0.13.8",
     "@trpc/server": "11.5.1",
     "better-auth": "^1.4.15",
