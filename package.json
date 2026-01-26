@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
+    "@better-auth/passkey": "^1.4.17",
     "@hono/trpc-server": "^0.4.2",
     "@hono/zod-validator": "^0.7.6",
     "@microsoft/microsoft-graph-client": "^3.0.7",

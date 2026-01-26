@@ -27,7 +27,7 @@ export default createTRPCRouter({
 
         await DB.update(s).set({ telegramId }).where(eq(s.code, code))
 
-        const u = SCHEMA.AUTH.users
+        const u = SCHEMA.AUTH.user
         await DB.update(u) // update the auth.user table
           .set({ telegramId, telegramUsername })
           .where(eq(u.id, userId))
