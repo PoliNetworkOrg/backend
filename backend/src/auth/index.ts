@@ -4,13 +4,14 @@ import { AUTH_PATH } from "@/constants"
 import { SCHEMA } from "@/db"
 import { db } from "@/db/db"
 import { env } from "@/env"
+import { emailOTP } from "./plugins/email-otp"
 import { telegramPlugin } from "./plugins/telegram"
 
 export const auth = betterAuth({
   basePath: AUTH_PATH,
   baseURL: env.PUBLIC_URL,
   trustedOrigins: env.TRUSTED_ORIGINS,
-  plugins: [telegramPlugin()],
+  plugins: [telegramPlugin(), emailOTP()],
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
@@ -38,11 +39,5 @@ export const auth = betterAuth({
   cookieCache: {
     enabled: true,
     maxAge: 5 * 60, // Cache duration in seconds
-  },
-  socialProviders: {
-    github: {
-      clientId: env.GITHUB_CLIENT_ID,
-      clientSecret: env.GITHUB_CLIENT_SECRET,
-    },
   },
 })
