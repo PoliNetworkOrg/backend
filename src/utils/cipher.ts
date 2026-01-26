@@ -35,10 +35,10 @@ export class Cipher {
    * Encrypts a string with aes-256-gcm.
    *
    * @param text The message content to encrypt.
-   * @returns A promise that resolves with the encrypted string (hexadecimal).
+   * @returns The encrypted string (hexadecimal).
    * @throws Error if encryption fails
    */
-  async encrypt(text: string): Promise<string> {
+  encrypt(text: string): string {
     if (!text) return "" // Handle empty strings gracefully
 
     const iv = randomBytes(IV_SIZE)
@@ -59,10 +59,10 @@ export class Cipher {
    * Decrypts an encrypted string.
    *
    * @param encryptedPayload The encrypted content string (hexadecimal).
-   * @returns A promise that resolves with the decrypted message content.
+   * @returns The decrypted message content.
    * @throws Error if decryption fails.
    */
-  async decrypt(encryptedPayload: string): Promise<string> {
+  decrypt(encryptedPayload: string): string {
     if (!encryptedPayload) {
       return "" // Handle empty strings gracefully
     }

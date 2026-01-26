@@ -1,6 +1,6 @@
 {
   "name": "@polinetwork/backend",
-  "version": "0.14.0",
+  "version": "0.15.2",
   "description": "Utils to interact with the backend.",
   "repository": {
     "type": "git",
@@ -28,18 +28,10 @@
     }
   },
   "scripts": {
-    "build": "rimraf ./dist && cd ../backend && pnpm install && pnpm run build:npm && cd ../package && copyfiles -u 3 ../backend/lib/* dist",
-    "prepublishOnly": "pnpm run build"
+    "build": "cd .. && bun install && bun run build:npm",
+    "prepublishOnly": "bun run build"
   },
   "devDependencies": {
-    "copyfiles": "^2.4.1",
-    "rimraf": "^6.0.1",
-    "tsup": "^8.5.0",
     "typescript": "^5.9.2"
-  },
-  "engines": {
-    "pnpm": ">=10.17.1",
-    "node": ">=24.8.0"
-  },
-  "packageManager": "pnpm@10.17.1"
+  }
 }

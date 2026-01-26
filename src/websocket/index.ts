@@ -1,4 +1,4 @@
-import type { ServerType } from "@hono/node-server"
+import { Server as Engine } from "@socket.io/bun-engine"
 import { Server as SocketIOServer } from "socket.io"
 import { logger } from "@/logger"
 import type * as Telegram from "./telegram"
@@ -11,15 +11,14 @@ export interface SocketData {
   connectedAt: Date
 }
 
+export const engine = new Engine()
+
 export class WebSocketServer {
   private io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
 
-  constructor(httpServer: ServerType, path: string = "/ws") {
-    this.io = new SocketIOServer(httpServer, {
-      path,
-      // TODO: implement SuperJSON parser
-      serveClient: false,
-    })
+  constructor() {
+    this.io = new SocketIOServer()
+    this.io.bind(engine)
 
     this.io.on("connection", (s) => {
       if ("type" in s.handshake.query && s.handshake.query.type === "telegram") {

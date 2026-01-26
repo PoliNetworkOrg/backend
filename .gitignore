@@ -23,6 +23,5 @@ db.sqlite
 **/.pnp
 .pnp.js
 **/dist
-**/lib
 
 /coverage

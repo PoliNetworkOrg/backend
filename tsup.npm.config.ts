@@ -4,10 +4,10 @@ import { defineConfig } from "tsup";
 // which build the npm package
 
 export default defineConfig({
-  entry: ["src/server.ts"],
-  outDir: "./dist",
-  dts: false,
-  format: ["esm"],
+  entry: ["src/index.ts"],
+  outDir: "./package/dist",
+  dts: true,
+  format: ["cjs", "esm"],
   clean: true,
   splitting: false,
   sourcemap: true,
