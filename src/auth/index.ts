@@ -16,17 +16,14 @@ export const auth = betterAuth({
     telegramPlugin(),
     emailOTP(),
     passkey({
-      rpID: "polinetwork.org",
+      rpID: env.NODE_ENV === "production" ? "polinetwork.org" : "localhost",
       rpName: "PoliNetwork APS",
     }),
   ],
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
-      user: SCHEMA.AUTH.user,
-      account: SCHEMA.AUTH.account,
-      session: SCHEMA.AUTH.session,
-      verification: SCHEMA.AUTH.verification,
+      ...SCHEMA.AUTH,
     },
   }),
   advanced:
