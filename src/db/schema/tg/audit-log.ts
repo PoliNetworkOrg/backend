@@ -4,8 +4,10 @@ import { createTable } from "../create-table"
 
 export const AUDIT_TYPE = {
   BAN: "ban",
+  UNBAN: "unban",
   KICK: "kick",
   MUTE: "mute",
+  UNMUTE: "unmute",
   BAN_ALL: "ban_all",
   MUTE_ALL: "mute_all",
 } as const
@@ -13,8 +15,10 @@ export type TAuditType = (typeof AUDIT_TYPE)[keyof typeof AUDIT_TYPE]
 
 export const ARRAY_AUDIT_TYPE = [
   AUDIT_TYPE.BAN,
+  AUDIT_TYPE.UNBAN,
   AUDIT_TYPE.KICK,
   AUDIT_TYPE.MUTE,
+  AUDIT_TYPE.UNMUTE,
   AUDIT_TYPE.BAN_ALL,
   AUDIT_TYPE.MUTE_ALL,
 ] as const
