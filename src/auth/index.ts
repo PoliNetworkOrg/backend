@@ -1,3 +1,4 @@
+import { passkey } from "@better-auth/passkey"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { AUTH_PATH } from "@/constants"
@@ -11,14 +12,18 @@ export const auth = betterAuth({
   basePath: AUTH_PATH,
   baseURL: env.PUBLIC_URL,
   trustedOrigins: env.TRUSTED_ORIGINS,
-  plugins: [telegramPlugin(), emailOTP()],
+  plugins: [
+    telegramPlugin(),
+    emailOTP(),
+    passkey({
+      rpID: env.NODE_ENV === "production" ? "polinetwork.org" : "localhost",
+      rpName: "PoliNetwork APS",
+    }),
+  ],
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
-      user: SCHEMA.AUTH.users,
-      account: SCHEMA.AUTH.accounts,
-      session: SCHEMA.AUTH.sessions,
-      verification: SCHEMA.AUTH.verifications,
+      ...SCHEMA.AUTH,
     },
   }),
   advanced:
