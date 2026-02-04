@@ -13,6 +13,7 @@ import { env } from "./env"
 import { logger } from "./logger"
 import { appRouter } from "./routers"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
+import { getMembers } from "./azure/functions"
 
 export const WSS = new WebSocketServer()
 const app = new Hono()
@@ -77,6 +78,13 @@ app.post(
     return c.json({ sent })
   }
 )
+
+app.get("/test/members", async (c) => {
+  if (env.NODE_ENV === "production") return c.status(500)
+
+  const users = await getMembers()
+  return c.json({ users })
+})
 
 app.all(`${WS_PATH}/`, (c) => {
   return wssEngine.handleRequest(c.req.raw, server)
