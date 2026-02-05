@@ -8,7 +8,7 @@
   "license": "ISC",
   "type": "module",
   "scripts": {
-    "dev": "bun --hot --no-clear-screen ./src/server.ts | pino-pretty",
+    "dev": "bun --watch --no-clear-screen ./src/server.ts | pino-pretty",
     "build": "shx rm -rf dist && bun build ./src/server.ts --production --outdir ./dist --sourcemap=linked --target bun && shx cp -r ./drizzle ./dist/",
     "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
     "email": "email dev --port 3012 --dir src/emails/templates",
@@ -49,6 +49,7 @@
     "croner": "^9.1.0",
     "drizzle-orm": "^0.44.7",
     "hono": "^4.11.6",
+    "nanoid": "^5.1.6",
     "node-html-parser": "^7.0.2",
     "nodemailer": "^7.0.11",
     "pino": "^10.3.0",
