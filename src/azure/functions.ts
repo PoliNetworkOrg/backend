@@ -3,12 +3,10 @@ import MailComposer from "nodemailer/lib/mail-composer/index.js"
 import type { JSX } from "react"
 import { env } from "@/env"
 import { logger } from "@/logger"
-import { client } from "./client"
-import type { Member } from "./types"
 import { generatePassword } from "@/utils/password"
 import { wait } from "@/utils/wait"
-import { GraphError } from "@microsoft/microsoft-graph-client"
-import { which } from "bun"
+import { client } from "./client"
+import type { User } from "./types"
 
 export async function sendEmail(to: string, subject: string, component: JSX.Element) {
   const html = await render(component)
@@ -53,24 +51,30 @@ const FlippedLicenses = Object.fromEntries(Object.entries(Licenses).map(([key, v
 
 export async function getMembers() {
   try {
-    const members: Member[] = await client
-      .api(`/groups/${GruppoSociID}/members`)
+    const allPolinetworkUsers: User[] = await client
+      .api(`/users`)
+      .header("ConsistencyLevel", "eventual")
       .select(["displayName", "mail", "givenName", "surname", "id", "assignedLicenses", "employeeId"])
+      .filter("endswith(mail, '@polinetwork.org')")
+      .get()
+      .then<User[]>((r) => r.value)
+
+    const members: { id: string }[] = await client
+      .api(`/groups/${GruppoSociID}/members`)
+      .select(["id"])
       .get()
       .then((r) => r.value)
 
     logger.debug({ count: members.length }, "[Azure Graph API] Get members")
 
-    const outMembers = members.map((m) => ({
-      ...m,
-      assignedLicensesIds: m.assignedLicenses.map((al) => (al.skuId ? FlippedLicenses[al.skuId] : null)),
-      assignedLicenses: undefined,
+    return allPolinetworkUsers.map(({ assignedLicenses, ...u }) => ({
+      ...u,
+      isMember: members.findIndex((m) => m.id === u.id) !== -1,
+      assignedLicensesIds: assignedLicenses.map((al) => (al.skuId ? FlippedLicenses[al.skuId] : "UNKNOWN")),
     }))
-
-    return outMembers
   } catch (error) {
     logger.error({ error }, "[Azure Graph API] Could not get users")
-    return []
+    return null
   }
 }
 
@@ -122,6 +126,18 @@ export async function createMember({
     id,
     password,
   }
+}
+
+export async function changePassword(userId: string) {
+  const password = generatePassword()
+
+  // create user
+  await client.api(`/users/${userId}`).patch({
+    passwordProfile: {
+      forceChangePasswordNextSignIn: true,
+      password,
+    },
+  })
 }
 
 export async function manageLicenses(

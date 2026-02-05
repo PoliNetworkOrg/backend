@@ -21,8 +21,8 @@ function shuffleString(text: string): string {
     // Generate a random index from 0 to i
     const j = Math.floor(Math.random() * (i + 1))
 
-      // Swap elements at indices i and j
-      ;[characters[i], characters[j]] = [characters[j], characters[i]]
+    // Swap elements at indices i and j
+    ;[characters[i], characters[j]] = [characters[j], characters[i]]
   }
 
   // Join the array back into a string

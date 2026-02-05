@@ -1,8 +1,8 @@
-import type { User } from "@microsoft/microsoft-graph-types"
+import type { User as TUser } from "@microsoft/microsoft-graph-types"
 
 // this is returned when `/users` is called without `$select` query
 export type BasicUser = Pick<
-  Required<User>,
+  Required<TUser>,
   | "businessPhones"
   | "displayName"
   | "givenName"
@@ -17,7 +17,7 @@ export type BasicUser = Pick<
 >
 
 // this is the type representing our call to `/users`
-export type Member = Pick<
-  Required<User>,
+export type User = Pick<
+  Required<TUser>,
   "displayName" | "mail" | "givenName" | "surname" | "id" | "assignedLicenses" | "employeeId"
 >

@@ -5,6 +5,7 @@ import { cors } from "hono/cors"
 import { logger as loggerMiddlware } from "hono/logger"
 import z from "zod"
 import { auth } from "./auth"
+import { getMembers } from "./azure/functions"
 import { AUTH_PATH, TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
@@ -13,7 +14,6 @@ import { env } from "./env"
 import { logger } from "./logger"
 import { appRouter } from "./routers"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
-import { getMembers } from "./azure/functions"
 
 export const WSS = new WebSocketServer()
 const app = new Hono()

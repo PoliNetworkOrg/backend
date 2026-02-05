@@ -1,14 +1,12 @@
+import z from "zod"
 import { createMember, getMembers } from "@/azure/functions"
 import { sendWelcomeEmail } from "@/emails/mailer"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
-import z from "zod"
 
 export default createTRPCRouter({
   getAll: publicProcedure.query(async () => {
-    const members = await getMembers()
-    if (members.length === 0) return { error: "NOT_FOUND", members: [] }
-
-    return { error: null, members }
+    const res = await getMembers()
+    return res ?? []
   }),
   create: publicProcedure
     .input(
