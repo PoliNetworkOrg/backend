@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto"
 import { customAlphabet } from "nanoid"
 
 const a1 = customAlphabet("abcdefghijklmnopqrstuvwxyz", 4)
@@ -19,7 +20,7 @@ function shuffleString(text: string): string {
 
   for (let i = characters.length - 1; i > 0; i--) {
     // Generate a random index from 0 to i
-    const j = Math.floor(Math.random() * (i + 1))
+    const j = randomInt(0, i + 1)
 
     // Swap elements at indices i and j
     ;[characters[i], characters[j]] = [characters[j], characters[i]]
