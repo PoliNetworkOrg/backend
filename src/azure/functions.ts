@@ -165,10 +165,7 @@ export async function manageLicenses(
           disabledPlans: [],
           skuId: Licenses[l],
         })),
-        removeLicenses: removeLicenses.map((l) => ({
-          disabledPlans: [],
-          skuId: Licenses[l],
-        })),
+        removeLicenses: removeLicenses.map((l) => Licenses[l]),
       })
       logger.info("[Azure Graph API] manageLicenses OK")
       return
