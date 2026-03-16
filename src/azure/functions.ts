@@ -6,7 +6,7 @@ import { logger } from "@/logger"
 import { generatePassword } from "@/utils/password"
 import { wait } from "@/utils/wait"
 import { client } from "./client"
-import type { User } from "./types"
+import type { ParsedUser, User } from "./types"
 
 export async function sendEmail(to: string, subject: string, component: JSX.Element) {
   const html = await render(component)
@@ -49,7 +49,7 @@ const Licenses = {
 } as const
 const FlippedLicenses = Object.fromEntries(Object.entries(Licenses).map(([key, value]) => [value, key]))
 
-export async function getMembers() {
+export async function getMembers(): Promise<ParsedUser[]> {
   try {
     const allPolinetworkUsers: User[] = await client
       .api(`/users`)
@@ -67,14 +67,28 @@ export async function getMembers() {
 
     logger.debug({ count: members.length }, "[Azure Graph API] Get members")
 
-    return allPolinetworkUsers.map(({ assignedLicenses, ...u }) => ({
-      ...u,
-      isMember: members.findIndex((m) => m.id === u.id) !== -1,
-      assignedLicensesIds: assignedLicenses.map((al) => (al.skuId ? FlippedLicenses[al.skuId] : "UNKNOWN")),
-    }))
+    return allPolinetworkUsers.map<ParsedUser>(
+      ({ assignedLicenses, ...u }) =>
+        ({
+          ...u,
+          isMember: members.findIndex((m) => m.id === u.id) !== -1,
+          assignedLicensesIds: assignedLicenses.map((al) => (al.skuId ? FlippedLicenses[al.skuId] : "UNKNOWN")),
+        }) satisfies ParsedUser
+    )
   } catch (error) {
     logger.error({ error }, "[Azure Graph API] Could not get users")
-    return null
+    return []
+  }
+}
+
+export async function setMemberNumber(userId: string, assocNumber: number) {
+  try {
+    await client.api(`/users/${userId}`).patch({
+      employeeId: assocNumber.toString(),
+    })
+    return { error: null }
+  } catch (err) {
+    return { error: JSON.stringify(err) }
   }
 }
 
@@ -130,8 +144,6 @@ export async function createMember({
 
 export async function changePassword(userId: string) {
   const password = generatePassword()
-
-  // create user
   await client.api(`/users/${userId}`).patch({
     passwordProfile: {
       forceChangePasswordNextSignIn: true,
