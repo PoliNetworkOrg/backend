@@ -43,6 +43,13 @@
       "when": 1768651768488,
       "tag": "0005_cloudy_human_cannonball",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1769463712170,
+      "tag": "0006_uneven_lord_hawal",
+      "breakpoints": true
     }
   ]
 }
