@@ -101,6 +101,7 @@ export async function createMember({
   lastName: string
   assocNumber: number
 }) {
+  // TODO: separate steps and add better error handling, maybe with neverthrow
   const password = generatePassword()
   const mailNickname = `${firstName.replaceAll(" ", "")}.${lastName.replaceAll(" ", "")}`.toLowerCase()
   const mail = `${mailNickname}@polinetwork.org`
@@ -158,7 +159,7 @@ export async function manageLicenses(
   removeLicenses: (keyof typeof Licenses)[]
 ) {
   let tries = 0
-  while (tries < 6) {
+  while (tries <= 5) {
     try {
       await client.api(`/users/${userId}/assignLicense`).post({
         addLicenses: addLicenses.map((l) => ({
@@ -172,7 +173,7 @@ export async function manageLicenses(
     } catch (error) {
       tries++
       logger.error({ error, tries }, "[Azure Graph API] manageLicenses error")
-      await wait(2 ** tries * 1000)
+      if (tries < 5) await wait(2 ** tries * 1000)
     }
   }
 }
