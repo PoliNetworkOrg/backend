@@ -174,6 +174,7 @@ export async function manageLicenses(
       tries++
       logger.error({ error, tries }, "[Azure Graph API] manageLicenses error")
       if (tries < 5) await wait(2 ** tries * 1000)
+      else throw error
     }
   }
 }
