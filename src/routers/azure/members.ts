@@ -1,6 +1,7 @@
 import z from "zod"
 import { createMember, getMembers, setMemberNumber } from "@/azure/functions"
 import { sendWelcomeEmail } from "@/emails/mailer"
+import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
 export default createTRPCRouter({
@@ -62,9 +63,9 @@ export default createTRPCRouter({
           email: member.mail,
           welcomeMailSent: mailOk,
         }
-      } catch (err) {
-        console.error(err)
-        return { error: JSON.stringify(err) }
+      } catch (error) {
+        logger.error({ error }, "[trpc:azure:members] error in create procedure")
+        return { error: error instanceof Error ? error.message : "Unknown error, see backend logs" }
       }
     }),
 })
