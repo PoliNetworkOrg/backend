@@ -1,6 +1,6 @@
+import { drizzleAdapter } from "@better-auth/drizzle-adapter"
 import { passkey } from "@better-auth/passkey"
-import { betterAuth } from "better-auth"
-import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { betterAuth } from "better-auth/minimal"
 import { AUTH_PATH } from "@/constants"
 import { SCHEMA } from "@/db"
 import { db } from "@/db/db"
