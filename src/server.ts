@@ -5,6 +5,7 @@ import { cors } from "hono/cors"
 import { logger as loggerMiddlware } from "hono/logger"
 import z from "zod"
 import { auth } from "./auth"
+import { getMembers } from "./azure/functions"
 import { AUTH_PATH, TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
@@ -77,6 +78,13 @@ app.post(
     return c.json({ sent })
   }
 )
+
+app.get("/test/members", async (c) => {
+  if (env.NODE_ENV === "production") return c.status(500)
+
+  const users = await getMembers()
+  return c.json({ users })
+})
 
 app.all(`${WS_PATH}/`, (c) => {
   return wssEngine.handleRequest(c.req.raw, server)

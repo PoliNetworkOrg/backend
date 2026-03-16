@@ -1,4 +1,5 @@
 import { createTRPCRouter } from "@/trpc"
+import { azureRouter } from "./azure"
 import { testRouter } from "./test"
 import { tgRouter } from "./tg"
 
@@ -10,6 +11,7 @@ import { tgRouter } from "./tg"
 export const appRouter = createTRPCRouter({
   test: testRouter,
   tg: tgRouter,
+  azure: azureRouter,
 })
 
 // export type definition of API
