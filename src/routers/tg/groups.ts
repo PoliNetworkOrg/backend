@@ -1,14 +1,15 @@
-import { eq, ilike, sql } from "drizzle-orm"
+import { eq, ilike, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
 const GROUPS = SCHEMA.TG.groups
 export default createTRPCRouter({
-  getAll: publicProcedure.query(async () => {
-    const results = await DB.select().from(GROUPS)
-    return results
-  }),
+  // TODO: this is not production-safe
+  // getAll: publicProcedure.query(async () => {
+  //   const results = await DB.select().from(GROUPS)
+  //   return results
+  // }),
 
   search: publicProcedure
     .input(
@@ -24,10 +25,12 @@ export default createTRPCRouter({
       const results = await DB.select({
         telegramId: GROUPS.telegramId,
         title: GROUPS.title,
+        tag: GROUPS.tag,
         link: GROUPS.link,
       })
         .from(GROUPS)
-        .where((t) => ilike(t.title, `%${likeQuery}%`))
+        .where((t) => or(ilike(t.title, `%${likeQuery}%`), ilike(t.tag, `%${likeQuery}%`)))
+        .orderBy((t) => sql`${t.tag} ASC NULLS LAST`)
         .limit(limit)
 
       return {
@@ -55,6 +58,7 @@ export default createTRPCRouter({
         z.object({
           title: z.string(),
           telegramId: z.number(),
+          tag: z.string().optional(),
           link: z.url({ hostname: /^t\.me$/ }),
         })
       )
@@ -66,7 +70,9 @@ export default createTRPCRouter({
         .onConflictDoUpdate({
           target: GROUPS.telegramId,
           set: {
+            // this means: use the new value
             title: sql.raw(`excluded.${GROUPS.title.name}`),
+            tag: sql.raw(`excluded.${GROUPS.tag.name}`),
             link: sql.raw(`excluded.${GROUPS.link.name}`),
           },
         })
