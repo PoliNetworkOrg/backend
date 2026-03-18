@@ -1,15 +1,23 @@
 import { eq, ilike, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
+import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
 const GROUPS = SCHEMA.TG.groups
 export default createTRPCRouter({
-  // TODO: this is not production-safe
-  // getAll: publicProcedure.query(async () => {
-  //   const results = await DB.select().from(GROUPS)
-  //   return results
-  // }),
+  // TODO: this is performance HEAVY, make it more safe eventually
+  // At the moment, this query is used by banall flowProducer in the telegram bot.
+  // We may consider moving the flowProducer and ensure connection through the same Redis
+  // instance or some other way of bridging the two parts together.
+  getAll: publicProcedure.query(async () => {
+    const beforeMs = performance.now()
+    const results = await DB.select().from(GROUPS)
+    const afterMs = performance.now()
+
+    logger.warn({ queryMs: afterMs - beforeMs }, "Call to trpc.tg.groups.getAll, performance monitoring...")
+    return results
+  }),
 
   search: publicProcedure
     .input(
