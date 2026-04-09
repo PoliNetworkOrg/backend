@@ -1,7 +1,8 @@
 import { and, arrayContains, eq, inArray, ne as neq, sql } from "drizzle-orm"
 import { z } from "zod"
+import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
-import { ARRAY_USER_ROLE, type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
+import { ARRAY_USER_ROLE, type TUserRole } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 import { decryptUser, TgUserSchema } from "@/utils/users"
@@ -19,27 +20,39 @@ const direttivoMember = z.object({
 })
 
 export default createTRPCRouter({
-  getRoles: publicProcedure
-    .input(z.object({ userId: z.number() }))
-    .output(
-      z.object({
-        userId: z.number(),
-        roles: z.union([z.array(z.string<TUserRole>()), z.null()]),
-      })
-    )
-    .query(async ({ input }) => {
-      const [res] = await DB.select({
-        roles: s.permissions.roles,
-      })
-        .from(s.permissions)
-        .where(eq(s.permissions.userId, input.userId))
-        .limit(1)
+  getRoles: publicProcedure.input(z.object({ userId: z.number() })).query(async ({ input }) => {
+    const [res] = await DB.select({
+      roles: s.permissions.roles,
+    })
+      .from(s.permissions)
+      .where(eq(s.permissions.userId, input.userId))
+      .limit(1)
 
-      return {
-        userId: input.userId,
-        roles: res ? res.roles : null,
-      }
-    }),
+    const groupAdmin = await DB.select({
+      group: {
+        title: s.groups.title,
+        id: s.groups.telegramId,
+        inviteLink: s.groups.link,
+      },
+      addedBy: s.users,
+    })
+      .from(s.groupAdmins)
+      .where(eq(s.groupAdmins.userId, input.userId))
+      .innerJoin(s.groups, eq(s.groupAdmins.groupId, s.groups.telegramId))
+      .leftJoin(s.users, eq(s.groupAdmins.addedBy, s.users.userId))
+
+    return {
+      userId: input.userId,
+      roles: res ? res.roles : null,
+      groupAdmin: await Promise.all(
+        groupAdmin.map(async (ga) => {
+          if (!ga.addedBy) return null
+          const decryptedUser = await decryptUser(ga.addedBy)
+          return { ...ga, addedBy: decryptedUser }
+        })
+      ),
+    }
+  }),
 
   getDirettivo: publicProcedure
     .output(
@@ -274,7 +287,7 @@ export default createTRPCRouter({
         groupId: z.number(),
       })
     )
-    .query(async ({ input }) => {
+    .mutation(async ({ input }) => {
       await DB.insert(s.groupAdmins)
         .values({
           userId: input.userId,
@@ -282,6 +295,49 @@ export default createTRPCRouter({
           addedBy: input.adderId,
         })
         .onConflictDoNothing()
+    }),
+
+  removeGroup: publicProcedure
+    .input(
+      z.object({
+        userId: z.number(),
+        groupId: z.number(),
+        removerId: z.number(),
+      })
+    )
+    .output(
+      z.object({
+        error: z.union([
+          z.null(),
+          z.enum(["UNAUTHORIZED", "NOT_FOUND", "UNAUTHORIZED_SELF_ASSIGN", "INTERNAL_SERVER_ERROR"]),
+        ]),
+      })
+    )
+    .mutation(async ({ input }) => {
+      try {
+        // get current permissions of remover and target
+        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.removerId))
+        if (q.length === 0) return { error: "UNAUTHORIZED" }
+
+        const remover = q[0]
+
+        // check if remover is not in permission table or doesn't have permissions
+        if (!remover.roles.some((a) => CAN_ASSIGN.includes(a))) return { error: "UNAUTHORIZED" }
+
+        // if remover is self-removing roles, he must be president or owner (ref CAN_SELF_ASSIGN)
+        if (remover.userId === input.userId && !remover.roles.some((a) => CAN_SELF_ASSIGN.includes(a)))
+          return { error: "UNAUTHORIZED_SELF_ASSIGN" }
+
+        const deleted = await DB.delete(s.groupAdmins)
+          .where(and(eq(s.groupAdmins.userId, input.userId), eq(s.groupAdmins.groupId, input.removerId)))
+          .returning()
+
+        if (deleted.length === 0) return { error: "NOT_FOUND" }
+        return { error: null }
+      } catch (error) {
+        logger.error({ error }, "Error while executing removeRole in tg.permissions router")
+        return { error: "INTERNAL_SERVER_ERROR" }
+      }
     }),
 
   canAddBot: publicProcedure

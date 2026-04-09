@@ -14,6 +14,12 @@ const message = z.object({
   authorId: z.number(),
   message: z.string(),
   timestamp: z.date(),
+  group: z
+    .object({
+      title: z.string(),
+      inviteLink: z.string().nullable(),
+    })
+    .optional(),
 })
 type Message = z.infer<typeof message>
 
@@ -50,7 +56,7 @@ export default createTRPCRouter({
       if (!res) return { message: null, error: "NOT_FOUND" }
 
       try {
-        const encryptedMessage = await cipher.decrypt(res.message)
+        const encryptedMessage = cipher.decrypt(res.message)
         const message: Message = {
           message: encryptedMessage,
           timestamp: res.timestamp,
@@ -77,7 +83,7 @@ export default createTRPCRouter({
       try {
         const messages = input.messages.map(async (m) => ({
           ...m,
-          message: await cipher.encrypt(m.message),
+          message: cipher.encrypt(m.message),
         }))
         const awaitedMessages = await Promise.all(messages)
         await DB.insert(s.messages).values(awaitedMessages).onConflictDoNothing()
@@ -88,6 +94,56 @@ export default createTRPCRouter({
           `error while encrypting ${input.messages.length > 1 ? "some telegram messages" : "a telegam message"}`
         )
         return { error: "ENCRYPT_ERROR" }
+      }
+    }),
+
+  getLastByUser: publicProcedure
+    .input(z.object({ userId: z.number() }))
+    .output(
+      z.union([
+        z.object({ messages: z.array(message), error: z.null() }),
+        z.object({
+          messages: z.null().optional(),
+          error: z.enum(["NOT_FOUND", "DECRYPT_ERROR", "INTERNAL_SERVER_ERROR"]),
+        }),
+      ])
+    )
+    .query(async ({ input }) => {
+      const res = await DB.select()
+        .from(s.messages)
+        .where(eq(s.messages.authorId, input.userId))
+        .leftJoin(SCHEMA.TG.groups, eq(s.messages.chatId, SCHEMA.TG.groups.telegramId))
+        .limit(10)
+
+      if (!res) return { messages: null, error: "NOT_FOUND" }
+
+      try {
+        const messages = res.map(({ messages: e, groups: group }) => {
+          const decryptedMessage = cipher.decrypt(e.message)
+          const message: Message = {
+            message: decryptedMessage,
+            timestamp: e.timestamp,
+            authorId: e.authorId,
+            chatId: e.chatId,
+            messageId: e.messageId,
+            group: group
+              ? {
+                  title: group.title,
+                  inviteLink: group.link,
+                }
+              : undefined,
+          }
+          return message
+        })
+
+        return { messages, error: null }
+      } catch (error) {
+        if (error instanceof DecryptError) {
+          logger.error(error, "error while decrypting a telegram message")
+          return { message: null, error: "DECRYPT_ERROR" }
+        }
+
+        return { error: "INTERNAL_SERVER_ERROR" }
       }
     }),
 })

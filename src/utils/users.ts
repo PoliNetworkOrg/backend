@@ -2,7 +2,7 @@ import z from "zod"
 import type { SCHEMA } from "@/db"
 import { Cipher } from "./cipher"
 
-const userCipher = new Cipher("tg.users")
+export const userCipher = new Cipher("tg.users")
 
 export const TgUserSchema = z.object({
   id: z.number(),

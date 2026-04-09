@@ -5,7 +5,7 @@ import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 import { DecryptError } from "@/utils/cipher"
 import { upsertMultipleSetSql } from "@/utils/db"
-import { decryptUser, encryptUser, TgUserSchema } from "@/utils/users"
+import { decryptUser, encryptUser, TgUserSchema, userCipher } from "@/utils/users"
 
 const s = SCHEMA.TG
 const upsertSet = upsertMultipleSetSql(s.users, ["firstName", "lastName", "username", "langCode", "isBot"])
@@ -28,6 +28,42 @@ export default createTRPCRouter({
     .query(async ({ input }) => {
       try {
         const res = await DB.select().from(s.users).where(eq(s.users.userId, input.userId)).limit(1)
+        if (res.length === 0) return { error: "NOT_FOUND" }
+
+        const user = await decryptUser(res[0])
+
+        return {
+          user,
+          error: null,
+        }
+      } catch (error) {
+        if (error instanceof DecryptError) {
+          logger.error(error, "error while decrypting a telegram user from table tg.users")
+          return { error: "DECRYPT_ERROR" }
+        }
+
+        return { error: "INTERNAL_SERVER_ERROR" }
+      }
+    }),
+
+  getByUsername: publicProcedure
+    .input(z.object({ username: z.string() }))
+    .output(
+      z.union([
+        z.object({
+          user: TgUserSchema,
+          error: z.null(),
+        }),
+        z.object({
+          error: z.enum(["NOT_FOUND", "INTERNAL_SERVER_ERROR", "DECRYPT_ERROR"]),
+          user: z.null().optional(),
+        }),
+      ])
+    )
+    .query(async ({ input }) => {
+      try {
+        const encryptedUsername = userCipher.encrypt(input.username.replace("@", ""))
+        const res = await DB.select().from(s.users).where(eq(s.users.username, encryptedUsername)).limit(1)
         if (res.length === 0) return { error: "NOT_FOUND" }
 
         const user = await decryptUser(res[0])

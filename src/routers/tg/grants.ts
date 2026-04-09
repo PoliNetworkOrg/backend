@@ -1,7 +1,8 @@
 import { and, eq, gte, isNull, lte } from "drizzle-orm"
 import { z } from "zod"
+import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
-import { type TUserRole, USER_ROLE } from "@/db/schema/tg/permissions"
+import type { TUserRole } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
