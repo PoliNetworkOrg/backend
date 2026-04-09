@@ -11,8 +11,8 @@ export const grants = createTable.tg(
     grantedBy: bigint("granted_by_id", { mode: "number" })
       .references(() => permissions.userId)
       .notNull(),
-    validSince: timestamp("valid_since", { precision: 0 }).notNull(),
-    validUntil: timestamp("valid_until", { precision: 0 }).notNull(),
+    validSince: timestamp("valid_since", { precision: 0, withTimezone: true }).notNull(),
+    validUntil: timestamp("valid_until", { precision: 0, withTimezone: true }).notNull(),
     interruptedBy: bigint("interrupted_by_id", { mode: "number" }).references(() => permissions.userId),
     reason: text("reason"),
 

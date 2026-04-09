@@ -57,6 +57,13 @@
       "when": 1773852579683,
       "tag": "0007_fine_ted_forrester",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1775767649095,
+      "tag": "0008_tranquil_black_cat",
+      "breakpoints": true
     }
   ]
 }

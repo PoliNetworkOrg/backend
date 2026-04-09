@@ -12,7 +12,7 @@ export const messages = createTable.tg(
       mode: "number",
     }).notNull(),
     authorId: bigint("author_id", { mode: "number" }).notNull(),
-    timestamp: timestamp("timestamp").notNull(), // the telegram message timestamp
+    timestamp: timestamp("timestamp", { precision: 0, withTimezone: true }).notNull(), // the telegram message timestamp
     message: varchar("message", { length: 8704 }).notNull(),
     createdAt: timeColumns.createdAt,
   },

@@ -31,7 +31,7 @@ export const auditLog = createTable.tg(
     targetId: bigint("target_id", { mode: "number" }).notNull(),
     groupId: bigint("group_id", { mode: "number" }),
     type: varchar("type", { length: 32 }).$type<TAuditType>().notNull(),
-    until: timestamp("until", { precision: 0 }),
+    until: timestamp("until", { precision: 0, withTimezone: true }),
     reason: varchar("reason", { length: 256 }),
 
     ...timeColumns,
