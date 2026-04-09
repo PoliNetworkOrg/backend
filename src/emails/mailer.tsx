@@ -1,4 +1,4 @@
-import { sendEmail } from "@/azure/functions"
+import { sendEmail } from "@/azure/functions/emails"
 import { env } from "@/env"
 import OtpEmail from "./templates/otp"
 import Welcome from "./templates/welcome"

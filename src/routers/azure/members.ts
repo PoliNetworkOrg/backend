@@ -1,5 +1,5 @@
 import z from "zod"
-import { createMember, getMembers, setMemberNumber } from "@/azure/functions"
+import { createMember, getMembers, setMemberNumber } from "@/azure/functions/members"
 import { sendWelcomeEmail } from "@/emails/mailer"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
