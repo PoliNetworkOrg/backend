@@ -329,7 +329,7 @@ export default createTRPCRouter({
           return { error: "UNAUTHORIZED_SELF_ASSIGN" }
 
         const deleted = await DB.delete(s.groupAdmins)
-          .where(and(eq(s.groupAdmins.userId, input.userId), eq(s.groupAdmins.groupId, input.removerId)))
+          .where(and(eq(s.groupAdmins.userId, input.userId), eq(s.groupAdmins.groupId, input.groupId)))
           .returning()
 
         if (deleted.length === 0) return { error: "NOT_FOUND" }
