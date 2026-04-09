@@ -2,13 +2,28 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
+    "rootDir": "./",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     },
     "jsx": "react-jsx",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist", "lib", "package"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "lib",
+    "package"
+  ]
 }
-

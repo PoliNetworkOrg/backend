@@ -1,4 +1,4 @@
-import { type CipherGCMTypes, createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from "node:crypto"
+import { type CipherGCMTypes, createCipheriv, createDecipheriv, pbkdf2Sync } from "node:crypto"
 import { env } from "@/env"
 
 // Define your encryption algorithm and key size
@@ -41,7 +41,7 @@ export class Cipher {
   encrypt(text: string): string {
     if (!text) return "" // Handle empty strings gracefully
 
-    const iv = randomBytes(IV_SIZE)
+    const iv = Buffer.alloc(IV_SIZE, 0) // Keep it deterministic to allow for lookups of encrypted values
     const cipher = createCipheriv(ALGORITHM, this.key, iv)
 
     let encrypted = cipher.update(text, "utf8", "hex")
