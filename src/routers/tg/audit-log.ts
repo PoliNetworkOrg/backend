@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { ARRAY_AUDIT_TYPE } from "@/db/schema/tg/audit-log"
@@ -31,6 +31,7 @@ export default createTRPCRouter({
         .from(SCHEMA.TG.auditLog)
         .where((t) => eq(t.targetId, input.targetId))
         .leftJoin(SCHEMA.TG.groups, eq(SCHEMA.TG.auditLog.groupId, SCHEMA.TG.groups.telegramId))
+        .orderBy(desc(SCHEMA.TG.auditLog.createdAt))
 
       return res.map((e) => ({ ...e.audit_log, groupTitle: e.groups?.title }))
     }),

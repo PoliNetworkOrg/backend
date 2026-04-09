@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
@@ -113,6 +113,7 @@ export default createTRPCRouter({
         .from(s.messages)
         .where(eq(s.messages.authorId, input.userId))
         .leftJoin(SCHEMA.TG.groups, eq(s.messages.chatId, SCHEMA.TG.groups.telegramId))
+        .orderBy(desc(s.messages.timestamp))
         .limit(10)
 
       if (!res) return { messages: null, error: "NOT_FOUND" }

@@ -62,7 +62,7 @@ export default createTRPCRouter({
     )
     .query(async ({ input }) => {
       try {
-        const encryptedUsername = userCipher.encrypt(input.username.replace("@", ""))
+        const encryptedUsername = userCipher.encrypt(input.username.toLowerCase().replace("@", ""))
         const res = await DB.select().from(s.users).where(eq(s.users.username, encryptedUsername)).limit(1)
         if (res.length === 0) return { error: "NOT_FOUND" }
 
