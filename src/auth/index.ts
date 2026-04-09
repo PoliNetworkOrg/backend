@@ -16,7 +16,7 @@ export const auth = betterAuth({
     telegramPlugin(),
     emailOTP(),
     passkey({
-      rpID: env.NODE_ENV === "production" ? new URL(env.PUBLIC_URL).hostname : "localhost",
+      rpID: env.NODE_ENV === "production" ? "polinetwork.org" : "localhost",
       rpName: "PoliNetwork APS",
     }),
   ],

@@ -1,6 +1,6 @@
 import { logger } from "@/logger"
 import { generatePassword } from "@/utils/password"
-import { wait, withRetry } from "@/utils/wait"
+import { withRetry } from "@/utils/wait"
 import { client } from "../client"
 import type { ParsedUser, User } from "../types"
 
