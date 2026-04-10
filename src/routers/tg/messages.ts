@@ -98,7 +98,7 @@ export default createTRPCRouter({
     }),
 
   getLastByUser: publicProcedure
-    .input(z.object({ userId: z.number() }))
+    .input(z.object({ userId: z.number(), limit: z.number().min(1).max(100).default(12) }))
     .output(
       z.union([
         z.object({ messages: z.array(message), error: z.null() }),
@@ -114,7 +114,7 @@ export default createTRPCRouter({
         .where(eq(s.messages.authorId, input.userId))
         .leftJoin(SCHEMA.TG.groups, eq(s.messages.chatId, SCHEMA.TG.groups.telegramId))
         .orderBy(desc(s.messages.timestamp))
-        .limit(10)
+        .limit(input.limit)
 
       if (!res) return { messages: null, error: "NOT_FOUND" }
 
