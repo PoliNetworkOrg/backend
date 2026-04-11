@@ -1,4 +1,4 @@
-import { and, eq, ilike, ne, or, sql } from "drizzle-orm"
+import { and, eq, ilike, ne, not, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
@@ -37,7 +37,7 @@ export default createTRPCRouter({
         link: GROUPS.link,
       })
         .from(GROUPS)
-        .where((t) => or(ilike(t.title, `%${likeQuery}%`), ilike(t.tag, `%${likeQuery}%`)))
+        .where(and(or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`)), not(GROUPS.hide)))
         .orderBy((t) => sql`${t.tag} ASC NULLS LAST`)
         .limit(limit)
 
@@ -120,6 +120,22 @@ export default createTRPCRouter({
     .output(z.boolean())
     .mutation(async ({ input }) => {
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.telegramId)).returning()
+      return rows.length === 1
+    }),
+
+  setHide: publicProcedure
+    .input(
+      z.object({
+        telegramId: z.number(),
+        hide: z.boolean(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const rows = await DB.update(GROUPS)
+        .set({ hide: input.hide })
+        .where(eq(GROUPS.telegramId, input.telegramId))
+        .returning()
+
       return rows.length === 1
     }),
 })
