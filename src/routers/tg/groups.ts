@@ -35,6 +35,7 @@ export default createTRPCRouter({
         title: GROUPS.title,
         tag: GROUPS.tag,
         link: GROUPS.link,
+        hide: GROUPS.link,
       })
         .from(GROUPS)
         .where(and(or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`)), not(GROUPS.hide)))
