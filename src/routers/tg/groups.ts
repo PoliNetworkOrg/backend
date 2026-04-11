@@ -24,12 +24,15 @@ export default createTRPCRouter({
       z.object({
         query: z.string().min(1).max(100),
         limit: z.number().min(1).max(20).default(6),
+        showHidden: z.boolean().default(false),
       })
     )
     .query(async ({ input }) => {
       const { query, limit } = input
 
       const likeQuery = query.split(" ").join("%")
+      const whereClause = or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`))
+
       const results = await DB.select({
         telegramId: GROUPS.telegramId,
         title: GROUPS.title,
@@ -38,7 +41,7 @@ export default createTRPCRouter({
         hide: GROUPS.hide,
       })
         .from(GROUPS)
-        .where(and(or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`)), not(GROUPS.hide)))
+        .where(input.showHidden ? whereClause : and(whereClause, not(GROUPS.hide)))
         .orderBy((t) => sql`${t.tag} ASC NULLS LAST`)
         .limit(limit)
 
