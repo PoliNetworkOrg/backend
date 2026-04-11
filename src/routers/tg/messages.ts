@@ -98,7 +98,9 @@ export default createTRPCRouter({
     }),
 
   getLastByUser: publicProcedure
-    .input(z.object({ userId: z.number(), limit: z.number().min(1).max(100).default(12) }))
+    .input(
+      z.object({ userId: z.number(), limit: z.number().min(1).max(100).default(12), chatId: z.number().optional() })
+    )
     .output(
       z.union([
         z.object({ messages: z.array(message), error: z.null() }),
@@ -111,7 +113,11 @@ export default createTRPCRouter({
     .query(async ({ input }) => {
       const res = await DB.select()
         .from(s.messages)
-        .where(eq(s.messages.authorId, input.userId))
+        .where(
+          input.chatId
+            ? and(eq(s.messages.authorId, input.userId), eq(s.messages.chatId, input.chatId))
+            : eq(s.messages.authorId, input.userId)
+        )
         .leftJoin(SCHEMA.TG.groups, eq(s.messages.chatId, SCHEMA.TG.groups.telegramId))
         .orderBy(desc(s.messages.timestamp))
         .limit(input.limit)
