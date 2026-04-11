@@ -1,4 +1,4 @@
-import { and, eq, ilike, ne, or, sql } from "drizzle-orm"
+import { and, eq, ilike, ne, not, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
@@ -24,20 +24,24 @@ export default createTRPCRouter({
       z.object({
         query: z.string().min(1).max(100),
         limit: z.number().min(1).max(20).default(6),
+        showHidden: z.boolean().default(false),
       })
     )
     .query(async ({ input }) => {
       const { query, limit } = input
 
       const likeQuery = query.split(" ").join("%")
+      const whereClause = or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`))
+
       const results = await DB.select({
         telegramId: GROUPS.telegramId,
         title: GROUPS.title,
         tag: GROUPS.tag,
         link: GROUPS.link,
+        hide: GROUPS.hide,
       })
         .from(GROUPS)
-        .where((t) => or(ilike(t.title, `%${likeQuery}%`), ilike(t.tag, `%${likeQuery}%`)))
+        .where(input.showHidden ? whereClause : and(whereClause, not(GROUPS.hide)))
         .orderBy((t) => sql`${t.tag} ASC NULLS LAST`)
         .limit(limit)
 
@@ -120,6 +124,22 @@ export default createTRPCRouter({
     .output(z.boolean())
     .mutation(async ({ input }) => {
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.telegramId)).returning()
+      return rows.length === 1
+    }),
+
+  setHide: publicProcedure
+    .input(
+      z.object({
+        telegramId: z.number(),
+        hide: z.boolean(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const rows = await DB.update(GROUPS)
+        .set({ hide: input.hide })
+        .where(eq(GROUPS.telegramId, input.telegramId))
+        .returning()
+
       return rows.length === 1
     }),
 })

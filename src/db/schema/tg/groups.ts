@@ -1,4 +1,4 @@
-import { bigint, varchar } from "drizzle-orm/pg-core"
+import { bigint, boolean, varchar } from "drizzle-orm/pg-core"
 import { timeColumns } from "@/db/columns"
 import { createTable } from "../create-table"
 
@@ -7,6 +7,7 @@ export const groups = createTable.tg("groups", {
   title: varchar("title").notNull(),
   tag: varchar("tag"),
   link: varchar("link", { length: 128 }).unique(),
+  hide: boolean("hide").notNull().default(false),
 
   ...timeColumns,
 })
