@@ -63,6 +63,22 @@ export default createTRPCRouter({
       return res[0]
     }),
 
+  getByInviteLink: publicProcedure
+    .input(
+      z.object({
+        inviteLink: z.url(),
+      })
+    )
+    .query(async ({ input }) => {
+      const res = await DB.select()
+        .from(GROUPS)
+        .limit(1)
+        .where((t) => eq(t.link, input.inviteLink))
+
+      if (res.length === 0) return null
+      return res[0]
+    }),
+
   create: publicProcedure
     .input(
       z.array(
