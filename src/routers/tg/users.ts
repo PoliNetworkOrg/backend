@@ -11,6 +11,25 @@ const s = SCHEMA.TG
 const upsertSet = upsertMultipleSetSql(s.users, ["firstName", "lastName", "username", "langCode", "isBot"])
 
 export default createTRPCRouter({
+  getAll: publicProcedure.query(async () => {
+    try {
+      const res = await DB.select().from(s.users)
+      const decryptedUsers = await Promise.all(res.map((user) => decryptUser(user).catch(() => null)))
+
+      return {
+        users: decryptedUsers.filter((user) => user !== null),
+        error: null,
+      }
+    } catch (error) {
+      if (error instanceof DecryptError) {
+        logger.error(error, "error while decrypting a telegram user from table tg.users")
+        return { error: "DECRYPT_ERROR" }
+      }
+
+      return { error: "INTERNAL_SERVER_ERROR" }
+    }
+  }),
+
   get: publicProcedure
     .input(z.object({ userId: z.number() }))
     .output(
