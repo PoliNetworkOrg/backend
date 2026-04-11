@@ -7,7 +7,7 @@ export const groups = createTable.tg("groups", {
   title: varchar("title").notNull(),
   tag: varchar("tag"),
   link: varchar("link", { length: 128 }).unique(),
-  hide: boolean("hide").default(false),
+  hide: boolean("hide").notNull().default(false),
 
   ...timeColumns,
 })
