@@ -54,10 +54,13 @@ export default createTRPCRouter({
       })
     )
     .query(async ({ input }) => {
-      return await DB.select()
+      const res = await DB.select()
         .from(GROUPS)
         .limit(1)
         .where((t) => eq(t.telegramId, input.telegramId))
+
+      if (res.length === 0) return null
+      return res[0]
     }),
 
   create: publicProcedure
