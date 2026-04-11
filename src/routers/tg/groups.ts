@@ -1,4 +1,4 @@
-import { eq, ilike, or, sql } from "drizzle-orm"
+import { and, eq, ilike, ne, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
@@ -76,6 +76,10 @@ export default createTRPCRouter({
     )
     .output(z.array(z.number()))
     .mutation(async ({ input }) => {
+      for (const group of input) {
+        await DB.delete(GROUPS).where(and(eq(GROUPS.link, group.link), ne(GROUPS.telegramId, group.telegramId)))
+      }
+
       const rows = await DB.insert(GROUPS)
         .values(input)
         .onConflictDoUpdate({
