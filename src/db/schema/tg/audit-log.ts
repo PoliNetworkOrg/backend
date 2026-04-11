@@ -9,7 +9,7 @@ export const AUDIT_TYPE = {
   MUTE: "mute",
   UNMUTE: "unmute",
   BAN_ALL: "ban_all",
-  MUTE_ALL: "mute_all",
+  UNBAN_ALL: "unban_all",
 } as const
 export type TAuditType = (typeof AUDIT_TYPE)[keyof typeof AUDIT_TYPE]
 
@@ -20,7 +20,7 @@ export const ARRAY_AUDIT_TYPE = [
   AUDIT_TYPE.MUTE,
   AUDIT_TYPE.UNMUTE,
   AUDIT_TYPE.BAN_ALL,
-  AUDIT_TYPE.MUTE_ALL,
+  AUDIT_TYPE.UNBAN_ALL,
 ] as const
 
 export const auditLog = createTable.tg(
