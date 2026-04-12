@@ -4,6 +4,7 @@ import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
 import type { TUserRole } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
+import { WSS } from "@/server"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 import { decryptUser } from "@/utils/users"
 
@@ -60,6 +61,7 @@ export default createTRPCRouter({
         since: z.date(),
         until: z.date(),
         reason: z.string().optional(),
+        sendTgLog: z.boolean().default(false),
       })
     )
     .output(
@@ -115,6 +117,10 @@ export default createTRPCRouter({
           reason: input.reason,
         })
 
+        if (input.sendTgLog) {
+          await WSS.logGrantCreate(input.userId, input.adderId, input.since, input.until, input.reason)
+        }
+
         return { success: true, error: null }
       } catch (error) {
         logger.error({ error }, "Error while executing create in tg.grants router")
@@ -127,6 +133,7 @@ export default createTRPCRouter({
       z.object({
         userId: z.number(),
         interruptedById: z.number(),
+        sendTgLog: z.boolean().default(false),
       })
     )
     .output(
@@ -161,6 +168,10 @@ export default createTRPCRouter({
             success: false,
             error: "NOT_FOUND",
           }
+
+        if (input.sendTgLog) {
+          await WSS.logGrantInterrupt(input.userId, input.interruptedById)
+        }
 
         return { success: true, error: null }
       } catch (error) {

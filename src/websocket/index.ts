@@ -56,4 +56,44 @@ export class WebSocketServer {
       })
     })
   }
+
+  async logGrantCreate(userId: number, adminId: number, since: Date, until: Date, reason?: string) {
+    const sockets = await this.io.fetchSockets()
+    const tgSocket = sockets.find((s) => s.data.type === "telegram")
+    if (!tgSocket) {
+      logger.error("[WS] There is no bot websocket connected, cannot perform logGrantCreate")
+      return false
+    }
+
+    return new Promise((res) => {
+      tgSocket.emit("logGrantCreate", { userId, adminId, validSince: since, validUntil: until, reason }, (err) => {
+        if (err) {
+          logger.error({ err }, "[WS] Error occured while logging in telegram bot")
+          res(false)
+        } else {
+          res(true)
+        }
+      })
+    })
+  }
+
+  async logGrantInterrupt(userId: number, adminId: number) {
+    const sockets = await this.io.fetchSockets()
+    const tgSocket = sockets.find((s) => s.data.type === "telegram")
+    if (!tgSocket) {
+      logger.error("[WS] There is no bot websocket connected, cannot perform logGrantInterrupt")
+      return false
+    }
+
+    return new Promise((res) => {
+      tgSocket.emit("logGrantInterrupt", { userId, adminId }, (err) => {
+        if (err) {
+          logger.error({ err }, "[WS] Error occured while logging in telegram bot")
+          res(false)
+        } else {
+          res(true)
+        }
+      })
+    })
+  }
 }

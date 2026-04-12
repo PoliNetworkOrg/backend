@@ -10,6 +10,18 @@ export interface ToClient {
     },
     cb: (error: string | null) => void
   ) => void
+
+  logGrantCreate: (
+    data: {
+      userId: number
+      adminId: number
+      validSince: Date
+      validUntil: Date
+      reason?: string
+    },
+    cb: (error: string | null) => void
+  ) => void
+  logGrantInterrupt: (data: { userId: number; adminId: number }, cb: (error: string | null) => void) => void
 }
 
 // the telegram bot answers the backend
