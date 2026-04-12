@@ -1,4 +1,5 @@
 import { Server as Engine } from "@socket.io/bun-engine"
+import * as parser from "@socket.io/devalue-parser"
 import { Server as SocketIOServer } from "socket.io"
 import { logger } from "@/logger"
 import type * as Telegram from "./telegram"
@@ -17,7 +18,7 @@ export class WebSocketServer {
   private io: SocketIOServer<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
 
   constructor() {
-    this.io = new SocketIOServer()
+    this.io = new SocketIOServer({ parser })
     this.io.bind(engine)
 
     this.io.on("connection", (s) => {
