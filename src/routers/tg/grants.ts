@@ -167,4 +167,16 @@ export default createTRPCRouter({
         return { success: false, error: "INTERNAL_SERVER_ERROR" }
       }
     }),
+
+  getOngoing: publicProcedure.query(async () => {
+    const now = new Date()
+    const res = await DB.select()
+      .from(s.grants)
+      .where(and(lte(s.grants.validSince, now), gte(s.grants.validUntil, now), isNull(s.grants.interruptedBy)))
+      .leftJoin(s.users, eq(s.grants.userId, s.users.userId))
+
+    return {
+      grants: res.map((r) => ({ grant: r.grants, user: r.users })),
+    }
+  }),
 })
