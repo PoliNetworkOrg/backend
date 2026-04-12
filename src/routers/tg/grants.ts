@@ -5,6 +5,7 @@ import { DB, SCHEMA } from "@/db"
 import type { TUserRole } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { decryptUser } from "@/utils/users"
 
 const s = SCHEMA.TG
 
@@ -175,8 +176,14 @@ export default createTRPCRouter({
       .where(and(lte(s.grants.validSince, now), gte(s.grants.validUntil, now), isNull(s.grants.interruptedBy)))
       .leftJoin(s.users, eq(s.grants.userId, s.users.userId))
 
+    const grants = await Promise.all(
+      res.map(async (r) => ({ grant: r.grants, user: r.users ? await decryptUser(r.users).catch(() => null) : null }))
+    )
+
+    console.log(grants)
+
     return {
-      grants: res.map((r) => ({ grant: r.grants, user: r.users })),
+      grants,
     }
   }),
 })
