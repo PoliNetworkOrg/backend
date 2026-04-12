@@ -85,6 +85,13 @@
       "when": 1775940920223,
       "tag": "0011_yellow_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1775994260371,
+      "tag": "0012_sudden_sandman",
+      "breakpoints": true
     }
   ]
 }

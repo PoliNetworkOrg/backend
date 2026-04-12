@@ -7,7 +7,7 @@ export const grants = createTable.tg(
   "grants",
   {
     id: integer().primaryKey().generatedAlwaysAsIdentity(),
-    userId: bigint("user_id", { mode: "number" }),
+    userId: bigint("user_id", { mode: "number" }).notNull(),
     grantedBy: bigint("granted_by_id", { mode: "number" })
       .references(() => permissions.userId)
       .notNull(),
