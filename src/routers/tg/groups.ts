@@ -152,7 +152,7 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
-      const left = await WSS.leaveChat(input.chatId)
+      const left = await WSS.leaveChat(input.chatId, input.performerId)
       if (!left) return { error: "BOT_ERROR" }
 
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.chatId)).returning()
