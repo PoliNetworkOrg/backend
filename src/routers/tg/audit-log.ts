@@ -1,8 +1,10 @@
 import { desc, eq } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { ARRAY_AUDIT_TYPE } from "@/db/schema/tg/audit-log"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { decryptUser } from "@/utils/users"
 
 export default createTRPCRouter({
   create: publicProcedure
@@ -27,12 +29,21 @@ export default createTRPCRouter({
       })
     )
     .query(async ({ input }) => {
+      const admin = alias(SCHEMA.TG.users, "admin")
+
       const res = await DB.select()
         .from(SCHEMA.TG.auditLog)
         .where((t) => eq(t.targetId, input.targetId))
         .leftJoin(SCHEMA.TG.groups, eq(SCHEMA.TG.auditLog.groupId, SCHEMA.TG.groups.telegramId))
+        .leftJoin(admin, eq(SCHEMA.TG.auditLog.adminId, admin.userId))
         .orderBy(desc(SCHEMA.TG.auditLog.createdAt))
 
-      return res.map((e) => ({ ...e.audit_log, groupTitle: e.groups?.title }))
+      return await Promise.all(
+        res.map(async (e) => ({
+          ...e.audit_log,
+          groupTitle: e.groups?.title,
+          admin: e.admin ? await decryptUser(e.admin).catch(() => null) : null,
+        }))
+      )
     }),
 })
