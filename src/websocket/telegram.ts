@@ -22,6 +22,7 @@ export interface ToClient {
     cb: (error: string | null) => void
   ) => void
   logGrantInterrupt: (data: { userId: number; adminId: number }, cb: (error: string | null) => void) => void
+  leaveChat: (data: { chatId: number; performerId: number }, cb: (ok: boolean) => void) => void
 }
 
 // the telegram bot answers the backend

@@ -2,6 +2,7 @@ import { and, eq, ilike, ne, not, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
+import { WSS } from "@/server"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
 const GROUPS = SCHEMA.TG.groups
@@ -141,5 +142,22 @@ export default createTRPCRouter({
         .returning()
 
       return rows.length === 1
+    }),
+
+  leaveChat: publicProcedure
+    .input(
+      z.object({
+        chatId: z.number(),
+        performerId: z.number(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const left = await WSS.leaveChat(input.chatId)
+      if (!left) return { error: "BOT_ERROR" }
+
+      const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.chatId)).returning()
+      if (rows.length === 0) return { error: "NOT_FOUND" }
+
+      return { error: null }
     }),
 })

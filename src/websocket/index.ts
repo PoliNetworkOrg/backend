@@ -97,4 +97,24 @@ export class WebSocketServer {
       })
     })
   }
+
+  async leaveChat(chatId: number, performerId: number) {
+    const sockets = await this.io.fetchSockets()
+    const tgSocket = sockets.find((s) => s.data.type === "telegram")
+    if (!tgSocket) {
+      logger.error("[WS] There is no bot websocket connected, cannot perform logGrantInterrupt")
+      return false
+    }
+
+    return new Promise<boolean>((res) => {
+      tgSocket.emit("leaveChat", { chatId, performerId }, (ok) => {
+        if (!ok) {
+          logger.error({ chatId }, "[WS] Cannot leave the chat")
+          res(false)
+        } else {
+          res(true)
+        }
+      })
+    })
+  }
 }
