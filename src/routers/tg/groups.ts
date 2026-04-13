@@ -4,6 +4,7 @@ import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
 import { WSS } from "@/server"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { lower } from "@/utils/db"
 
 const GROUPS = SCHEMA.TG.groups
 export default createTRPCRouter({
@@ -79,6 +80,22 @@ export default createTRPCRouter({
         .from(GROUPS)
         .limit(1)
         .where((t) => eq(t.link, input.inviteLink))
+
+      if (res.length === 0) return null
+      return res[0]
+    }),
+
+  getByTag: publicProcedure
+    .input(
+      z.object({
+        tag: z.string(),
+      })
+    )
+    .query(async ({ input }) => {
+      const res = await DB.select()
+        .from(GROUPS)
+        .limit(1)
+        .where((t) => eq(lower(t.tag), input.tag.toLowerCase().replace("@", "")))
 
       if (res.length === 0) return null
       return res[0]
