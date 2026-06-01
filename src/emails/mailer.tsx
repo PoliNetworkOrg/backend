@@ -24,6 +24,7 @@ async function devSendMail(to: string, subject: string, component: JSX.Element) 
   const html = await render(component)
   const res = await transporter.sendMail({ to, subject, html })
   logger.info(`[EMAIL] new email, click to see: ${getTestMessageUrl(res)}`)
+  return true
 }
 
 const sendEmail = env.NODE_ENV === "development" && env.USE_DEV_MAILER ? devSendMail : azureSendEmail
