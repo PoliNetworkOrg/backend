@@ -7,14 +7,43 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 import { lower } from "@/utils/db"
 
 const GROUPS = SCHEMA.TG.groups
+const GROUPS_CACHE_TTL_MS = 30_000
+let groupsCache: { expiresAt: number; value: (typeof GROUPS.$inferSelect)[] } | null = null
+let groupsCachePromise: Promise<(typeof GROUPS.$inferSelect)[]> | null = null
+let groupsCacheVersion = 0
+
+const invalidateGroupsCache = () => {
+  groupsCacheVersion += 1
+  groupsCache = null
+  groupsCachePromise = null
+}
+
+const getAllGroups = async () => {
+  const now = Date.now()
+  if (groupsCache && groupsCache.expiresAt > now) return groupsCache.value
+  if (groupsCachePromise) return groupsCachePromise
+
+  const version = groupsCacheVersion
+  const promise = DB.select()
+    .from(GROUPS)
+    .then((value) => {
+      if (version === groupsCacheVersion) groupsCache = { value, expiresAt: Date.now() + GROUPS_CACHE_TTL_MS }
+      if (groupsCachePromise === promise) groupsCachePromise = null
+      return value
+    })
+    .catch((error) => {
+      if (groupsCachePromise === promise) groupsCachePromise = null
+      throw error
+    })
+
+  groupsCachePromise = promise
+  return groupsCachePromise
+}
+
 export default createTRPCRouter({
-  // TODO: this is performance HEAVY, make it more safe eventually
-  // At the moment, this query is used by banall flowProducer in the telegram bot.
-  // We may consider moving the flowProducer and ensure connection through the same Redis
-  // instance or some other way of bridging the two parts together.
   getAll: publicProcedure.query(async () => {
     const beforeMs = performance.now()
-    const results = await DB.select().from(GROUPS)
+    const results = await getAllGroups()
     const afterMs = performance.now()
 
     logger.warn({ queryMs: afterMs - beforeMs }, "Call to trpc.tg.groups.getAll, performance monitoring...")
@@ -114,6 +143,7 @@ export default createTRPCRouter({
     )
     .output(z.array(z.number()))
     .mutation(async ({ input }) => {
+      invalidateGroupsCache()
       for (const group of input) {
         await DB.delete(GROUPS).where(and(eq(GROUPS.link, group.link), ne(GROUPS.telegramId, group.telegramId)))
       }
@@ -130,6 +160,7 @@ export default createTRPCRouter({
           },
         })
         .returning()
+      invalidateGroupsCache()
       return rows.map((r) => r.telegramId)
     }),
 
@@ -142,6 +173,7 @@ export default createTRPCRouter({
     .output(z.boolean())
     .mutation(async ({ input }) => {
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.telegramId)).returning()
+      if (rows.length === 1) invalidateGroupsCache()
       return rows.length === 1
     }),
 
@@ -158,6 +190,7 @@ export default createTRPCRouter({
         .where(eq(GROUPS.telegramId, input.telegramId))
         .returning()
 
+      if (rows.length === 1) invalidateGroupsCache()
       return rows.length === 1
     }),
 
@@ -175,6 +208,7 @@ export default createTRPCRouter({
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.chatId)).returning()
       if (rows.length === 0) return { error: "NOT_FOUND" }
 
+      invalidateGroupsCache()
       return { error: null }
     }),
 })
