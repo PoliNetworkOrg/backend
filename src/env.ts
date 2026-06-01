@@ -44,6 +44,7 @@ export const env = createEnv({
     // env config
     NODE_ENV: NODE_ENV.default(nodeEnv),
     LOG_LEVEL: z.string().default("DEBUG"),
+    USE_DEV_MAILER: z.coerce.boolean().default(true),
   },
 
   runtimeEnv: process.env,
