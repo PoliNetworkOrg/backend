@@ -18,7 +18,8 @@
     "db:migrate": "drizzle-kit migrate",
     "typecheck": "tsc --noEmit",
     "check": "biome check",
-    "check:fix": "biome check --write --unsafe"
+    "check:fix": "biome check --write --unsafe",
+    "seed:user": "bun ./scripts/seed-user.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",
