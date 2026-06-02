@@ -8,14 +8,19 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 export const authRouter = createTRPCRouter({
   updateProfilePic: publicProcedure
     .input(
-      z.object({
-        userId: z.string(),
-        image: z
-          .file()
-          .mime(["image/png", "image/jpeg"])
-          .min(1)
-          .max(1024 * 1024), // 1MB
-      })
+      z
+        .instanceof(FormData)
+        .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
+        .pipe(
+          z.object({
+            userId: z.string(),
+            image: z
+              .file()
+              .mime(["image/png", "image/jpeg"])
+              .min(1)
+              .max(1024 * 1024), // 1MB
+          })
+        )
     )
     .mutation(async ({ input }) => {
       try {
