@@ -12,12 +12,15 @@ export default createTRPCRouter({
     .output(
       z.array(
         z.object({
-          title: z.string(),
+          titleIt: z.string(),
+          titleEn: z.string(),
           icon: z.string().nullable(),
           faqs: z.array(
             z.object({
-              title: z.string(),
-              description: z.string(),
+              titleIt: z.string(),
+              titleEn: z.string(),
+              descriptionIt: z.string(),
+              descriptionEn: z.string(),
             })
           ),
         })
@@ -28,13 +31,16 @@ export default createTRPCRouter({
       const categories = await DB.select().from(FAQ_CATEGORIES)
 
       const result = categories.map((c) => ({
-        title: c.title,
+        titleIt: c.titleIt,
+        titleEn: c.titleEn,
         icon: c.icon,
         faqs: faqs
           .filter((f) => f.categoryId === c.id)
           .map((f) => ({
-            title: f.title,
-            description: f.description,
+            titleIt: f.titleIt,
+            titleEn: f.titleEn,
+            descriptionIt: f.descriptionIt,
+            descriptionEn: f.descriptionEn,
           })),
       }))
 
@@ -44,19 +50,23 @@ export default createTRPCRouter({
   addFaqs: publicProcedure
     .input(
       z.object({
-        title: z.string(),
-        description: z.string(),
+        titleIt: z.string(),
+        titleEn: z.string(),
+        descriptionIt: z.string(),
+        descriptionEn: z.string(),
         categoryId: z.number(),
         createdBy: z.number(),
       })
     )
     .mutation(async ({ input }) => {
-      const { title, description, categoryId, createdBy } = input
+      const { titleIt, titleEn, descriptionIt, descriptionEn, categoryId, createdBy } = input
 
       const [res] = await DB.insert(FAQS)
         .values({
-          title,
-          description,
+          titleIt,
+          titleEn,
+          descriptionIt,
+          descriptionEn,
           categoryId,
           createdBy,
         })
@@ -68,17 +78,19 @@ export default createTRPCRouter({
   addFaqsCategory: publicProcedure
     .input(
       z.object({
-        title: z.string(),
+        titleIt: z.string(),
+        titleEn: z.string(),
         icon: z.string().nullable(),
         createdBy: z.number(),
       })
     )
     .mutation(async ({ input }) => {
-      const { title, icon, createdBy } = input
+      const { titleIt, titleEn, icon, createdBy } = input
 
       const [res] = await DB.insert(FAQ_CATEGORIES)
         .values({
-          title,
+          titleIt,
+          titleEn,
           icon,
           createdBy,
         })
@@ -91,25 +103,30 @@ export default createTRPCRouter({
     .input(
       z.object({
         id: z.number(),
-        title: z.string(),
-        description: z.string(),
+        titleIt: z.string(),
+        titleEn: z.string(),
+        descriptionIt: z.string(),
+        descriptionEn: z.string(),
         categoryId: z.number(),
         modifiedBy: z.number(),
       })
     )
     .mutation(async ({ input }) => {
-      const { id, title, description, categoryId, modifiedBy } = input
+      const { id, titleIt, titleEn, descriptionIt, descriptionEn, categoryId, modifiedBy } = input
 
       const [res] = await DB.update(FAQS)
         .set({
-          title,
-          description,
+          titleIt,
+          titleEn,
+          descriptionIt,
+          descriptionEn,
           categoryId,
           modifiedBy,
         })
         .where(eq(FAQS.id, id))
         .returning()
 
+      if (!res) return { error: "NOT_FOUND" }
       return res
     }),
 
@@ -117,23 +134,26 @@ export default createTRPCRouter({
     .input(
       z.object({
         id: z.number(),
-        title: z.string(),
+        titleIt: z.string(),
+        titleEn: z.string(),
         icon: z.string().nullable(),
         modifiedBy: z.number(),
       })
     )
     .mutation(async ({ input }) => {
-      const { id, title, icon, modifiedBy } = input
+      const { id, titleIt, titleEn, icon, modifiedBy } = input
 
       const [res] = await DB.update(FAQ_CATEGORIES)
         .set({
-          title,
+          titleIt,
+          titleEn,
           icon,
           modifiedBy,
         })
         .where(eq(FAQ_CATEGORIES.id, id))
         .returning()
 
+      if (!res) return { error: "NOT_FOUND" }
       return res
     }),
 

@@ -5,7 +5,8 @@ import { permissions } from "../tg/permissions"
 
 export const faqCategories = createTable.web("faq_categories", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  title: text("title").notNull(),
+  titleIt: text("title_it").notNull(),
+  titleEn: text("title_en").notNull(),
   icon: text("icon"),
   createdBy: bigint("created_by_id", { mode: "number" })
     .references(() => permissions.userId)
@@ -16,8 +17,10 @@ export const faqCategories = createTable.web("faq_categories", {
 
 export const faqs = createTable.web("faqs", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  title: text("title").notNull(),
-  description: text("description").notNull(),
+  titleIt: text("title_it").notNull(),
+  titleEn: text("title_en").notNull(),
+  descriptionIt: text("description_it").notNull(),
+  descriptionEn: text("description_en").notNull(),
   categoryId: integer("category_id")
     .references(() => faqCategories.id, { onDelete: "cascade" })
     .notNull(),
