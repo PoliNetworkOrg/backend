@@ -12,11 +12,13 @@ export default createTRPCRouter({
     .output(
       z.array(
         z.object({
+          categoryId: z.number(),
           titleIt: z.string(),
           titleEn: z.string(),
           icon: z.string().nullable(),
           faqs: z.array(
             z.object({
+              faqId: z.number(),
               titleIt: z.string(),
               titleEn: z.string(),
               descriptionIt: z.string(),
@@ -31,12 +33,14 @@ export default createTRPCRouter({
       const categories = await DB.select().from(FAQ_CATEGORIES)
 
       const result = categories.map((c) => ({
+        categoryId: c.id,
         titleIt: c.titleIt,
         titleEn: c.titleEn,
         icon: c.icon,
         faqs: faqs
           .filter((f) => f.categoryId === c.id)
           .map((f) => ({
+            faqId: f.id,
             titleIt: f.titleIt,
             titleEn: f.titleEn,
             descriptionIt: f.descriptionIt,
