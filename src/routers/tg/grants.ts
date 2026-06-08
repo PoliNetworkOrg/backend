@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, lte } from "drizzle-orm"
+import { and, eq, gt, gte, isNull, lte } from "drizzle-orm"
 import { z } from "zod"
 import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
@@ -191,7 +191,21 @@ export default createTRPCRouter({
       res.map(async (r) => ({ grant: r.grants, user: r.users ? await decryptUser(r.users).catch(() => null) : null }))
     )
 
-    console.log(grants)
+    return {
+      grants,
+    }
+  }),
+
+  getScheduled: publicProcedure.query(async () => {
+    const now = new Date()
+    const res = await DB.select()
+      .from(s.grants)
+      .where(and(gt(s.grants.validSince, now), isNull(s.grants.interruptedBy)))
+      .leftJoin(s.users, eq(s.grants.userId, s.users.userId))
+
+    const grants = await Promise.all(
+      res.map(async (r) => ({ grant: r.grants, user: r.users ? await decryptUser(r.users).catch(() => null) : null }))
+    )
 
     return {
       grants,
