@@ -10,6 +10,7 @@ export default createTRPCRouter({
     .output(
       z.array(
         z.object({
+          id: z.number(),
           name: z.string(),
           descriptionIt: z.string(),
           descriptionEn: z.string(),
@@ -21,6 +22,7 @@ export default createTRPCRouter({
       const associations = await DB.select().from(ASSOCIATIONS)
 
       const result = associations.map((c) => ({
+        id: c.id,
         name: c.name,
         descriptionIt: c.descriptionIt,
         descriptionEn: c.descriptionEn,
