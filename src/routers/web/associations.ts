@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm"
+import { asc, eq } from "drizzle-orm"
 import z from "zod"
 import { DB, SCHEMA } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
@@ -19,7 +19,7 @@ export default createTRPCRouter({
       )
     )
     .query(async () => {
-      const associations = await DB.select().from(ASSOCIATIONS)
+      const associations = await DB.select().from(ASSOCIATIONS).orderBy(asc(ASSOCIATIONS.id))
 
       const result = associations.map((c) => ({
         id: c.id,
