@@ -25,7 +25,7 @@ export const authRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       try {
         const buffer = Buffer.from(await input.image.arrayBuffer())
-        const file = await uploadBlob(buffer, input.image.type.includes("png") ? "png" : "jpeg")
+        const file = await uploadBlob(buffer, input.image.type.includes("png") ? "png" : "jpeg", input.image.type)
         await DB.update(SCHEMA.AUTH.user).set({ image: file.url }).where(eq(SCHEMA.AUTH.user.id, input.userId))
         return { success: true }
       } catch (err) {
