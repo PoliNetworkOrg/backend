@@ -1,5 +1,6 @@
 import { DefaultAzureCredential } from "@azure/identity"
 import { BlobServiceClient } from "@azure/storage-blob"
+import { customAlphabet } from "nanoid"
 import { env } from "@/env"
 import { logger } from "@/logger"
 
@@ -15,8 +16,11 @@ export const storageClient = new BlobServiceClient(
 const containerName = env.AZURE_BLOB_STORAGE_CONTAINER
 export const containerClient = storageClient.getContainerClient(containerName)
 
+const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz" // default with -_
+const nanoid = customAlphabet(alphabet, 21)
+
 export async function uploadBlob(buffer: Buffer, extension: string) {
-  const filename = `upload_${Date.now()}.${extension}`
+  const filename = `${nanoid()}.${extension.startsWith(".") ? extension.slice(1) : extension}`
   const blobClient = containerClient.getBlockBlobClient(filename)
 
   const res = await blobClient.upload(buffer, buffer.length)
