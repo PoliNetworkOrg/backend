@@ -40,6 +40,8 @@ export const env = createEnv({
     AZURE_CLIENT_ID: z.string(),
     AZURE_CLIENT_SECRET: z.string(),
     AZURE_EMAIL_SENDER: z.email().default("noreply@polinetwork.org"),
+    AZURE_BLOB_STORAGE_ACCOUNT: z.string().default("polinetworksa"),
+    AZURE_BLOB_STORAGE_CONTAINER: z.string().default("file-blobs"),
 
     // env config
     NODE_ENV: NODE_ENV.default(nodeEnv),
