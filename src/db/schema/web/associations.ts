@@ -9,6 +9,16 @@ export const associations = createTable.web("associations", {
   descriptionIt: text("description_it").notNull(),
   descriptionEn: text("description_en").notNull(),
   logoSvg: text("logo_svg"),
+  email: text("email"),
+  website: text("website"),
+  facebook: text("facebook"),
+  instagram: text("instagram"),
+  tiktok: text("tiktok"),
+  x: text("x"),
+  youtube: text("youtube"),
+  telegram: text("telegram"),
+  linkedin: text("linkedin"),
+  spotify: text("spotify"),
   createdBy: bigint("created_by_id", { mode: "number" })
     .references(() => permissions.userId)
     .notNull(),
