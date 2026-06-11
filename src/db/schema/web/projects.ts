@@ -3,7 +3,7 @@ import { timeColumns } from "@/db/columns"
 import { createTable } from "../create-table"
 import { permissions } from "../tg/permissions"
 
-export const projectsCategories = ["news", "deprecated", "other"] as const
+export const projectsCategories = ["news", "deprecated", "general"] as const
 
 export type ProjectCategory = (typeof projectsCategories)[number]
 
@@ -14,7 +14,7 @@ export const projects = createTable.web("projects", {
   descriptionEn: text("description_en").notNull(),
   logo: text("logo"),
   link: text("link"),
-  category: text("category", { enum: projectsCategories }).notNull().default("other"),
+  category: text("category", { enum: projectsCategories }).notNull().default("general"),
   order: integer("order").notNull().default(0),
   createdBy: bigint("created_by_id", { mode: "number" })
     .references(() => permissions.userId)
