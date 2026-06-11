@@ -64,6 +64,22 @@ export default createTRPCRouter({
     return res
   }),
 
+  reorderProjects: publicProcedure
+    .input(
+      z.object({
+        projectIds: z.array(z.number().int()).min(1),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await DB.transaction(async (tx) => {
+        await Promise.all(
+          input.projectIds.map((id, index) => tx.update(PROJECTS).set({ order: index }).where(eq(PROJECTS.id, id)))
+        )
+      })
+
+      return { error: null }
+    }),
+
   deleteProject: publicProcedure
     .input(
       z.object({
