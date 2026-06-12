@@ -1,3 +1,4 @@
+import { webRouter } from "@/routers/web"
 import { createTRPCRouter } from "@/trpc"
 import { authRouter } from "./auth"
 import { azureRouter } from "./azure"
@@ -14,6 +15,7 @@ export const appRouter = createTRPCRouter({
   tg: tgRouter,
   azure: azureRouter,
   auth: authRouter,
+  web: webRouter,
 })
 
 // export type definition of API
