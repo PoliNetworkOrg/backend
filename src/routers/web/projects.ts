@@ -64,7 +64,10 @@ export default createTRPCRouter({
   reorderProjects: publicProcedure
     .input(
       z.object({
-        projectIds: z.array(z.number().int()).min(1),
+        projectIds: z
+          .array(z.number().int())
+          .min(1)
+          .refine((projectIds) => new Set(projectIds).size === projectIds.length),
       })
     )
     .mutation(async ({ input }) => {
