@@ -14,7 +14,6 @@ const projectSchema = z.object({
   logo: z.string().nullable(),
   link: z.string().nullable(),
   category: z.enum(projectsCategories),
-  order: z.number(),
 })
 
 export default createTRPCRouter({
@@ -25,7 +24,7 @@ export default createTRPCRouter({
   addProject: publicProcedure
     .input(projectSchema.omit({ id: true }).extend({ createdBy: z.number() }))
     .mutation(async ({ input }) => {
-      const { title, descriptionIt, descriptionEn, logo, link, category, createdBy, order } = input
+      const { title, descriptionIt, descriptionEn, logo, link, category, createdBy } = input
 
       const [res] = await DB.insert(PROJECTS)
         .values({
@@ -36,7 +35,6 @@ export default createTRPCRouter({
           link,
           category,
           createdBy,
-          order,
         })
         .returning()
 
@@ -44,7 +42,7 @@ export default createTRPCRouter({
     }),
 
   editProject: publicProcedure.input(projectSchema.extend({ modifiedBy: z.number() })).mutation(async ({ input }) => {
-    const { id, title, descriptionIt, descriptionEn, logo, link, category, modifiedBy, order } = input
+    const { id, title, descriptionIt, descriptionEn, logo, link, category, modifiedBy } = input
 
     const [res] = await DB.update(PROJECTS)
       .set({
@@ -54,7 +52,6 @@ export default createTRPCRouter({
         logo,
         link,
         category,
-        order,
         modifiedBy,
       })
       .where(eq(PROJECTS.id, id))
