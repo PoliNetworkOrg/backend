@@ -23,7 +23,7 @@ const associationSchema = z.object({
   name: z.string(),
   descriptionIt: z.string(),
   descriptionEn: z.string(),
-  logoSvg: z.string().nullable(),
+  logo: z.string().nullable(),
   links: associationLinksSchema,
 })
 
@@ -33,7 +33,7 @@ function formatAssociation(association: typeof ASSOCIATIONS.$inferSelect): z.inf
     name: association.name,
     descriptionIt: association.descriptionIt,
     descriptionEn: association.descriptionEn,
-    logoSvg: association.logoSvg,
+    logo: association.logo,
     links: {
       email: association.email,
       website: association.website,
@@ -62,19 +62,19 @@ export default createTRPCRouter({
         name: z.string(),
         descriptionIt: z.string(),
         descriptionEn: z.string(),
-        logoSvg: z.string().nullable(),
+        logo: z.string().nullable(),
         createdBy: z.number(),
       })
     )
     .mutation(async ({ input }) => {
-      const { name, descriptionIt, descriptionEn, logoSvg, createdBy } = input
+      const { name, descriptionIt, descriptionEn, logo, createdBy } = input
 
       const [res] = await DB.insert(ASSOCIATIONS)
         .values({
           name,
           descriptionIt,
           descriptionEn,
-          logoSvg,
+          logo,
           createdBy,
         })
         .returning()
@@ -89,19 +89,19 @@ export default createTRPCRouter({
         name: z.string(),
         descriptionIt: z.string(),
         descriptionEn: z.string(),
-        logoSvg: z.string().nullable(),
+        logo: z.string().nullable(),
         modifiedBy: z.number(),
       })
     )
     .mutation(async ({ input }) => {
-      const { id, name, descriptionIt, descriptionEn, logoSvg, modifiedBy } = input
+      const { id, name, descriptionIt, descriptionEn, logo, modifiedBy } = input
 
       const [res] = await DB.update(ASSOCIATIONS)
         .set({
           name,
           descriptionIt,
           descriptionEn,
-          logoSvg,
+          logo,
           modifiedBy,
         })
         .where(eq(ASSOCIATIONS.id, id))

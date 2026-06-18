@@ -8,7 +8,7 @@ export const associations = createTable.web("associations", {
   name: text("name").notNull(),
   descriptionIt: text("description_it").notNull(),
   descriptionEn: text("description_en").notNull(),
-  logoSvg: text("logo_svg"),
+  logo: text("logo"),
   email: text("email"),
   website: text("website"),
   facebook: text("facebook"),
