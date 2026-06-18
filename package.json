@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.15.19",
+  "version": "0.16.2",
   "description": "PoliNetwork backend server",
   "private": true,
   "keywords": [],
@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
+    "@azure/storage-blob": "^12.31.0",
     "@better-auth/drizzle-adapter": "1.5.5",
     "@better-auth/passkey": "1.5.5",
     "@hono/trpc-server": "^0.4.2",

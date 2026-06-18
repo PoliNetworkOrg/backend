@@ -1,5 +1,5 @@
 {
-  "id": "2f672fdf-b7c0-4133-9bd5-44a0d3873972",
+  "id": "11d256f8-c5b6-4390-9cd6-c75f64c558d2",
   "prevId": "ed5cf808-3f4a-45df-b384-69cac0367dc8",
   "version": "7",
   "dialect": "postgresql",
@@ -1123,8 +1123,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.web_associations": {
-      "name": "web_associations",
+    "public.web_faq_categories": {
+      "name": "web_faq_categories",
       "schema": "",
       "columns": {
         "id": {
@@ -1134,7 +1134,7 @@
           "notNull": true,
           "identity": {
             "type": "always",
-            "name": "web_associations_id_seq",
+            "name": "web_faq_categories_id_seq",
             "schema": "public",
             "increment": "1",
             "startWith": "1",
@@ -1144,26 +1144,20 @@
             "cycle": false
           }
         },
-        "name": {
-          "name": "name",
+        "title_it": {
+          "name": "title_it",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "description_it": {
-          "name": "description_it",
+        "title_en": {
+          "name": "title_en",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "description_en": {
-          "name": "description_en",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "logo_svg": {
-          "name": "logo_svg",
+        "icon": {
+          "name": "icon",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1196,9 +1190,9 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "web_associations_created_by_id_tg_permissions_user_id_fk": {
-          "name": "web_associations_created_by_id_tg_permissions_user_id_fk",
-          "tableFrom": "web_associations",
+        "web_faq_categories_created_by_id_tg_permissions_user_id_fk": {
+          "name": "web_faq_categories_created_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_faq_categories",
           "tableTo": "tg_permissions",
           "columnsFrom": [
             "created_by_id"
@@ -1209,9 +1203,260 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "web_associations_modified_by_id_tg_permissions_user_id_fk": {
-          "name": "web_associations_modified_by_id_tg_permissions_user_id_fk",
-          "tableFrom": "web_associations",
+        "web_faq_categories_modified_by_id_tg_permissions_user_id_fk": {
+          "name": "web_faq_categories_modified_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_faq_categories",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "modified_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.web_faqs": {
+      "name": "web_faqs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "web_faqs_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "title_it": {
+          "name": "title_it",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title_en": {
+          "name": "title_en",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description_it": {
+          "name": "description_it",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description_en": {
+          "name": "description_en",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_id": {
+          "name": "created_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modified_by_id": {
+          "name": "modified_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "web_faqs_category_id_web_faq_categories_id_fk": {
+          "name": "web_faqs_category_id_web_faq_categories_id_fk",
+          "tableFrom": "web_faqs",
+          "tableTo": "web_faq_categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "web_faqs_created_by_id_tg_permissions_user_id_fk": {
+          "name": "web_faqs_created_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_faqs",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "created_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "web_faqs_modified_by_id_tg_permissions_user_id_fk": {
+          "name": "web_faqs_modified_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_faqs",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "modified_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.web_projects": {
+      "name": "web_projects",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "web_projects_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description_it": {
+          "name": "description_it",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description_en": {
+          "name": "description_en",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "logo": {
+          "name": "logo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "link": {
+          "name": "link",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'general'"
+        },
+        "order": {
+          "name": "order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_by_id": {
+          "name": "created_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modified_by_id": {
+          "name": "modified_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "web_projects_created_by_id_tg_permissions_user_id_fk": {
+          "name": "web_projects_created_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_projects",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "created_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "web_projects_modified_by_id_tg_permissions_user_id_fk": {
+          "name": "web_projects_modified_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_projects",
           "tableTo": "tg_permissions",
           "columnsFrom": [
             "modified_by_id"
