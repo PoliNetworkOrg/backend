@@ -3,6 +3,7 @@ import { authRouter } from "./auth"
 import { azureRouter } from "./azure"
 import { testRouter } from "./test"
 import { tgRouter } from "./tg"
+import { webRouter } from "./web"
 
 /**
  * This is the primary router for your server.
@@ -13,6 +14,7 @@ export const appRouter = createTRPCRouter({
   test: testRouter,
   tg: tgRouter,
   azure: azureRouter,
+  web: webRouter,
   auth: authRouter,
 })
 
