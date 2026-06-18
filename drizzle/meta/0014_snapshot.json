@@ -1,6 +1,6 @@
 {
-  "id": "73b5b73f-4da7-4798-9e1b-73c1839904b4",
-  "prevId": "52d78c7c-5b01-462a-823d-3ca688bcbdfd",
+  "id": "89bf3898-1916-4fec-986f-938f3fc9e1a2",
+  "prevId": "11d256f8-c5b6-4390-9cd6-c75f64c558d2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1162,8 +1162,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "logo_svg": {
-          "name": "logo_svg",
+        "logo": {
+          "name": "logo",
           "type": "text",
           "primaryKey": false,
           "notNull": false

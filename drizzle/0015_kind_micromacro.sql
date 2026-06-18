@@ -1,1 +1,0 @@
-ALTER TABLE "web_associations" RENAME COLUMN "logo_svg" TO "logo";
