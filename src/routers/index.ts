@@ -1,9 +1,9 @@
+import { webRouter } from "@/routers/web"
 import { createTRPCRouter } from "@/trpc"
 import { authRouter } from "./auth"
 import { azureRouter } from "./azure"
 import { testRouter } from "./test"
 import { tgRouter } from "./tg"
-import { webRouter } from "./web"
 
 /**
  * This is the primary router for your server.
