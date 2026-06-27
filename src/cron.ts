@@ -1,5 +1,5 @@
 import { Cron } from "croner"
-import { lt } from "drizzle-orm"
+import { and, eq, lt } from "drizzle-orm"
 import { MESSAGES_RETENTION_DAYS } from "./constants"
 import { DB, SCHEMA } from "./db"
 import { logger } from "./logger"
@@ -9,10 +9,29 @@ export function cron() {
     logger.info("[CRON] start")
     await cleanMessages()
     await cleanLinkCodes()
+    await markExpiredWarnings()
     logger.info("[CRON] end")
   })
 
   logger.info("[CRON] scheduled")
+}
+
+async function markExpiredWarnings() {
+  logger.info("[CRON] START(markExpiredWarnings)")
+
+  const twelveMonthsAgo = new Date()
+  twelveMonthsAgo.setFullYear(twelveMonthsAgo.getFullYear() - 1)
+
+  try {
+    const updated = await DB.update(SCHEMA.TG.warnings)
+      .set({ isExpired: true })
+      .where(and(lt(SCHEMA.TG.warnings.createdAt, twelveMonthsAgo), eq(SCHEMA.TG.warnings.isExpired, false)))
+      .returning()
+
+    logger.info(`[CRON] END(markExpiredWarnings) marked ${updated.length} warning(s) as expired.`)
+  } catch (err) {
+    logger.error(err, "[CRON] markExpiredWarnings")
+  }
 }
 
 async function cleanLinkCodes() {
