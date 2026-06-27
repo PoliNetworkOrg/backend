@@ -61,11 +61,15 @@ export default createTRPCRouter({
             })
         )
         .mutation(async ({input}) => {
-            await DB.update(SCHEMA.TG.warnings)
+            const [updated] = await DB.update(SCHEMA.TG.warnings)
                 .set({ deletedAt: new Date() })
-                .where(eq(SCHEMA.TG.warnings.id, input.id))
+                .where(and(
+                    eq(SCHEMA.TG.warnings.id, input.id),
+                    isNull(SCHEMA.TG.warnings.deletedAt),
+                    eq(SCHEMA.TG.warnings.isExpired, false)
+                ))
                 .returning()
-            return { error: null }
+            return { deleted: !!updated, error: null }
         }),
     // Count active warnings for user across ALL groups
     getTotalActiveCount: loggerProcedure
@@ -77,7 +81,7 @@ export default createTRPCRouter({
         .query(async ({ input }) => {
             return await DB.select({ count: count() })
                 .from(SCHEMA.TG.warnings)
-                .where(and(eq(SCHEMA.TG.warnings.targetId, input.targetId), isNull(SCHEMA.TG.warnings.deletedAt)))
+                .where(and(eq(SCHEMA.TG.warnings.targetId, input.targetId), isNull(SCHEMA.TG.warnings.deletedAt), eq(SCHEMA.TG.warnings.isExpired, false)))
         }),
     // Count active warnings for user in group 
     getActiveCountInGroup: loggerProcedure
@@ -90,6 +94,6 @@ export default createTRPCRouter({
         .query(async ({ input }) => {
             return await DB.select({ count: count() })
                 .from(SCHEMA.TG.warnings)
-                .where(and(eq(SCHEMA.TG.warnings.targetId, input.targetId), eq(SCHEMA.TG.warnings.groupId, input.groupId), isNull(SCHEMA.TG.warnings.deletedAt)))
+                .where(and(eq(SCHEMA.TG.warnings.targetId, input.targetId), eq(SCHEMA.TG.warnings.groupId, input.groupId), isNull(SCHEMA.TG.warnings.deletedAt), eq(SCHEMA.TG.warnings.isExpired, false)))
         })
 })
