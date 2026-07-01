@@ -94,7 +94,7 @@ export default createTRPCRouter({
           title,
           descriptionIt,
           descriptionEn,
-          ...(uploadedLogo && { logo: uploadedLogo.url }),
+          logo: uploadedLogo?.url ?? null,
           link,
           category,
           modifiedBy,
