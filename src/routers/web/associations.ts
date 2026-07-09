@@ -119,14 +119,14 @@ export default createTRPCRouter({
 
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
-        : null
+        : undefined
 
       const [res] = await DB.update(ASSOCIATIONS)
         .set({
           name,
           descriptionIt,
           descriptionEn,
-          logo: uploadedLogo?.url ?? null,
+          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
           modifiedBy,
         })
         .where(eq(ASSOCIATIONS.id, id))

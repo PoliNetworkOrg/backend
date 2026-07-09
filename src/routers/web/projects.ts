@@ -87,14 +87,14 @@ export default createTRPCRouter({
       const { title, descriptionIt, descriptionEn, logo, link, category, modifiedBy } = input
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
-        : null
+        : undefined
 
       const [res] = await DB.update(PROJECTS)
         .set({
           title,
           descriptionIt,
           descriptionEn,
-          logo: uploadedLogo?.url ?? null,
+          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
           link,
           category,
           modifiedBy,
