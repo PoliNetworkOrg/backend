@@ -5,7 +5,7 @@ import { permissions } from "../tg/permissions"
 
 export const guidesMatricole = createTable.web("guides_matricole", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
-  version: text("version").notNull(),
+  version: text("version").notNull().unique(),
   date: text("date").notNull(),
   file: text("file").notNull(),
   createdBy: bigint("created_by_id", { mode: "number" })
