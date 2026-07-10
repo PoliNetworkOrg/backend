@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm"
 import z from "zod"
-import { uploadBlob } from "@/azure/blob"
+import { deleteBlob, uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
@@ -80,6 +80,8 @@ export default createTRPCRouter({
       const deleted = await DB.delete(GUIDES_MATRICOLE).where(eq(GUIDES_MATRICOLE.id, id)).returning()
 
       if (deleted.length === 0) return { error: "NOT_FOUND" }
+
+      await deleteBlob(deleted[0].file)
       return { error: null }
     }),
 })
