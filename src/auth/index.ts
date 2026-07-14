@@ -8,7 +8,7 @@ import { env } from "@/env"
 import { emailOTP } from "./plugins/email-otp"
 import { telegramPlugin } from "./plugins/telegram"
 
-export const auth = betterAuth({
+export const auth: ReturnType<typeof betterAuth> = betterAuth({
   basePath: AUTH_PATH,
   baseURL: env.PUBLIC_URL,
   trustedOrigins: env.TRUSTED_ORIGINS,
