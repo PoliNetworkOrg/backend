@@ -4,8 +4,7 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 
 export default createTRPCRouter({
   getAll: publicProcedure.query(async () => {
-    const all = await getAllGroups()
-    return all.map((g) => ({ ...g, mailAddress: `${g.mailNickname}@polinetwork.org` }))
+    return await getAllGroups()
   }),
   addMember: publicProcedure
     .input(z.object({ groupId: z.string(), userId: z.string() }))

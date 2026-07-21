@@ -36,8 +36,7 @@ export type ParsedUser = {
 export type ParsedGroup = {
   id: string
   displayName: string
-  mailNickname: string
-  mailAddress: string
+  mailAddress: string | null
   members: Array<{
     id: string
     displayName: string
