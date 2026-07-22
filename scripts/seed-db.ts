@@ -2,7 +2,7 @@ import "@/server"
 import { argv } from "bun"
 import { sql } from "drizzle-orm"
 import { DB, SCHEMA } from "@/db"
-import { Cipher } from "@/utils/cipher"
+import { tgMessagesCipher } from "@/routers/tg/messages"
 import { encryptUser } from "@/utils/users"
 
 const USERS_COUNT = 2000
@@ -92,7 +92,6 @@ const chunk = <T>(items: T[], size: number): T[][] => {
 }
 
 const force = argv.includes("--force")
-const messageCipher = new Cipher("tg.messages")
 
 const existing = await Promise.all([
   DB.select().from(SCHEMA.TG.users).limit(1),
@@ -159,7 +158,7 @@ const messages = users.flatMap((user) =>
       messageId: nextMessageId(chatId),
       authorId: user.userId,
       timestamp: daysAgo(180),
-      message: messageCipher.encrypt(randomItem(MESSAGE_TEMPLATES)),
+      message: tgMessagesCipher.encrypt(randomItem(MESSAGE_TEMPLATES)),
     }
   })
 )
