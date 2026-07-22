@@ -5,7 +5,7 @@ import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 import { Cipher, DecryptError } from "@/utils/cipher"
 
-const cipher = new Cipher("tg.messages")
+export const tgMessagesCipher = new Cipher("tg.messages")
 
 const s = SCHEMA.TG
 const message = z.object({
@@ -56,7 +56,7 @@ export default createTRPCRouter({
       if (!res) return { message: null, error: "NOT_FOUND" }
 
       try {
-        const encryptedMessage = cipher.decrypt(res.message)
+        const encryptedMessage = tgMessagesCipher.decrypt(res.message)
         const message: Message = {
           message: encryptedMessage,
           timestamp: res.timestamp,
@@ -83,7 +83,7 @@ export default createTRPCRouter({
       try {
         const messages = input.messages.map(async (m) => ({
           ...m,
-          message: cipher.encrypt(m.message),
+          message: tgMessagesCipher.encrypt(m.message),
         }))
         const awaitedMessages = await Promise.all(messages)
         await DB.insert(s.messages).values(awaitedMessages).onConflictDoNothing()
@@ -126,7 +126,7 @@ export default createTRPCRouter({
 
       try {
         const messages = res.map(({ messages: e, groups: group }) => {
-          const decryptedMessage = cipher.decrypt(e.message)
+          const decryptedMessage = tgMessagesCipher.decrypt(e.message)
           const message: Message = {
             message: decryptedMessage,
             timestamp: e.timestamp,
