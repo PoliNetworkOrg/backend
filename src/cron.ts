@@ -2,6 +2,7 @@ import { Cron } from "croner"
 import { lt } from "drizzle-orm"
 import { MESSAGES_RETENTION_DAYS } from "./constants"
 import { DB, SCHEMA } from "./db"
+import { env } from "./env"
 import { logger } from "./logger"
 
 export function cron() {
@@ -30,6 +31,9 @@ async function cleanLinkCodes() {
 }
 
 async function cleanMessages() {
+  // do not run this cronjob unless in production
+  if (env.NODE_ENV !== "production") return
+
   logger.info(`[CRON] START(cleanMessages) retention days = ${MESSAGES_RETENTION_DAYS}`)
 
   const daysAgo = new Date()
