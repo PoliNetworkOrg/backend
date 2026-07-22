@@ -32,3 +32,13 @@ export type ParsedUser = {
   isMember: boolean
   assignedLicensesIds: string[]
 }
+
+export type ParsedGroup = {
+  id: string
+  displayName: string
+  mailAddress: string | null
+  members: Array<{
+    id: string
+    displayName: string
+  }>
+}

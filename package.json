@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.16.3",
+  "version": "0.17.0",
   "description": "PoliNetwork backend server",
   "private": true,
   "keywords": [],
@@ -16,6 +16,7 @@
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit",
     "check": "biome check",
     "check:fix": "biome check --write --unsafe",
