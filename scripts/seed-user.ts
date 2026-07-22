@@ -1,4 +1,3 @@
-import "@/server"
 import type { User } from "better-auth"
 import { argv } from "bun"
 import { eq } from "drizzle-orm"

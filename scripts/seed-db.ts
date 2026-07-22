@@ -1,4 +1,3 @@
-import "@/server"
 import { argv } from "bun"
 import { sql } from "drizzle-orm"
 import { DB, SCHEMA } from "@/db"
