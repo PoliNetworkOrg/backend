@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "description": "PoliNetwork backend server",
   "private": true,
   "keywords": [],
