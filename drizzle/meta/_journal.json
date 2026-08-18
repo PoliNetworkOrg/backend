@@ -96,22 +96,8 @@
     {
       "idx": 13,
       "version": "7",
-      "when": 1781815592697,
-      "tag": "0013_youthful_captain_britain",
-      "breakpoints": true
-    },
-    {
-      "idx": 14,
-      "version": "7",
-      "when": 1781819577408,
-      "tag": "0014_regular_blindfold",
-      "breakpoints": true
-    },
-    {
-      "idx": 15,
-      "version": "7",
-      "when": 1783667936607,
-      "tag": "0015_equal_the_spike",
+      "when": 1787092097810,
+      "tag": "0013_military_zzzax",
       "breakpoints": true
     }
   ]
