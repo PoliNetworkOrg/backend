@@ -3,7 +3,7 @@ import MailComposer from "nodemailer/lib/mail-composer/index.js"
 import type { JSX } from "react"
 import { env } from "@/env"
 import { logger } from "@/logger"
-import { client } from "../client"
+import { getAzureClient } from "../client"
 
 export async function sendEmail(to: string, subject: string, component: JSX.Element) {
   const html = await render(component)
@@ -27,6 +27,7 @@ export async function sendEmail(to: string, subject: string, component: JSX.Elem
   const base64Encoded = mimeMessage.toString("base64")
 
   try {
+    const client = getAzureClient()
     await client.api(`/users/${sender}/sendMail`).header("Content-Type", "text/plain").post(base64Encoded)
     logger.info({ subject, to }, "[Azure Graph API] Email sent")
 

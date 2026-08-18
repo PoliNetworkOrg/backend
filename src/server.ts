@@ -5,9 +5,8 @@ import { cors } from "hono/cors"
 import { logger as loggerMiddlware } from "hono/logger"
 import z from "zod"
 import { auth } from "./auth"
-import { getMembers } from "./azure/functions/members"
 import "./azure/blob"
-import { addGroupMember, getAllGroups, removeGroupMember } from "./azure/functions/groups"
+import { azureDirectory } from "./azure/directory"
 import { AUTH_PATH, TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
@@ -84,14 +83,14 @@ app.post(
 app.get("/test/members", async (c) => {
   if (env.NODE_ENV === "production") return c.status(500)
 
-  const users = await getMembers()
+  const users = await azureDirectory.getMembers()
   return c.json({ users })
 })
 
 app.get("/test/azure-groups", async (c) => {
   if (env.NODE_ENV === "production") return c.status(500)
 
-  const groups = await getAllGroups()
+  const groups = await azureDirectory.getAllGroups()
   return c.json({ groups })
 })
 
@@ -102,7 +101,10 @@ app.post(
     if (env.NODE_ENV === "production") return c.status(500)
     const { userId, groupId, mode } = c.req.valid("json")
 
-    const ok = mode === "add" ? await addGroupMember(groupId, userId) : await removeGroupMember(groupId, userId)
+    const ok =
+      mode === "add"
+        ? await azureDirectory.addGroupMember(groupId, userId)
+        : await azureDirectory.removeGroupMember(groupId, userId)
     return c.json({ ok })
   }
 )

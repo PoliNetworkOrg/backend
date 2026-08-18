@@ -42,3 +42,26 @@ export type ParsedGroup = {
     displayName: string
   }>
 }
+
+export type CreateMemberInput = {
+  firstName: string
+  lastName: string
+  assocNumber: number
+}
+
+export type CreatedMember = {
+  firstName: string
+  lastName: string
+  id: string
+  mail: string
+  password: string
+}
+
+export type AzureDirectory = {
+  getMembers(): Promise<ParsedUser[]>
+  setMemberNumber(userId: string, assocNumber: number): Promise<{ error: string | null }>
+  createMember(input: CreateMemberInput): Promise<CreatedMember>
+  getAllGroups(): Promise<ParsedGroup[]>
+  addGroupMember(groupId: string, userId: string): Promise<boolean>
+  removeGroupMember(groupId: string, userId: string): Promise<boolean>
+}

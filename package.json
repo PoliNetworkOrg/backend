@@ -13,6 +13,7 @@
     "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
     "email": "email dev --port 3012 --dir src/emails/templates",
     "start": "bun run ./dist/server.js",
+    "test": "vitest run",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
