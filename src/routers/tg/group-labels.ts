@@ -17,6 +17,12 @@ export default createTRPCRouter({
     return results
   }),
 
+  getAllRelations: publicProcedure.query(async () => {
+    const results = await DB.select().from(GROUP_LABEL_RELATIONS)
+
+    return results
+  }),
+
   create: publicProcedure
     .input(
       z.object({
