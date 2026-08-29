@@ -7,7 +7,9 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 import { lower } from "@/utils/db"
 
 const GROUPS = SCHEMA.TG.groups
-const GROUP_LABELS = SCHEMA.TG.groupLabelRelations
+const LABELS = SCHEMA.COMMON.groupLabels
+const LABEL_RELATIONS = SCHEMA.TG.tgGroupLabelRelations
+
 export default createTRPCRouter({
   // TODO: this is performance HEAVY, make it more safe eventually
   // At the moment, this query is used by banall flowProducer in the telegram bot.
@@ -43,11 +45,12 @@ export default createTRPCRouter({
         conditions.push(
           exists(
             DB.select()
-              .from(GROUP_LABELS)
+              .from(LABEL_RELATIONS)
+              .innerJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
               .where(
                 and(
-                  eq(GROUP_LABELS.groupId, GROUPS.telegramId),
-                  or(...requiredLabels.map((label) => eq(GROUP_LABELS.label, label)))
+                  eq(LABEL_RELATIONS.groupId, GROUPS.telegramId),
+                  or(...requiredLabels.map((label) => eq(LABELS.label, label)))
                 )
               )
           )
@@ -58,11 +61,12 @@ export default createTRPCRouter({
         conditions.push(
           notExists(
             DB.select()
-              .from(GROUP_LABELS)
+              .from(LABEL_RELATIONS)
+              .innerJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
               .where(
                 and(
-                  eq(GROUP_LABELS.groupId, GROUPS.telegramId),
-                  or(...excludedLabels.map((label) => eq(GROUP_LABELS.label, label)))
+                  eq(LABEL_RELATIONS.groupId, GROUPS.telegramId),
+                  or(...excludedLabels.map((label) => eq(LABELS.label, label)))
                 )
               )
           )

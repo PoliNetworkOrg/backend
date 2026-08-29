@@ -1,8 +1,10 @@
 import { createTRPCRouter } from "@/trpc"
 import { authRouter } from "./auth"
 import { azureRouter } from "./azure"
+import { groupsRouter } from "./groups"
 import { testRouter } from "./test"
 import { tgRouter } from "./tg"
+import { waRouter } from "./wa"
 import { webRouter } from "./web"
 
 /**
@@ -11,11 +13,13 @@ import { webRouter } from "./web"
  * All routers added in /api/routers should be manually added here.
  */
 export const appRouter = createTRPCRouter({
+  auth: authRouter,
+  azure: azureRouter,
+  groups: groupsRouter,
   test: testRouter,
   tg: tgRouter,
-  azure: azureRouter,
+  wa: waRouter,
   web: webRouter,
-  auth: authRouter,
 })
 
 // export type definition of API

@@ -1,7 +1,7 @@
 import { createTRPCRouter } from "@/trpc"
+import groupLabels from "../groups/labels"
 import auditLog from "./audit-log"
 import grants from "./grants"
-import groupLabels from "./group-labels"
 import groups from "./groups"
 import link from "./link"
 import messages from "./messages"

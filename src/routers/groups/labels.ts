@@ -1,10 +1,12 @@
 import { and, eq } from "drizzle-orm"
 import { z } from "zod"
-import { DB, SCHEMA } from "@/db"
+import { DB, SCHEMA, VIEWS } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
-const GROUP_LABELS = SCHEMA.TG.groupLabels
-const GROUP_LABEL_RELATIONS = SCHEMA.TG.groupLabelRelations
+const GROUPS = VIEWS.GROUPS.groupsView
+const GROUP_LABELS = SCHEMA.COMMON.groupLabels
+const TG_RELATIONS = SCHEMA.TG.tgGroupLabelRelations
+const WA_RELATIONS = SCHEMA.WA.waGroupLabelRelations
 
 export const groupLabel = z.string().min(1).max(128)
 const label = groupLabel
@@ -13,12 +15,6 @@ const label = groupLabel
 export default createTRPCRouter({
   getAll: publicProcedure.query(async () => {
     const results = await DB.select().from(GROUP_LABELS)
-
-    return results
-  }),
-
-  getAllRelations: publicProcedure.query(async () => {
-    const results = await DB.select().from(GROUP_LABEL_RELATIONS)
 
     return results
   }),
@@ -99,13 +95,34 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       const { groupId, label } = input
 
-      const result = await DB.insert(GROUP_LABEL_RELATIONS)
-        .values({
-          groupId,
-          label,
-        })
-        .returning()
-      return result
+      const type = await DB.select({ type: GROUPS.type }).from(GROUPS).where(eq(GROUPS.id, groupId)).limit(1)
+      if (!type.length) throw new Error("Group not found")
+      const labelIdResult = await DB.select({ id: GROUP_LABELS.id })
+        .from(GROUP_LABELS)
+        .where(eq(GROUP_LABELS.label, label))
+        .limit(1)
+      if (!labelIdResult.length) throw new Error("Label not found")
+      const labelId = labelIdResult[0].id
+
+      if (type[0].type === "tg") {
+        const result = await DB.insert(TG_RELATIONS)
+          .values({
+            groupId,
+            labelId,
+          })
+          .returning()
+        return result
+      } else if (type[0].type === "wa") {
+        const result = await DB.insert(WA_RELATIONS)
+          .values({
+            groupId,
+            labelId,
+          })
+          .returning()
+        return result
+      }
+
+      throw new Error("Invalid group type")
     }),
 
   untagGroup: publicProcedure
@@ -118,9 +135,22 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       const { groupId, label } = input
 
-      const result = await DB.delete(GROUP_LABEL_RELATIONS)
-        .where(and(eq(GROUP_LABEL_RELATIONS.groupId, groupId), eq(GROUP_LABEL_RELATIONS.label, label)))
-        .returning()
-      return result
+      const labelIdResult = await DB.select({ id: GROUP_LABELS.id })
+        .from(GROUP_LABELS)
+        .where(eq(GROUP_LABELS.label, label))
+        .limit(1)
+      if (!labelIdResult.length) throw new Error("Label not found")
+      const labelId = labelIdResult[0].id
+
+      const result = await Promise.allSettled([
+        DB.delete(TG_RELATIONS)
+          .where(and(eq(TG_RELATIONS.groupId, groupId), eq(TG_RELATIONS.labelId, labelId)))
+          .returning(),
+        await DB.delete(WA_RELATIONS)
+          .where(and(eq(WA_RELATIONS.groupId, groupId), eq(WA_RELATIONS.labelId, labelId)))
+          .returning(),
+      ])
+
+      return result.flatMap((r) => (r.status === "fulfilled" ? r.value : []))
     }),
 })
