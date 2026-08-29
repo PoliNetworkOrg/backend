@@ -12,17 +12,17 @@ export const search = createTRPCRouter({
     const results = await DB.select({
       id: GROUPS.id,
       title: GROUPS.title,
-      type: GROUPS.type,
+      // `GROUPS.type`/`LABEL_RELATIONS.type` both compile to bare `"type"` (they're `sql`-defined view
+      // columns, not real table columns), so referencing either unqualified is ambiguous once joined.
+      type: sql<"tg" | "wa">`${GROUPS}.type`,
       link: GROUPS.link,
       hide: GROUPS.hide,
-      labels: sql<
-        string[]
-      >`coalesce(array_agg(${LABELS.label}) filter (where ${LABELS.label} is not null) using array_agg, '{}')`,
+      labels: sql<string[]>`coalesce(array_agg(${LABELS.label}) filter (where ${LABELS.label} is not null), '{}')`,
     })
       .from(GROUPS)
       .leftJoin(LABEL_RELATIONS, eq(LABEL_RELATIONS.groupId, GROUPS.id))
       .leftJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
-      .groupBy(GROUPS.id)
+      .groupBy(GROUPS.id, GROUPS.title, sql`${GROUPS}.type`, GROUPS.link, GROUPS.hide)
 
     return results
   }),
@@ -89,18 +89,18 @@ export const search = createTRPCRouter({
       const results = await DB.select({
         telegramId: GROUPS.id,
         title: GROUPS.title,
-        type: GROUPS.type,
+        // see the `getAll` procedure above: `type` must be qualified to avoid ambiguity with
+        // `LABEL_RELATIONS.type`, since both are `sql`-defined view columns that lose their table info.
+        type: sql<"tg" | "wa">`${GROUPS}.type`,
         link: GROUPS.link,
         hide: GROUPS.hide,
-        labels: sql<
-          string[]
-        >`coalesce(array_agg(${LABELS.label}) filter (where ${LABELS.label} is not null) using array_agg, '{}')`,
+        labels: sql<string[]>`coalesce(array_agg(${LABELS.label}) filter (where ${LABELS.label} is not null), '{}')`,
       })
         .from(GROUPS)
         .leftJoin(LABEL_RELATIONS, eq(LABEL_RELATIONS.groupId, GROUPS.id))
         .leftJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
         .where(and(...conditions))
-        .groupBy(GROUPS.id)
+        .groupBy(GROUPS.id, GROUPS.title, sql`${GROUPS}.type`, GROUPS.link, GROUPS.hide)
         .orderBy((t) => asc(t.type))
         .limit(limit)
 

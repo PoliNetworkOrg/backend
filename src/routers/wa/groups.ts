@@ -6,6 +6,11 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 const GROUPS = SCHEMA.WA.waGroups
 
 export default createTRPCRouter({
+  getAll: publicProcedure.query(async () => {
+    const results = await DB.select().from(GROUPS)
+    return results
+  }),
+
   getById: publicProcedure
     .input(
       z.object({
@@ -38,34 +43,30 @@ export default createTRPCRouter({
       return res[0]
     }),
 
-  create: publicProcedure
+  add: publicProcedure
     .input(
-      z.array(
-        z.object({
-          title: z.string(),
-          id: z.number(),
-          link: z.url({ hostname: /^t\.me$/ }),
-        })
-      )
+      z.object({
+        title: z.string(),
+        link: z.url({ hostname: /^chat\.whatsapp\.com$/ }),
+      })
     )
-    .output(z.array(z.number()))
     .mutation(async ({ input }) => {
-      for (const group of input) {
-        await DB.delete(GROUPS).where(and(eq(GROUPS.link, group.link), ne(GROUPS.id, group.id)))
-      }
+      const [created] = await DB.insert(GROUPS).values(input).returning()
+      return created
+    }),
 
-      const rows = await DB.insert(GROUPS)
-        .values(input)
-        .onConflictDoUpdate({
-          target: GROUPS.id,
-          set: {
-            // this means: use the new value
-            title: sql.raw(`excluded.${GROUPS.title.name}`),
-            link: sql.raw(`excluded.${GROUPS.link.name}`),
-          },
-        })
-        .returning()
-      return rows.map((r) => r.id)
+  modify: publicProcedure
+    .input(
+      z.object({
+        id: z.number(),
+        title: z.string(),
+        link: z.url({ hostname: /^chat\.whatsapp\.com$/ }),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { id, ...values } = input
+      const [updated] = await DB.update(GROUPS).set(values).where(eq(GROUPS.id, id)).returning()
+      return updated
     }),
 
   delete: publicProcedure
