@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA, VIEWS } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
@@ -53,6 +53,24 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       const { label } = input
 
+      const labelRow = await DB.select({ id: GROUP_LABELS.id })
+        .from(GROUP_LABELS)
+        .where(eq(GROUP_LABELS.label, label))
+        .limit(1)
+      if (!labelRow.length) return []
+      const labelId = labelRow[0].id
+
+      const [[tgCount], [waCount]] = await Promise.all([
+        DB.select({ count: sql<string>`count(*)` }).from(TG_RELATIONS).where(eq(TG_RELATIONS.labelId, labelId)),
+        DB.select({ count: sql<string>`count(*)` }).from(WA_RELATIONS).where(eq(WA_RELATIONS.labelId, labelId)),
+      ])
+      const groupCount = Number(tgCount?.count ?? 0) + Number(waCount?.count ?? 0)
+      if (groupCount > 0) {
+        throw new Error(
+          `This label is still assigned to ${groupCount} group${groupCount === 1 ? "" : "s"}. Remove it from them before deleting.`
+        )
+      }
+
       const result = await DB.delete(GROUP_LABELS).where(eq(GROUP_LABELS.label, label)).returning()
       return result
     }),
@@ -61,6 +79,7 @@ export default createTRPCRouter({
     .input(
       z.object({
         label,
+        newLabel: label.optional(),
         description: z.string().optional(),
         color: z
           .string()
@@ -70,10 +89,11 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
-      const { label, description, color, updatedBy } = input
+      const { label, newLabel, description, color, updatedBy } = input
 
       const result = await DB.update(GROUP_LABELS)
         .set({
+          label: newLabel,
           description,
           color,
           updatedBy,
