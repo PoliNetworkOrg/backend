@@ -16,5 +16,5 @@ export const tgRouter = createTRPCRouter({
   auditLog,
   users,
   grants,
-  warnings
+  warnings,
 })

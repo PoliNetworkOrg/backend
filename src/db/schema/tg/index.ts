@@ -8,4 +8,14 @@ import * as test from "./test"
 import * as users from "./users"
 import * as warnings from "./warnings"
 
-export const schema = { ...groups, ...test, ...permissions, ...link, ...messages, ...auditLog, ...users, ...grants, ...warnings }
+export const schema = {
+  ...groups,
+  ...test,
+  ...permissions,
+  ...link,
+  ...messages,
+  ...auditLog,
+  ...users,
+  ...grants,
+  ...warnings,
+}
