@@ -126,9 +126,10 @@ export default createTRPCRouter({
             })
         )
         .query(async ({ input }) => {
-            return await DB.select({ count: count() })
+            const [result] = await DB.select({ count: count() })
                 .from(SCHEMA.TG.warnings)
                 .where(and(eq(SCHEMA.TG.warnings.targetId, input.targetId), isNull(SCHEMA.TG.warnings.deletedAt), eq(SCHEMA.TG.warnings.isExpired, false)))
+            return result?.count ?? 0
         }),
     /**
      * getActiveCountInGroup - Returns the number of active warnings for a
@@ -146,8 +147,9 @@ export default createTRPCRouter({
         )
         .query(async ({ input }) => {
             // Only count warnings that are not deleted and not expired.
-            return await DB.select({ count: count() })
+            const [result] = await DB.select({ count: count() })
                 .from(SCHEMA.TG.warnings)
                 .where(and(eq(SCHEMA.TG.warnings.targetId, input.targetId), eq(SCHEMA.TG.warnings.groupId, input.groupId), isNull(SCHEMA.TG.warnings.deletedAt), eq(SCHEMA.TG.warnings.isExpired, false)))
+            return result?.count ?? 0
         })
 })
