@@ -1,8 +1,8 @@
 import { logger } from "@/logger"
 import { generatePassword } from "@/utils/password"
 import { withRetry } from "@/utils/wait"
-import { client } from "../client"
-import type { ParsedUser, User } from "../types"
+import { getAzureClient } from "../client"
+import type { CreatedMember, CreateMemberInput, ParsedUser, User } from "../types"
 
 const GruppoSociID = "1c68dbb8-4ac3-4569-a886-283b5a825cbd"
 const Licenses = {
@@ -15,6 +15,7 @@ const FlippedLicenses = Object.fromEntries(Object.entries(Licenses).map(([key, v
 
 export async function getMembers(): Promise<ParsedUser[]> {
   try {
+    const client = getAzureClient()
     const allPolinetworkUsers: User[] = await client
       .api(`/users`)
       .header("ConsistencyLevel", "eventual")
@@ -47,6 +48,7 @@ export async function getMembers(): Promise<ParsedUser[]> {
 
 export async function setMemberNumber(userId: string, assocNumber: number) {
   try {
+    const client = getAzureClient()
     await client.api(`/users/${userId}`).patch({
       employeeId: assocNumber.toString(),
     })
@@ -56,15 +58,8 @@ export async function setMemberNumber(userId: string, assocNumber: number) {
   }
 }
 
-export async function createMember({
-  firstName,
-  lastName,
-  assocNumber,
-}: {
-  firstName: string
-  lastName: string
-  assocNumber: number
-}) {
+export async function createMember({ firstName, lastName, assocNumber }: CreateMemberInput): Promise<CreatedMember> {
+  const client = getAzureClient()
   // TODO: separate steps and add better error handling, maybe with neverthrow
   const password = generatePassword()
   const mailNickname = `${firstName.replaceAll(" ", "")}.${lastName.replaceAll(" ", "")}`.toLowerCase()
@@ -112,6 +107,7 @@ export async function createMember({
 }
 
 export async function changePassword(userId: string) {
+  const client = getAzureClient()
   const password = generatePassword()
 
   await withRetry(() =>
@@ -130,6 +126,7 @@ export async function manageLicenses(
   addLicenses: (keyof typeof Licenses)[],
   removeLicenses: (keyof typeof Licenses)[]
 ) {
+  const client = getAzureClient()
   await withRetry(() =>
     client.api(`/users/${userId}/assignLicense`).post({
       addLicenses: addLicenses.map((l) => ({

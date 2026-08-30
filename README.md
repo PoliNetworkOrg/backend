@@ -15,11 +15,11 @@ Requirements:
 
 - Bun installed
 - A Postgres database
-- An Azure App Registration
 
 > [!NOTE]
-> You can skip Azure by making `AZURE_*` env vars optional in `./src/env.ts`
-> and by removing all Azure related auth in `./src/azure/`
+> Azure credentials are optional. When `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
+> `AZURE_CLIENT_SECRET` are all omitted, the Azure tRPC routes use a seeded in-memory directory.
+> Its changes last until the backend restarts. Set all three variables to connect to Microsoft Graph.
 
 1. Install packages
    ```sh

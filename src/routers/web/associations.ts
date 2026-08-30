@@ -1,9 +1,17 @@
 import { asc, eq } from "drizzle-orm"
 import z from "zod"
+import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { getImageExtension } from "@/utils/web"
 
 const ASSOCIATIONS = SCHEMA.WEB.associations
+
+const logoFileSchema = z
+  .file()
+  .mime(["image/png", "image/jpeg", "image/svg+xml"])
+  .min(1)
+  .max(1024 * 1024)
 
 const associationLinksSchema = z.object({
   email: z.email().nullable(),
@@ -16,6 +24,13 @@ const associationLinksSchema = z.object({
   telegram: z.url().nullable(),
   linkedin: z.url().nullable(),
   spotify: z.url().nullable(),
+})
+
+const associationFormSchema = z.object({
+  name: z.string(),
+  descriptionIt: z.string(),
+  descriptionEn: z.string(),
+  logo: logoFileSchema.optional(),
 })
 
 const associationSchema = z.object({
@@ -58,23 +73,28 @@ export default createTRPCRouter({
 
   addAssociation: publicProcedure
     .input(
-      z.object({
-        name: z.string(),
-        descriptionIt: z.string(),
-        descriptionEn: z.string(),
-        logo: z.string().nullable(),
-        createdBy: z.number(),
-      })
+      z
+        .instanceof(FormData)
+        .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
+        .pipe(
+          associationFormSchema.extend({
+            createdBy: z.coerce.number<string>(),
+          })
+        )
     )
     .mutation(async ({ input }) => {
       const { name, descriptionIt, descriptionEn, logo, createdBy } = input
+
+      const uploadedLogo = logo
+        ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
+        : null
 
       const [res] = await DB.insert(ASSOCIATIONS)
         .values({
           name,
           descriptionIt,
           descriptionEn,
-          logo,
+          logo: uploadedLogo?.url ?? null,
           createdBy,
         })
         .returning()
@@ -84,24 +104,29 @@ export default createTRPCRouter({
 
   editAssociation: publicProcedure
     .input(
-      z.object({
-        id: z.number(),
-        name: z.string(),
-        descriptionIt: z.string(),
-        descriptionEn: z.string(),
-        logo: z.string().nullable(),
-        modifiedBy: z.number(),
-      })
+      z
+        .instanceof(FormData)
+        .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
+        .pipe(
+          associationFormSchema.extend({
+            id: z.coerce.number<string>(),
+            modifiedBy: z.coerce.number<string>(),
+          })
+        )
     )
     .mutation(async ({ input }) => {
       const { id, name, descriptionIt, descriptionEn, logo, modifiedBy } = input
+
+      const uploadedLogo = logo
+        ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
+        : undefined
 
       const [res] = await DB.update(ASSOCIATIONS)
         .set({
           name,
           descriptionIt,
           descriptionEn,
-          logo,
+          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
           modifiedBy,
         })
         .where(eq(ASSOCIATIONS.id, id))

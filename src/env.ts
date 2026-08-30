@@ -36,9 +36,9 @@ export const env = createEnv({
     DB_NAME: z.string().min(3).default("polinetwork_backend"),
 
     // Azure
-    AZURE_TENANT_ID: z.string(),
-    AZURE_CLIENT_ID: z.string(),
-    AZURE_CLIENT_SECRET: z.string(),
+    AZURE_TENANT_ID: z.string().min(1).optional(),
+    AZURE_CLIENT_ID: z.string().min(1).optional(),
+    AZURE_CLIENT_SECRET: z.string().min(1).optional(),
     AZURE_EMAIL_SENDER: z.email().default("noreply@polinetwork.org"),
     AZURE_BLOB_STORAGE_ACCOUNT: z.string().default("polinetworksa"),
     AZURE_BLOB_STORAGE_CONTAINER: z.string().default("file-blobs"),

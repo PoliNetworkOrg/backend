@@ -1,12 +1,12 @@
 import z from "zod"
-import { createMember, getMembers, setMemberNumber } from "@/azure/functions/members"
+import { azureDirectory } from "@/azure/directory"
 import { sendWelcomeEmail } from "@/emails/mailer"
 import { logger } from "@/logger"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
 export default createTRPCRouter({
   getAll: publicProcedure.query(async () => {
-    return await getMembers()
+    return await azureDirectory.getMembers()
   }),
   setAssocNumber: publicProcedure
     .input(
@@ -17,7 +17,7 @@ export default createTRPCRouter({
     )
     .output(z.object({ error: z.nullable(z.string()) }))
     .mutation(async ({ input }) => {
-      const { error } = await setMemberNumber(input.userId, input.assocNumber)
+      const { error } = await azureDirectory.setMemberNumber(input.userId, input.assocNumber)
       return { error }
     }),
   create: publicProcedure
@@ -42,7 +42,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       try {
-        const member = await createMember({
+        const member = await azureDirectory.createMember({
           firstName: input.firstName,
           lastName: input.lastName,
           assocNumber: input.assocNumber,
