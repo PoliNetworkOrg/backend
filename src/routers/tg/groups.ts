@@ -1,4 +1,4 @@
-import { and, eq, ilike, ne, not, or, sql } from "drizzle-orm"
+import { and, eq, exists, ilike, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
@@ -7,6 +7,9 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 import { lower } from "@/utils/db"
 
 const GROUPS = SCHEMA.TG.groups
+const LABELS = SCHEMA.COMMON.groupLabels
+const LABEL_RELATIONS = SCHEMA.TG.tgGroupLabelRelations
+
 export default createTRPCRouter({
   // TODO: this is performance HEAVY, make it more safe eventually
   // At the moment, this query is used by banall flowProducer in the telegram bot.
@@ -24,16 +27,61 @@ export default createTRPCRouter({
   search: publicProcedure
     .input(
       z.object({
-        query: z.string().min(1).max(100),
+        query: z.string().min(1).max(100).optional(),
         limit: z.number().min(1).max(20).default(6),
+        requiredLabels: z.array(z.string()).optional(),
+        excludedLabels: z.array(z.string()).optional(),
         showHidden: z.boolean().default(false),
       })
     )
     .query(async ({ input }) => {
-      const { query, limit } = input
+      // TODO: implement some kind of recommender system to promote groups that are more relevant
+      // raw string search is weird, we should boost more used groups
 
-      const likeQuery = query.split(" ").join("%")
-      const whereClause = or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`))
+      const { query, limit, requiredLabels, excludedLabels } = input
+      const conditions: SQL[] = []
+
+      if (requiredLabels && requiredLabels.length > 0) {
+        conditions.push(
+          exists(
+            DB.select()
+              .from(LABEL_RELATIONS)
+              .innerJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
+              .where(
+                and(
+                  eq(LABEL_RELATIONS.groupId, GROUPS.telegramId),
+                  or(...requiredLabels.map((label) => eq(LABELS.label, label)))
+                )
+              )
+          )
+        )
+      }
+
+      if (excludedLabels && excludedLabels.length > 0) {
+        conditions.push(
+          notExists(
+            DB.select()
+              .from(LABEL_RELATIONS)
+              .innerJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
+              .where(
+                and(
+                  eq(LABEL_RELATIONS.groupId, GROUPS.telegramId),
+                  or(...excludedLabels.map((label) => eq(LABELS.label, label)))
+                )
+              )
+          )
+        )
+      }
+
+      if (query && query.length > 0) {
+        const likeQuery = query.split(" ").join("%")
+        const queryWhere = or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`))
+        if (queryWhere) conditions.push(queryWhere) // or(...) returns undefined? idk
+      }
+
+      if (input.showHidden === false) {
+        conditions.push(not(GROUPS.hide))
+      }
 
       const results = await DB.select({
         telegramId: GROUPS.telegramId,
@@ -43,7 +91,7 @@ export default createTRPCRouter({
         hide: GROUPS.hide,
       })
         .from(GROUPS)
-        .where(input.showHidden ? whereClause : and(whereClause, not(GROUPS.hide)))
+        .where(and(...conditions))
         .orderBy((t) => sql`${t.tag} ASC NULLS LAST`)
         .limit(limit)
 
