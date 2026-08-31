@@ -6,6 +6,7 @@ import { createTRPCRouter, publicProcedure } from "@/trpc"
 const GROUPS = VIEWS.GROUPS.groupsView
 const LABELS = SCHEMA.COMMON.groupLabels
 const LABEL_RELATIONS = VIEWS.GROUPS.labelsRelationsView
+const samePlatform = sql`${LABEL_RELATIONS}.type = ${GROUPS}.type`
 
 export const search = createTRPCRouter({
   getAll: publicProcedure.query(async () => {
@@ -20,7 +21,7 @@ export const search = createTRPCRouter({
       labels: sql<string[]>`coalesce(array_agg(${LABELS.label}) filter (where ${LABELS.label} is not null), '{}')`,
     })
       .from(GROUPS)
-      .leftJoin(LABEL_RELATIONS, eq(LABEL_RELATIONS.groupId, GROUPS.id))
+      .leftJoin(LABEL_RELATIONS, and(eq(LABEL_RELATIONS.groupId, GROUPS.id), samePlatform))
       .leftJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
       .groupBy(GROUPS.id, GROUPS.title, sql`${GROUPS}.type`, GROUPS.link, GROUPS.hide)
 
@@ -53,6 +54,7 @@ export const search = createTRPCRouter({
               .where(
                 and(
                   eq(LABEL_RELATIONS.groupId, GROUPS.id),
+                  samePlatform,
                   or(...requiredLabels.map((label) => eq(LABELS.label, label)))
                 )
               )
@@ -69,6 +71,7 @@ export const search = createTRPCRouter({
               .where(
                 and(
                   eq(LABEL_RELATIONS.groupId, GROUPS.id),
+                  samePlatform,
                   or(...excludedLabels.map((label) => eq(LABELS.label, label)))
                 )
               )
@@ -97,7 +100,7 @@ export const search = createTRPCRouter({
         labels: sql<string[]>`coalesce(array_agg(${LABELS.label}) filter (where ${LABELS.label} is not null), '{}')`,
       })
         .from(GROUPS)
-        .leftJoin(LABEL_RELATIONS, eq(LABEL_RELATIONS.groupId, GROUPS.id))
+        .leftJoin(LABEL_RELATIONS, and(eq(LABEL_RELATIONS.groupId, GROUPS.id), samePlatform))
         .leftJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
         .where(and(...conditions))
         .groupBy(GROUPS.id, GROUPS.title, sql`${GROUPS}.type`, GROUPS.link, GROUPS.hide)

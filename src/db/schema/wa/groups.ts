@@ -16,7 +16,7 @@ export const waGroupLabelRelations = createTable.wa(
   "group_label_relations",
   {
     groupId: bigint("group_id", { mode: "number" })
-      .references(() => waGroups.id)
+      .references(() => waGroups.id, { onDelete: "cascade" })
       .notNull(),
     labelId: integer("label_id")
       .references(() => groupLabels.id)

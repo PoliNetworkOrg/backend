@@ -17,7 +17,7 @@ export const tgGroupLabelRelations = createTable.tg(
   "group_label_relations",
   {
     groupId: bigint("group_id", { mode: "number" })
-      .references(() => groups.telegramId)
+      .references(() => groups.telegramId, { onDelete: "cascade" })
       .notNull(),
     labelId: integer("label_id")
       .references(() => groupLabels.id)
