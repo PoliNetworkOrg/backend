@@ -20,4 +20,5 @@ export const USER_ROLE = {
   DIRETTIVO: "direttivo",
   CREATOR: "creator",
   OWNER: "owner",
+  WEB: "web",
 } as const
