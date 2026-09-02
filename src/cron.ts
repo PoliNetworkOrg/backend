@@ -16,7 +16,7 @@ export function cron() {
   logger.info("[CRON] scheduled")
 }
 
-async function cleanLinkCodes() {
+export async function cleanLinkCodes() {
   logger.info(`[CRON] START(cleanLinkCodes)`)
 
   const yesterday = new Date()
