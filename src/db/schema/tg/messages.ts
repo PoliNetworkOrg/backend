@@ -14,6 +14,7 @@ export const messages = createTable.tg(
     authorId: bigint("author_id", { mode: "number" }).notNull(),
     timestamp: timestamp("timestamp", { precision: 0, withTimezone: true }).notNull(), // the telegram message timestamp
     message: varchar("message", { length: 8704 }).notNull(),
+    deletedAt: timestamp("deleted_at", { precision: 0, withTimezone: true }),
     createdAt: timeColumns.createdAt,
   },
   (t) => [primaryKey({ columns: [t.chatId, t.messageId] })]

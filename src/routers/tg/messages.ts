@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm"
+import { and, desc, eq, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
@@ -14,6 +14,7 @@ const message = z.object({
   authorId: z.number(),
   message: z.string(),
   timestamp: z.date(),
+  deletedAt: z.date().nullable().optional(),
   group: z
     .object({
       title: z.string(),
@@ -63,6 +64,7 @@ export default createTRPCRouter({
           authorId: res.authorId,
           chatId: res.chatId,
           messageId: res.messageId,
+          deletedAt: res.deletedAt,
         }
 
         return { message, error: null }
@@ -133,6 +135,7 @@ export default createTRPCRouter({
             authorId: e.authorId,
             chatId: e.chatId,
             messageId: e.messageId,
+            deletedAt: e.deletedAt,
             group: group
               ? {
                   title: group.title,
@@ -152,5 +155,28 @@ export default createTRPCRouter({
 
         return { error: "INTERNAL_SERVER_ERROR" }
       }
+    }),
+
+  markDeleted: publicProcedure
+    .input(
+      z.object({
+        chatId: z.number(),
+        messageIds: z.array(z.number()).min(1).max(100),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const deletedAt = new Date()
+      const updated = await DB.update(s.messages)
+        .set({ deletedAt })
+        .where(
+          and(
+            eq(s.messages.chatId, padChatId(input.chatId)),
+            inArray(s.messages.messageId, input.messageIds),
+            isNull(s.messages.deletedAt)
+          )
+        )
+        .returning({ messageId: s.messages.messageId })
+
+      return { count: updated.length, deletedAt }
     }),
 })
