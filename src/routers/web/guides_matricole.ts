@@ -31,7 +31,6 @@ export default createTRPCRouter({
 
   getLatestGuide: publicProcedure.output(guideSchema.nullable()).query(async () => {
     const res = await DB.select().from(GUIDES_MATRICOLE).orderBy(desc(GUIDES_MATRICOLE.date)).limit(1)
-    console.log(res, res[0])
 
     return res[0] || null
   }),

@@ -1,0 +1,1 @@
+CREATE INDEX "tg_messages_chat_author_timestamp_idx" ON "tg_messages" USING btree ("chat_id","author_id","timestamp" DESC NULLS LAST);

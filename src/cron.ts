@@ -23,7 +23,7 @@ async function cleanLinkCodes() {
   yesterday.setDate(yesterday.getDate() - 1)
 
   try {
-    const deleted = await DB.delete(SCHEMA.TG.link).where(lt(SCHEMA.TG.messages.createdAt, yesterday)).returning()
+    const deleted = await DB.delete(SCHEMA.TG.link).where(lt(SCHEMA.TG.link.createdAt, yesterday)).returning()
     logger.info(`[CRON] END(cleanLinkCodes) deleted ${deleted.length} link code(s).`)
   } catch (err) {
     logger.error(err, "[CRON] cleanLinkCodes")
