@@ -1,5 +1,5 @@
 import { argv } from "bun"
-import { sql } from "drizzle-orm"
+import { like, sql } from "drizzle-orm"
 import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
 import { tgMessagesCipher } from "@/routers/tg/messages"
@@ -175,6 +175,7 @@ console.log("SEED: done", {
 const CATEGORY_ROOT = "didattica"
 const FACET_LABELS = ["ita", "eng", "online", "campus-nord", "campus-sud"]
 const SEED_OWNER_ID = 1 // matches the admin app's AGENT_MODE synthetic session (telegramId: 1)
+const WA_SEED_LINK_PATTERN = "https://chat.whatsapp.com/SEEDFAKE%"
 
 type CourseEntry = {
   course: string
@@ -362,19 +363,24 @@ const waGroupRows = [...waTargets.values()].map((target) => ({
   link: target.link,
   hide: false,
 }))
-if (waGroupRows.length) {
-  await DB.insert(SCHEMA.WA.waGroups).values(waGroupRows).onConflictDoNothing()
-}
-const waGroupIdByLink = new Map((await DB.select().from(SCHEMA.WA.waGroups)).map((g) => [g.link, g.id]))
-const waRelations = [...waTargets.values()].flatMap((target) => {
-  const groupId = waGroupIdByLink.get(target.link)
-  if (groupId == null) return []
-  const { categories, facets } = labelsFor(target)
-  return resolveLabelIds([...categories, ...facets]).map((labelId) => ({ groupId, labelId }))
+await DB.transaction(async (tx) => {
+  if (force) {
+    await tx.delete(SCHEMA.WA.waGroups).where(like(SCHEMA.WA.waGroups.link, WA_SEED_LINK_PATTERN))
+  }
+  if (waGroupRows.length) {
+    await tx.insert(SCHEMA.WA.waGroups).values(waGroupRows).onConflictDoNothing()
+  }
+  const waGroupIdByLink = new Map((await tx.select().from(SCHEMA.WA.waGroups)).map((g) => [g.link, g.id]))
+  const waRelations = [...waTargets.values()].flatMap((target) => {
+    const groupId = waGroupIdByLink.get(target.link)
+    if (groupId == null) return []
+    const { categories, facets } = labelsFor(target)
+    return resolveLabelIds([...categories, ...facets]).map((labelId) => ({ groupId, labelId }))
+  })
+  if (waRelations.length) {
+    await tx.insert(SCHEMA.WA.waGroupLabelRelations).values(waRelations).onConflictDoNothing()
+  }
 })
-if (waRelations.length) {
-  await DB.insert(SCHEMA.WA.waGroupLabelRelations).values(waRelations).onConflictDoNothing()
-}
 
 console.log("SEED: creating Telegram course groups (synthetic ids)")
 const tgTargets = collectTargets((e) => e.tgLink)
@@ -393,7 +399,9 @@ if (tgCourseGroupRows.length) {
   await DB.insert(SCHEMA.TG.groups).values(tgCourseGroupRows).onConflictDoNothing()
 }
 const tgGroupIdByLink = new Map(
-  (await DB.select().from(SCHEMA.TG.groups)).filter((g) => g.link && tgLinks.includes(g.link)).map((g) => [g.link as string, g.telegramId])
+  (await DB.select().from(SCHEMA.TG.groups))
+    .filter((g) => g.link && tgLinks.includes(g.link))
+    .map((g) => [g.link as string, g.telegramId])
 )
 const rootLabelId = resolveLabelIds([CATEGORY_ROOT])[0]
 const tgRelations = [
