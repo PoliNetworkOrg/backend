@@ -48,10 +48,13 @@ export default createTRPCRouter({
       z.object({
         title: z.string(),
         link: z.url({ hostname: /^chat\.whatsapp\.com$/ }),
+        hide: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
-      const [created] = await DB.insert(GROUPS).values(input).returning()
+      const [created] = await DB.insert(GROUPS)
+        .values({ ...input, hide: input.hide ?? false })
+        .returning()
       return created
     }),
 
