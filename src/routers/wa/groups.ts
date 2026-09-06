@@ -48,7 +48,7 @@ export default createTRPCRouter({
       z.object({
         title: z.string(),
         link: z.url({ hostname: /^chat\.whatsapp\.com$/ }),
-        hide: z.boolean().optional(),
+        hide: z.boolean().default(false),
       })
     )
     .mutation(async ({ input }) => {
