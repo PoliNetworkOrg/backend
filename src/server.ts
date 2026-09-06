@@ -13,6 +13,7 @@ import { DB, SCHEMA } from "./db"
 import { sendWelcomeEmail } from "./emails/mailer"
 import { env } from "./env"
 import { logger } from "./logger"
+import { redis } from "./redis"
 import { appRouter } from "./routers"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
 
@@ -120,6 +121,8 @@ const shutdown = async () => {
 
   isShuttingDown = true
   logger.info("[SERVER] Received shutdown signal, shutting down...")
+
+  redis.quit()
 
   const err = await WSS.close()
   if (err) {

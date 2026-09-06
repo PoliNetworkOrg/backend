@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
@@ -48,6 +48,7 @@ export default createTRPCRouter({
       z.object({
         title: z.string(),
         link: z.url({ hostname: /^chat\.whatsapp\.com$/ }),
+        hide: z.boolean().default(false),
       })
     )
     .mutation(async ({ input }) => {
