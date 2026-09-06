@@ -1,3 +1,5 @@
+# Works through npm trusted publishing with OIDC. See https://docs.npmjs.com/trusted-publishers#for-github-actions
+
 name: Release npm package
 on:
   push:
