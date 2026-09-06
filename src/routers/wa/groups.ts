@@ -52,9 +52,7 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
-      const [created] = await DB.insert(GROUPS)
-        .values({ ...input, hide: input.hide ?? false })
-        .returning()
+	  const [created] = await DB.insert(GROUPS).values(input).returning()
       return created
     }),
 
