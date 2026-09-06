@@ -4,7 +4,7 @@
   "description": "Utils to interact with the backend.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PoliNetworkOrg/backend"
+    "url": "git+https://github.com/PoliNetworkOrg/backend.git"
   },
   "homepage": "https://github.com/PoliNetworkOrg/backend#readme",
   "keywords": [
