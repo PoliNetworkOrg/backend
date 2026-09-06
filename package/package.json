@@ -33,5 +33,9 @@
   },
   "devDependencies": {
     "typescript": "^5.9.2"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
   }
 }
