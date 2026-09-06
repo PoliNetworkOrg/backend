@@ -16,15 +16,14 @@ export default {
       "@semantic-release/npm",
       {
         npmPublish: true,
-        pkgRoot: "dist",
+        pkgRoot: "./dist",
       },
     ],
     [
       "@semantic-release/github",
       {
         successComment: false,
-        failComment: false,
-        failTitle: false,
+        failCommentCondition: false,
         addReleases: "top",
       },
     ],
