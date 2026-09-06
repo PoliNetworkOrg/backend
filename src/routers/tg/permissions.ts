@@ -136,7 +136,7 @@ export default createTRPCRouter({
         const adder = q.find((e) => e.userId === input.adderId)
 
         // check if adder is not in permission table or doesn't have permissions
-        if (!adder || !adder.roles.some((a) => CAN_ASSIGN.includes(a))) return { error: "UNAUTHORIZED" }
+        if (!adder?.roles.some((a) => CAN_ASSIGN.includes(a))) return { error: "UNAUTHORIZED" }
 
         // if adder is self-assigning roles, he must be president or owner (ref CAN_SELF_ASSIGN)
         if (adder.userId === input.userId && !adder.roles.some((a) => CAN_SELF_ASSIGN.includes(a)))

@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
@@ -52,7 +52,7 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
-	  const [created] = await DB.insert(GROUPS).values(input).returning()
+      const [created] = await DB.insert(GROUPS).values(input).returning()
       return created
     }),
 
