@@ -35,6 +35,12 @@ export const env = createEnv({
     DB_PASS: z.string().min(1),
     DB_NAME: z.string().min(3).default("polinetwork_backend"),
 
+    // main redis
+    REDIS_HOST: z.string().min(1).optional(),
+    REDIS_PORT: z.coerce.number().min(1).max(65535).default(6379),
+    REDIS_USERNAME: z.string().min(1).optional(),
+    REDIS_PASSWORD: z.string().min(1).optional(),
+
     // Azure
     AZURE_TENANT_ID: z.string().min(1).optional(),
     AZURE_CLIENT_ID: z.string().min(1).optional(),
