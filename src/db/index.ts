@@ -1,6 +1,7 @@
 import { db } from "./db"
 import { schema as authSchema } from "./schema/auth"
 import { schema as commonSchema } from "./schema/common"
+import { schema as emailSchema } from "./schema/email"
 import { schema as tgSchema } from "./schema/tg"
 import { views } from "./schema/views"
 import { schema as waSchema } from "./schema/wa"
@@ -13,6 +14,7 @@ export const SCHEMA = {
   TG: tgSchema,
   WA: waSchema,
   WEB: webSchema,
+  EMAIL: emailSchema,
 }
 export const VIEWS = {
   GROUPS: views,
