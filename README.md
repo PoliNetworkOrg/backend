@@ -34,3 +34,8 @@ Requirements:
    ```sh
    bun dev
    ```
+5. (Optional, for logging into the admin panel locally) Seed a test user with Telegram already linked and the `owner` role:
+   ```sh
+   bun run seed:user
+   ```
+   The script sends a sign-in OTP to `test@example.com` and prints a link to a temporary inbox where you can read the code — paste it when prompted. Without this step, logging into admin with `test@example.com` lands on the "Link your Telegram account" onboarding page, since that account has no `telegramId` associated yet. Re-run with `--force` to recreate the test user from scratch.

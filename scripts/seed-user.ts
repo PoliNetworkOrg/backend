@@ -17,6 +17,7 @@ const force = argv.includes("--force")
 const existing = await DB.select().from(SCHEMA.AUTH.user).where(eq(SCHEMA.AUTH.user.email, testUser.email)).limit(1)
 if (existing.length === 1) {
   if (force) {
+    await DB.delete(SCHEMA.TG.link).where(eq(SCHEMA.TG.link.userId, existing[0].id))
     await DB.delete(SCHEMA.AUTH.user).where(eq(SCHEMA.AUTH.user.email, testUser.email))
     console.warn("SEED: test user deleted for recreation by using --force flag")
   } else {
