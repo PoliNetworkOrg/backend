@@ -4,6 +4,7 @@ import type { JSX } from "react"
 import { sendEmail as azureSendEmail } from "@/azure/functions/emails"
 import { env } from "@/env"
 import { logger } from "@/logger"
+import CustomMessageEmail from "./templates/custom"
 import OtpEmail from "./templates/otp"
 import Welcome from "./templates/welcome"
 
@@ -49,5 +50,18 @@ export async function sendWelcomeEmail(
       assocNum={memberInfo.assocNumber}
       firstName={memberInfo.firstName}
     />
+  )
+}
+
+export async function sendCustomEmail(
+  toAddress: string,
+  content: { subject: string; body: string },
+  firstName: string
+) {
+  const customSubject = makeSubject(content.subject)
+  return sendEmail(
+    toAddress,
+    customSubject,
+    <CustomMessageEmail firstName={firstName} subject={content.subject} body={content.body} />
   )
 }

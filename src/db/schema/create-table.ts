@@ -6,4 +6,5 @@ export const createTable = {
   tg: pgTableCreator((tableName) => `tg_${tableName}`),
   wa: pgTableCreator((tableName) => `wa_${tableName}`),
   web: pgTableCreator((tableName) => `web_${tableName}`),
+  email: pgTableCreator((tableName) => `email_${tableName}`),
 }
