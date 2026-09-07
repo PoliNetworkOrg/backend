@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "0.17.1",
+  "version": "0.18.1",
   "description": "PoliNetwork backend server",
   "private": true,
   "keywords": [],
@@ -64,6 +64,7 @@
     "pino": "^10.3.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "redis": "^6.2.1",
     "socket.io": "^4.8.3",
     "zod": "^4.1.11"
   }

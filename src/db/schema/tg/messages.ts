@@ -1,4 +1,4 @@
-import { bigint, primaryKey, timestamp, varchar } from "drizzle-orm/pg-core"
+import { bigint, index, primaryKey, timestamp, varchar } from "drizzle-orm/pg-core"
 import { timeColumns } from "@/db/columns"
 import { createTable } from "../create-table"
 
@@ -16,5 +16,8 @@ export const messages = createTable.tg(
     message: varchar("message", { length: 8704 }).notNull(),
     createdAt: timeColumns.createdAt,
   },
-  (t) => [primaryKey({ columns: [t.chatId, t.messageId] })]
+  (t) => [
+    primaryKey({ columns: [t.chatId, t.messageId] }),
+    index("tg_messages_chat_author_timestamp_idx").on(t.chatId, t.authorId, t.timestamp.desc()),
+  ]
 )
