@@ -17,7 +17,6 @@ import type { EmailTemplate } from "@/emails/types"
 type Props = { firstName: string; subject: string; body: string }
 
 const CustomMessageEmail: EmailTemplate<Props> = (props) => {
-  const paragraphs = props.body.split(/\n{2,}/).filter((p) => p.trim())
   return (
     <Html>
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
@@ -31,11 +30,7 @@ const CustomMessageEmail: EmailTemplate<Props> = (props) => {
               <Text>
                 Dear <strong>{props.firstName}</strong>,
               </Text>
-              {paragraphs.map((p, i) => (
-                <Text key={i} className="my-4 whitespace-pre-line">
-                  {p}
-                </Text>
-              ))}
+              <Text className="my-4 whitespace-pre-line">{props.body}</Text>
             </Section>
           </Container>
           <Footer />
