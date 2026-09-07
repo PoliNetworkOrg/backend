@@ -71,44 +71,6 @@ export default createTRPCRouter({
   sendCustomEmail: publicProcedure
     .input(
       z.object({
-        userId: z.string(),
-        subject: z.string().min(1),
-        body: z.string().min(1),
-      })
-    )
-    .output(z.object({ error: z.nullable(z.string()) }))
-    .mutation(async ({ input }) => {
-      try {
-        const members = await azureDirectory.getMembers()
-        const member = members.find((m) => m.id === input.userId)
-        if (!member) {
-          return { error: "Member not found" }
-        }
-
-        if (!member.mail) {
-          return { error: "Member does not have an email address" }
-        }
-
-        const mailOk = await sendCustomEmail(
-          member.mail,
-          { subject: input.subject, body: input.body },
-          member.givenName || "Member"
-        )
-
-        if (!mailOk) {
-          return { error: "Failed to send email" }
-        }
-
-        return { error: null }
-      } catch (error) {
-        logger.error({ error }, "[trpc:azure:members] error in sendCustomEmail procedure")
-        return { error: error instanceof Error ? error.message : "Unknown error, see backend logs" }
-      }
-    }),
-
-  sendMultipleCustomEmail: publicProcedure
-    .input(
-      z.object({
         userIds: z.array(z.string().min(1)),
         subject: z.string().min(1),
         body: z.string().min(1),
@@ -155,7 +117,7 @@ export default createTRPCRouter({
 
         return { error: null, total: targetMembers.length, sent, failed }
       } catch (error) {
-        logger.error({ error }, "[trpc:azure:members] error in sendMultipleCustomEmail procedure")
+        logger.error({ error }, "[trpc:azure:members] error in sendCustomEmail procedure")
         return {
           error: error instanceof Error ? error.message : "Unknown error, see backend logs",
           total: 0,
