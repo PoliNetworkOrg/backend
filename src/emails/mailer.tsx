@@ -6,6 +6,7 @@ import { env } from "@/env"
 import { logger } from "@/logger"
 import OtpEmail from "./templates/otp"
 import Welcome from "./templates/welcome"
+import CustomMessageEmail from "./templates/custom"
 
 const makeSubject = (subject: string) => (env.NODE_ENV === "development" ? `[DEV] ${subject}` : subject)
 
@@ -50,4 +51,19 @@ export async function sendWelcomeEmail(
       firstName={memberInfo.firstName}
     />
   )
+}
+
+export async function sendCustomEmail(
+  toAddress: string,
+  content: { subject: string; body: string },
+  firstName: string
+) {
+  const customSubject = makeSubject(content.subject)
+  return sendEmail(
+    toAddress,
+    customSubject,
+    <CustomMessageEmail
+      firstName={firstName}
+      subject={content.subject}
+      body={content.body} />)
 }
