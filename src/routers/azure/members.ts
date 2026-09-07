@@ -92,7 +92,7 @@ export default createTRPCRouter({
         const mailOk = await sendCustomEmail(
           member.mail,
           { subject: input.subject, body: input.body },
-          member.givenName || member.displayName || "Member" // tod osk difference
+          member.givenName || "Member"
         )
 
         if (!mailOk) {
@@ -143,7 +143,7 @@ export default createTRPCRouter({
           const mailOk = await sendCustomEmail(
             member.mail,
             { subject: input.subject, body: input.body },
-            member.givenName || member.displayName || "Member"
+            member.givenName || "Member"
           )
 
           if (!mailOk) {
