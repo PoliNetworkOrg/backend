@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm"
-import { z } from "zod"
+import z from "zod"
 import { DB, SCHEMA, VIEWS } from "@/db"
 import { createTRPCRouter, publicProcedure } from "@/trpc"
 
@@ -27,17 +27,19 @@ export const reports = createTRPCRouter({
           groupId: z.number().int(),
           type: groupType,
           reportType: z.literal("broken_link"),
-          reportedLink: z.url().optional(),
+          reportedLink: z.url(),
         }),
         z.object({
-          groupId: z.number().int(),
-          type: groupType,
           reportType: z.literal("missing"),
+          label: z.string().trim().min(1).max(256),
+          details: z.string().trim().min(1).max(500),
         }),
       ])
     )
     .mutation(async ({ input }) => {
-      await assertGroupExists(input.groupId, input.type)
+      if (input.reportType === "broken_link") {
+        await assertGroupExists(input.groupId, input.type)
+      }
 
       await DB.insert(REPORTS).values(input)
 
@@ -53,7 +55,11 @@ export const reports = createTRPCRouter({
   }),
 
   list: publicProcedure
-    .input(z.object({ statuses: reportStatus.array().min(1).default(["pending"]) }))
+    .input(
+      z.object({
+        statuses: z.array(reportStatus).min(1).default(["pending"]),
+      })
+    )
     .query(async ({ input }) => {
       return await DB.select({
         id: REPORTS.id,
@@ -61,6 +67,8 @@ export const reports = createTRPCRouter({
         type: REPORTS.type,
         reportType: REPORTS.reportType,
         reportedLink: REPORTS.reportedLink,
+        label: REPORTS.label,
+        details: REPORTS.details,
         status: REPORTS.status,
         groupTitle: GROUPS.title,
         createdAt: REPORTS.createdAt,
