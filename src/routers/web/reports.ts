@@ -46,14 +46,6 @@ export const reports = createTRPCRouter({
       return { ok: true as const }
     }),
 
-  count: publicProcedure.query(async () => {
-    const [result] = await DB.select({ pending: sql<number>`count(*)` })
-      .from(REPORTS)
-      .where(eq(REPORTS.status, "pending"))
-
-    return result.pending
-  }),
-
   list: publicProcedure
     .input(
       z.object({
@@ -79,11 +71,11 @@ export const reports = createTRPCRouter({
         .orderBy(REPORTS.createdAt)
     }),
 
-  resolve: publicProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ input }) => {
-    return await DB.update(REPORTS).set({ status: "resolved" }).where(eq(REPORTS.id, input.id)).returning()
+  resolve: publicProcedure.input(z.object({ ids: z.array(z.number().int()).min(1) })).mutation(async ({ input }) => {
+    return await DB.update(REPORTS).set({ status: "resolved" }).where(inArray(REPORTS.id, input.ids)).returning()
   }),
 
-  dismiss: publicProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ input }) => {
-    return await DB.update(REPORTS).set({ status: "dismissed" }).where(eq(REPORTS.id, input.id)).returning()
+  dismiss: publicProcedure.input(z.object({ ids: z.array(z.number().int()).min(1) })).mutation(async ({ input }) => {
+    return await DB.update(REPORTS).set({ status: "dismissed" }).where(inArray(REPORTS.id, input.ids)).returning()
   }),
 })
