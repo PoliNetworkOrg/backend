@@ -1,0 +1,81 @@
+import { and, eq, inArray, sql } from "drizzle-orm"
+import { z } from "zod"
+import { DB, SCHEMA, VIEWS } from "@/db"
+import { createTRPCRouter, publicProcedure } from "@/trpc"
+
+const REPORTS = SCHEMA.WEB.groupLinkReports
+const GROUPS = VIEWS.GROUPS.groupsView
+const TG_GROUPS = SCHEMA.TG.groups
+const WA_GROUPS = SCHEMA.WA.waGroups
+
+const groupType = z.enum(["tg", "wa"])
+const reportStatus = z.enum(["pending", "resolved", "dismissed"])
+
+async function assertGroupExists(groupId: number, type: "tg" | "wa") {
+  const groups =
+    type === "tg"
+      ? await DB.select({ id: TG_GROUPS.telegramId }).from(TG_GROUPS).where(eq(TG_GROUPS.telegramId, groupId)).limit(1)
+      : await DB.select({ id: WA_GROUPS.id }).from(WA_GROUPS).where(eq(WA_GROUPS.id, groupId)).limit(1)
+  if (!groups.length) throw new Error("Group not found")
+}
+
+export const reports = createTRPCRouter({
+  create: publicProcedure
+    .input(
+      z.discriminatedUnion("reportType", [
+        z.object({
+          groupId: z.number().int(),
+          type: groupType,
+          reportType: z.literal("broken_link"),
+          reportedLink: z.url().optional(),
+        }),
+        z.object({
+          groupId: z.number().int(),
+          type: groupType,
+          reportType: z.literal("missing"),
+        }),
+      ])
+    )
+    .mutation(async ({ input }) => {
+      await assertGroupExists(input.groupId, input.type)
+
+      await DB.insert(REPORTS).values(input)
+
+      return { ok: true as const }
+    }),
+
+  count: publicProcedure.query(async () => {
+    const [result] = await DB.select({ pending: sql<number>`count(*)` })
+      .from(REPORTS)
+      .where(eq(REPORTS.status, "pending"))
+
+    return result.pending
+  }),
+
+  list: publicProcedure
+    .input(z.object({ statuses: reportStatus.array().min(1).default(["pending"]) }))
+    .query(async ({ input }) => {
+      return await DB.select({
+        id: REPORTS.id,
+        groupId: REPORTS.groupId,
+        type: REPORTS.type,
+        reportType: REPORTS.reportType,
+        reportedLink: REPORTS.reportedLink,
+        status: REPORTS.status,
+        groupTitle: GROUPS.title,
+        createdAt: REPORTS.createdAt,
+      })
+        .from(REPORTS)
+        .leftJoin(GROUPS, and(eq(GROUPS.id, REPORTS.groupId), sql`${GROUPS}.type = ${REPORTS.type}`))
+        .where(inArray(REPORTS.status, input.statuses))
+        .orderBy(REPORTS.createdAt)
+    }),
+
+  resolve: publicProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ input }) => {
+    return await DB.update(REPORTS).set({ status: "resolved" }).where(eq(REPORTS.id, input.id)).returning()
+  }),
+
+  dismiss: publicProcedure.input(z.object({ id: z.number().int() })).mutation(async ({ input }) => {
+    return await DB.update(REPORTS).set({ status: "dismissed" }).where(eq(REPORTS.id, input.id)).returning()
+  }),
+})
