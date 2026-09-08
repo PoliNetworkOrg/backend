@@ -120,6 +120,13 @@
       "when": 1788360706113,
       "tag": "0016_telegram_message_lookup",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788891351499,
+      "tag": "0017_lonely_talos",
+      "breakpoints": true
     }
   ]
 }

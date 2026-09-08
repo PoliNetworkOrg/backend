@@ -10,6 +10,10 @@ type Context = {
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
+    if (error.code === "BAD_REQUEST") {
+      logger.warn({ path: shape.data.path, error: error.cause }, "[TRPC] Request validation failed")
+    }
+
     return {
       ...shape,
       data: {

@@ -34,3 +34,41 @@ Requirements:
    ```sh
    bun dev
    ```
+
+## Audit log input
+
+The bot must send one `tg.auditLog.create` event per audit record. Every event
+must include `category`; the backend uses it to select the destination table.
+Do not send the old aggregate `{ type: "delete", preDeleteRes: ... }` format.
+
+For `/del`, send one request for each successfully deleted message:
+
+```json
+{
+   "category": "deleted",
+   "messageId": 12345,
+   "chatId": -1004404085898,
+   "authorId": 402072799,
+   "author": {
+      "id": 402072799,
+      "is_bot": false,
+      "first_name": "Invy55",
+      "username": "proporre"
+   },
+   "deletedById": 7298979523,
+   "deletedBy": {
+      "id": 7298979523,
+      "is_bot": false,
+      "first_name": "itasimo",
+      "username": "itasimo_js",
+      "language_code": "it"
+   },
+   "deletedAt": "2026-09-08T16:58:36.000Z",
+   "reason": "Command /del",
+   "source": "manual"
+}
+```
+
+Other events use the same `category` discriminator: `moderation`, `ban_all`,
+`exception`, `group_management`, or `grant`. Their category-specific fields
+are defined by the `tg.auditLog.create` input schema.

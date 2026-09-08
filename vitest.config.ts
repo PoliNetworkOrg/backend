@@ -7,5 +7,7 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
-  test: {},
+  test: {
+    setupFiles: ["./tests/setup.ts"],
+  },
 })

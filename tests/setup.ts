@@ -1,0 +1,8 @@
+process.env.NODE_ENV = "test"
+process.env.BETTER_AUTH_SECRET = "test-secret-with-at-least-thirty-two-characters"
+process.env.ENCRYPTION_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+process.env.DB_HOST = "localhost"
+process.env.DB_PORT = "5432"
+process.env.DB_USER = "postgres"
+process.env.DB_PASS = "postgres"
+process.env.DB_NAME = "polinetwork_backend_test"
