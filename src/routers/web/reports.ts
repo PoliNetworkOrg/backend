@@ -27,7 +27,7 @@ export const reports = createTRPCRouter({
           groupId: z.number().int(),
           type: groupType,
           reportType: z.literal("broken_link"),
-          reportedLink: z.url(),
+          reportedLink: z.url().max(256),
         }),
         z.object({
           reportType: z.literal("missing"),
