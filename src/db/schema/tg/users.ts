@@ -4,8 +4,9 @@ import { createTable } from "../create-table"
 
 export const users = createTable.tg("users", {
   userId: bigint("user_id", { mode: "number" }).primaryKey(),
-  firstName: varchar("first_name", { length: 192 }).notNull(), // 186
-  lastName: varchar("last_name", { length: 192 }), // 186
+  // A 64-code-unit Unicode name can use 192 UTF-8 bytes and 442 encrypted hex characters.
+  firstName: varchar("first_name", { length: 512 }).notNull(),
+  lastName: varchar("last_name", { length: 512 }),
   username: varchar("username", { length: 128 }), // 122
   isBot: boolean("is_bot").notNull(),
 
