@@ -134,6 +134,13 @@
       "when": 1788882926702,
       "tag": "0018_early_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789676318977,
+      "tag": "0019_encrypted_unicode_names",
+      "breakpoints": true
     }
   ]
 }

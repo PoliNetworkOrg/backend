@@ -1,3 +1,4 @@
+import { PgVarchar } from "drizzle-orm/pg-core"
 import { beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 let Cipher: typeof import("@/utils/cipher").Cipher
@@ -43,6 +44,19 @@ beforeEach(() => {
 })
 
 describe("Cipher", () => {
+  it("fits encrypted 64-character Unicode names in the user columns", async () => {
+    const { users } = await import("@/db/schema/tg/users")
+    const cipher = new Cipher("unicode-name-capacity")
+    const name = "界".repeat(64)
+    const encrypted = cipher.encrypt(name)
+
+    expect(cipher.decrypt(encrypted)).toBe(name)
+    for (const column of [users.firstName, users.lastName]) {
+      if (!(column instanceof PgVarchar)) throw new Error("Expected a varchar name column")
+      expect(column.length).toBeGreaterThanOrEqual(encrypted.length)
+    }
+  })
+
   it("encrypts and decrypts text correctly", () => {
     const cipher = new Cipher("roundtrip-salt")
     const plainText = "The quick brown fox jumps over 13 lazy dogs"
