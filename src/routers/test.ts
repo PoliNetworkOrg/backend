@@ -1,9 +1,9 @@
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure } from "@/trpc"
 
 export const testRouter = createTRPCRouter({
-  dbQuery: publicProcedure.input(z.object({ dbName: z.enum(["web", "tg"]) })).query(async ({ input }) => {
+  dbQuery: legacyProcedure.input(z.object({ dbName: z.enum(["web", "tg"]) })).query(async ({ input }) => {
     if (input.dbName === "tg") {
       const q = await DB.select().from(SCHEMA.TG.test).limit(50)
       return q.map((e) => e.text)
@@ -13,7 +13,7 @@ export const testRouter = createTRPCRouter({
     return q.map((e) => e.text)
   }),
 
-  dbInsert: publicProcedure
+  dbInsert: legacyProcedure
     .input(z.object({ text: z.string(), dbName: z.enum(["web", "tg"]) }))
     .mutation(async ({ input }) => {
       if (input.dbName === "tg") {

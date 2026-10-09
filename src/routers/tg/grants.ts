@@ -3,9 +3,10 @@ import { z } from "zod"
 import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
 import type { TUserRole } from "@/db/schema/tg/permissions"
+import { botReadOrDashboard, dashboard } from "@/idp/policies"
 import { logger } from "@/logger"
 import { WSS } from "@/server"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 import { decryptUser } from "@/utils/users"
 
 const s = SCHEMA.TG
@@ -13,7 +14,7 @@ const s = SCHEMA.TG
 const CAN_MANAGE_GRANTS: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER, USER_ROLE.DIRETTIVO] as const
 
 export default createTRPCRouter({
-  checkUser: publicProcedure
+  checkUser: policy(botReadOrDashboard("tg:grants:read"))
     .input(z.object({ userId: z.number() }))
     .output(
       z.object({
@@ -53,7 +54,7 @@ export default createTRPCRouter({
       }
     }),
 
-  create: publicProcedure
+  create: legacyProcedure
     .input(
       z.object({
         userId: z.number(),
@@ -128,7 +129,7 @@ export default createTRPCRouter({
       }
     }),
 
-  interrupt: publicProcedure
+  interrupt: legacyProcedure
     .input(
       z.object({
         userId: z.number(),
@@ -180,7 +181,7 @@ export default createTRPCRouter({
       }
     }),
 
-  getOngoing: publicProcedure.query(async () => {
+  getOngoing: policy(dashboard("tg:grants:read")).query(async () => {
     const now = new Date()
     const res = await DB.select()
       .from(s.grants)
@@ -196,7 +197,7 @@ export default createTRPCRouter({
     }
   }),
 
-  getScheduled: publicProcedure.query(async () => {
+  getScheduled: policy(dashboard("tg:grants:read")).query(async () => {
     const now = new Date()
     const res = await DB.select()
       .from(s.grants)

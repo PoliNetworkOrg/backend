@@ -1,7 +1,8 @@
 import { and, asc, eq, exists, ilike, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA, VIEWS } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard } from "@/idp/policies"
+import { createTRPCRouter, policy } from "@/trpc"
 
 const GROUPS = VIEWS.GROUPS.groupsView
 const LABELS = SCHEMA.COMMON.groupLabels
@@ -9,7 +10,7 @@ const LABEL_RELATIONS = VIEWS.GROUPS.labelsRelationsView
 const samePlatform = sql`${LABEL_RELATIONS}.type = ${GROUPS}.type`
 
 export const search = createTRPCRouter({
-  getAll: publicProcedure.query(async () => {
+  getAll: policy(dashboard("admin:access")).query(async () => {
     const results = await DB.select({
       id: GROUPS.id,
       title: GROUPS.title,
@@ -28,7 +29,7 @@ export const search = createTRPCRouter({
     return results
   }),
 
-  search: publicProcedure
+  search: policy(dashboard("admin:access"))
     .input(
       z.object({
         query: z.string().min(1).max(100).optional(),
@@ -113,7 +114,7 @@ export const search = createTRPCRouter({
       }
     }),
 
-  getById: publicProcedure
+  getById: policy(dashboard("admin:access"))
     .input(
       z.object({
         telegramId: z.number(),
@@ -129,7 +130,7 @@ export const search = createTRPCRouter({
       return res[0]
     }),
 
-  getByInviteLink: publicProcedure
+  getByInviteLink: policy(dashboard("admin:access"))
     .input(
       z.object({
         inviteLink: z.url(),

@@ -3,11 +3,12 @@ import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { ARRAY_AUDIT_TYPE } from "@/db/schema/tg/audit-log"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard, SCOPE } from "@/idp/policies"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 import { decryptUser } from "@/utils/users"
 
 export default createTRPCRouter({
-  create: publicProcedure
+  create: legacyProcedure
     .input(
       z.object({
         adminId: z.number(),
@@ -22,7 +23,11 @@ export default createTRPCRouter({
       await DB.insert(SCHEMA.TG.auditLog).values(input).onConflictDoNothing()
     }),
 
-  getById: publicProcedure
+  getById: policy({
+    service: { scope: SCOPE.tgRead },
+    telegram: { scope: SCOPE.tgRead, permission: "tg:audit:read" },
+    ...dashboard("tg:audit:read"),
+  })
     .input(
       z.object({
         targetId: z.number(),

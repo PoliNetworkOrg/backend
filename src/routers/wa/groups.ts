@@ -1,17 +1,18 @@
 import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard } from "@/idp/policies"
+import { createTRPCRouter, policy } from "@/trpc"
 
 const GROUPS = SCHEMA.WA.waGroups
 
 export default createTRPCRouter({
-  getAll: publicProcedure.query(async () => {
+  getAll: policy(dashboard("admin:access")).query(async () => {
     const results = await DB.select().from(GROUPS)
     return results
   }),
 
-  getById: publicProcedure
+  getById: policy(dashboard("admin:access"))
     .input(
       z.object({
         id: z.number(),
@@ -27,7 +28,7 @@ export default createTRPCRouter({
       return res[0]
     }),
 
-  getByInviteLink: publicProcedure
+  getByInviteLink: policy(dashboard("admin:access"))
     .input(
       z.object({
         inviteLink: z.url(),
@@ -43,7 +44,7 @@ export default createTRPCRouter({
       return res[0]
     }),
 
-  add: publicProcedure
+  add: policy(dashboard("wa:groups:manage"))
     .input(
       z.object({
         title: z.string(),
@@ -56,7 +57,7 @@ export default createTRPCRouter({
       return created
     }),
 
-  modify: publicProcedure
+  modify: policy(dashboard("wa:groups:manage"))
     .input(
       z.object({
         id: z.number(),
@@ -70,7 +71,7 @@ export default createTRPCRouter({
       return updated
     }),
 
-  delete: publicProcedure
+  delete: policy(dashboard("wa:groups:manage"))
     .input(
       z.object({
         id: z.number(),
@@ -82,7 +83,7 @@ export default createTRPCRouter({
       return rows.length === 1
     }),
 
-  setHide: publicProcedure
+  setHide: policy(dashboard("wa:groups:manage"))
     .input(
       z.object({
         id: z.number(),

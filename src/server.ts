@@ -1,5 +1,6 @@
 import { trpcServer } from "@hono/trpc-server"
 import { zValidator } from "@hono/zod-validator"
+import { ACTOR_HEADER } from "@polinetwork/auth-kit"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger as loggerMiddlware } from "hono/logger"
@@ -12,6 +13,7 @@ import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
 import { sendWelcomeEmail } from "./emails/mailer"
 import { env } from "./env"
+import { authenticateRequest, idp, startIdp, stopIdp } from "./idp"
 import { logger } from "./logger"
 import { redis } from "./redis"
 import { appRouter } from "./routers"
@@ -38,7 +40,14 @@ app.use(
   trpcServer({
     router: appRouter,
     endpoint: TRPC_PATH,
-    createContext: (_opts, c) => ({ userId: c.req.header("userId") }),
+    createContext: async (_opts, c) => ({
+      auth: await authenticateRequest({
+        authorization: c.req.header("authorization"),
+        actor: c.req.header(ACTOR_HEADER),
+      }),
+      access: idp?.snapshot ?? null,
+      legacyAnonymous: env.LEGACY_ANONYMOUS,
+    }),
   })
 )
 
@@ -57,6 +66,9 @@ app.use(
 app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
+
+// Access-changed events from the IdP (RFC v3 §5.6). Authenticated by the event's own signature.
+app.post("/internal/events", (c) => (idp?.events ? idp.events(c.req.raw) : c.body(null, 404)))
 
 app.post(
   "/test/welcome-email",
@@ -123,6 +135,7 @@ const shutdown = async () => {
   logger.info("[SERVER] Received shutdown signal, shutting down...")
 
   redis.quit()
+  stopIdp()
 
   const err = await WSS.close()
   if (err) {
@@ -154,3 +167,5 @@ await Promise.race([
   .catch(() => logger.error("DB not working!"))
 
 cron()
+
+startIdp().catch((err) => logger.error({ err }, "[IDP] start failed"))

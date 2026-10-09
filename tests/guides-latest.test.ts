@@ -14,13 +14,13 @@ const state = vi.hoisted(() => {
 vi.mock("drizzle-orm", () => ({ desc: vi.fn((column: unknown) => column), eq: vi.fn() }))
 vi.mock("@/azure/blob", () => ({ deleteBlob: vi.fn(), uploadBlob: vi.fn() }))
 vi.mock("@/db", () => ({ DB: { select: state.select }, SCHEMA: { WEB: { guidesMatricole: state.guides } } }))
-vi.mock("@/trpc", () => ({
-  createTRPCRouter: <T>(router: T) => router,
-  publicProcedure: {
+vi.mock("@/trpc", () => {
+  const procedure = {
     input: () => ({ mutation: (handler: unknown) => ({ handler }) }),
     output: () => ({ query: (handler: () => unknown) => ({ handler }) }),
-  },
-}))
+  }
+  return { createTRPCRouter: <T>(router: T) => router, policy: () => procedure, legacyProcedure: procedure }
+})
 
 const { default: guidesRouter } = await import("@/routers/web/guides_matricole")
 const latestGuide = guidesRouter.getLatestGuide as unknown as { handler: () => Promise<unknown> }
