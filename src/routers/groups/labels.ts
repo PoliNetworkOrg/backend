@@ -1,8 +1,9 @@
 import { and, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
+import { authorOf } from "@/idp/author"
 import { dashboard } from "@/idp/policies"
-import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 
 const GROUP_LABELS = SCHEMA.COMMON.groupLabels
 const TG_RELATIONS = SCHEMA.TG.tgGroupLabelRelations
@@ -30,25 +31,28 @@ export default createTRPCRouter({
     return results
   }),
 
-  create: legacyProcedure
+  create: policy(dashboard("groups:labels:write"))
     .input(
       z.object({
         label,
         description: z.string().optional(),
         color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-        createdBy: z.number(),
+        // Legacy callers only; token callers are taken from the token.
+        createdBy: z.number().optional(),
         updatedBy: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { label, description, color, createdBy } = input
+      const author = authorOf(ctx.actor, createdBy)
 
       const result = await DB.insert(GROUP_LABELS)
         .values({
           label,
           description,
           color,
-          createdBy,
+          createdBy: author.id,
+          createdBySub: author.sub,
         })
         .returning()
 
@@ -86,7 +90,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  modify: legacyProcedure
+  modify: policy(dashboard("groups:labels:write"))
     .input(
       z.object({
         label,
@@ -96,18 +100,21 @@ export default createTRPCRouter({
           .string()
           .regex(/^#[0-9A-Fa-f]{6}$/)
           .optional(),
-        updatedBy: z.number(),
+        // Legacy callers only; token callers are taken from the token.
+        updatedBy: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { label, newLabel, description, color, updatedBy } = input
+      const author = authorOf(ctx.actor, updatedBy)
 
       const result = await DB.update(GROUP_LABELS)
         .set({
           label: newLabel,
           description,
           color,
-          updatedBy,
+          updatedBy: author.id,
+          updatedBySub: author.sub,
           updatedAt: new Date(),
         })
         .where(eq(GROUP_LABELS.label, label))

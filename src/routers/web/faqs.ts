@@ -1,8 +1,9 @@
 import { asc, eq } from "drizzle-orm"
 import z from "zod"
 import { DB, SCHEMA } from "@/db"
+import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
-import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 
 const FAQS = SCHEMA.WEB.faqs
 
@@ -52,7 +53,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  addFaqs: legacyProcedure
+  addFaqs: policy(dashboard("web:content:write"))
     .input(
       z.object({
         titleIt: z.string(),
@@ -60,10 +61,10 @@ export default createTRPCRouter({
         descriptionIt: z.string(),
         descriptionEn: z.string(),
         categoryId: z.number(),
-        createdBy: z.number(),
+        createdBy: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { titleIt, titleEn, descriptionIt, descriptionEn, categoryId, createdBy } = input
 
       const [res] = await DB.insert(FAQS)
@@ -73,23 +74,23 @@ export default createTRPCRouter({
           descriptionIt,
           descriptionEn,
           categoryId,
-          createdBy,
+          ...createdByColumns(authorOf(ctx.actor, createdBy)),
         })
         .returning()
 
       return res
     }),
 
-  addFaqsCategory: legacyProcedure
+  addFaqsCategory: policy(dashboard("web:content:write"))
     .input(
       z.object({
         titleIt: z.string(),
         titleEn: z.string(),
         icon: z.string().nullable(),
-        createdBy: z.number(),
+        createdBy: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { titleIt, titleEn, icon, createdBy } = input
 
       const [res] = await DB.insert(FAQ_CATEGORIES)
@@ -97,14 +98,14 @@ export default createTRPCRouter({
           titleIt,
           titleEn,
           icon,
-          createdBy,
+          ...createdByColumns(authorOf(ctx.actor, createdBy)),
         })
         .returning()
 
       return res
     }),
 
-  editFaqs: legacyProcedure
+  editFaqs: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),
@@ -113,10 +114,10 @@ export default createTRPCRouter({
         descriptionIt: z.string(),
         descriptionEn: z.string(),
         categoryId: z.number(),
-        modifiedBy: z.number(),
+        modifiedBy: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, descriptionIt, descriptionEn, categoryId, modifiedBy } = input
 
       const [res] = await DB.update(FAQS)
@@ -126,7 +127,7 @@ export default createTRPCRouter({
           descriptionIt,
           descriptionEn,
           categoryId,
-          modifiedBy,
+          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
         })
         .where(eq(FAQS.id, id))
         .returning()
@@ -135,17 +136,17 @@ export default createTRPCRouter({
       return res
     }),
 
-  editFaqsCategory: legacyProcedure
+  editFaqsCategory: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),
         titleIt: z.string(),
         titleEn: z.string(),
         icon: z.string().nullable(),
-        modifiedBy: z.number(),
+        modifiedBy: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, icon, modifiedBy } = input
 
       const [res] = await DB.update(FAQ_CATEGORIES)
@@ -153,7 +154,7 @@ export default createTRPCRouter({
           titleIt,
           titleEn,
           icon,
-          modifiedBy,
+          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
         })
         .where(eq(FAQ_CATEGORIES.id, id))
         .returning()

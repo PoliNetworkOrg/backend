@@ -1,5 +1,5 @@
 import type { Actor } from "@polinetwork/auth-kit"
-import { beforeAll, describe, expect, it, vi } from "vitest"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Context } from "@/trpc"
 
 const REQUIRED_ENV: Record<string, string> = {
@@ -14,7 +14,13 @@ const REQUIRED_ENV: Record<string, string> = {
 }
 for (const [key, value] of Object.entries(REQUIRED_ENV)) process.env[key] = value
 
-const db = vi.hoisted(() => ({ grants: [] as Array<{ userId: number; validUntil: Date }> }))
+const db = vi.hoisted(() => ({
+  /** Rows each table returns, by SQL name. */
+  rows: {} as Record<string, unknown[]>,
+  inserted: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  /** Whether an insert hits the idempotency key. */
+  conflict: false,
+}))
 
 // The real schema, without a connection: importing "@/db" would run migrations.
 vi.mock("@/db", async () => {
@@ -26,9 +32,23 @@ vi.mock("@/db", async () => {
     import("@/db/schema/web"),
     import("@/db/schema/views"),
   ])
-  const query = { from: () => query, where: async () => db.grants }
+  const { getTableName } = await import("drizzle-orm")
+  const select = () => ({
+    from: (table: Parameters<typeof getTableName>[0]) => {
+      const rows = () => db.rows[getTableName(table)] ?? []
+      return { where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }) }
+    },
+  })
+  const insert = (table: Parameters<typeof getTableName>[0]) => ({
+    values: (values: Record<string, unknown>) => {
+      db.inserted.push({ table: getTableName(table), values })
+      return {
+        onConflictDoNothing: () => ({ returning: async () => (db.conflict ? [] : [{ id: db.inserted.length }]) }),
+      }
+    },
+  })
   return {
-    DB: { select: () => query },
+    DB: { select, insert },
     SCHEMA: { AUTH: auth.schema, COMMON: common.schema, TG: tg.schema, WA: wa.schema, WEB: web.schema },
     VIEWS: { GROUPS: views.views },
   }
@@ -41,7 +61,7 @@ beforeAll(async () => {
   ;({ appRouter } = await import("@/routers"))
 })
 
-type ProcedureDef = { _def: { meta?: { policy?: unknown } } }
+type ProcedureDef = { _def: { meta?: { policy?: unknown; tokenOnly?: boolean } } }
 
 function procedures(): Array<[string, ProcedureDef]> {
   return Object.entries(
@@ -56,6 +76,29 @@ describe("app router", () => {
       .map(([path]) => path)
     expect(procedures().length).toBeGreaterThan(90)
     expect(missing).toEqual([])
+  })
+
+  it("gives the migrated writes their RFC v3 §8 policies", () => {
+    const policyOf = (path: string) => procedures().find(([name]) => name === path)?.[1]._def.meta
+    expect(policyOf("tg.auditLog.record")).toMatchObject({
+      policy: { service: { scope: "backend:tg:audit" } },
+      tokenOnly: true,
+    })
+    expect(policyOf("tg.grants.create")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "tg:grants:manage" },
+    })
+    expect(policyOf("tg.grants.interrupt")?.policy).toEqual({
+      telegram: { scope: "backend:tg:act-as", permission: "tg:grants:manage" },
+      user: { scope: "backend:admin", permission: "tg:grants:manage" },
+    })
+    expect(policyOf("azure.members.create")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "azure:members:create" },
+    })
+    expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "tg:groups:manage" },
+    })
+    for (const path of ["web.faqs.addFaqs", "web.projects.editProject", "groups.labels.create"])
+      expect(policyOf(path)?.policy).not.toBe("legacy")
   })
 
   it("keeps procedures that RFC v3 removes on the legacy path only", () => {
@@ -107,7 +150,7 @@ describe("tg.access.resolve and me.access", () => {
 
   it("resolves Telegram users to their subject, permissions and active grant", async () => {
     const validUntil = new Date(Date.now() + 3_600_000)
-    db.grants = [{ userId: 456, validUntil }]
+    db.rows = { tg_grants: [{ userId: 456, validUntil }], tg_grants_v2: [] }
     const caller = appRouter.createCaller({
       auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:read"]) },
       access: access(true),
@@ -129,7 +172,7 @@ describe("tg.access.resolve and me.access", () => {
   })
 
   it("returns no permissions from a stale snapshot", async () => {
-    db.grants = []
+    db.rows = {}
     const caller = appRouter.createCaller({
       auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:read"]) },
       access: access(false),
@@ -157,5 +200,71 @@ describe("tg.access.resolve and me.access", () => {
       permissions: ["tg:moderate"],
       stale: false,
     })
+  })
+})
+
+describe("tg.auditLog.record", () => {
+  const bot: Actor = { kind: "service", client: "telegram-bot" }
+  const access = (fresh: boolean, moderators: string[]): NonNullable<Context["access"]> => ({
+    has: (actor, permission) =>
+      fresh &&
+      actor.kind !== "service" &&
+      actor.sub !== null &&
+      moderators.includes(actor.sub) &&
+      permission === "tg:moderate",
+    current: () => null,
+    subjectBySub: () => undefined,
+    subjectByTelegramId: (id) => (fresh ? ({ sub: `usr_${id}`, telegramId: String(id) } as never) : undefined),
+    status: () => ({ lastSyncAt: 1, fresh, generation: 1, subjects: 1 }),
+  })
+  const record = (ctxAccess: NonNullable<Context["access"]>, input: Record<string, unknown>) =>
+    appRouter
+      .createCaller({ auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:audit"]) }, access: ctxAccess })
+      .tg.auditLog.record({
+        idempotencyKey: "key-1",
+        type: "ban",
+        targetId: 777,
+        groupId: -100,
+        until: null,
+        basis: "idp_permission",
+        actorTelegramId: 10,
+        ...input,
+      } as never)
+
+  beforeEach(() => {
+    db.inserted = []
+    db.conflict = false
+    db.rows = {}
+  })
+
+  it("stores the actor's subject and the executing client", async () => {
+    expect(await record(access(true, ["usr_10"]), {})).toEqual({ id: 1, duplicate: false })
+    expect(db.inserted[0]).toMatchObject({
+      table: "tg_audit_log",
+      values: { actorTgId: 10, actorSub: "usr_10", client: "telegram-bot", basis: "idp_permission", review: null },
+    })
+  })
+
+  it("stores an action the snapshot does not back, flagged for review", async () => {
+    await record(access(true, []), {})
+    expect(db.inserted[0]?.values.review).toBe("permission_missing")
+    await record(access(false, ["usr_10"]), { idempotencyKey: "key-2" })
+    expect(db.inserted[1]?.values.review).toBe("unverified")
+  })
+
+  it("does not check the chat-admin shortcut or automatic actions against the IdP", async () => {
+    await record(access(true, []), { basis: "telegram_chat_admin" })
+    await record(access(true, []), { basis: "automatic", actorTelegramId: null, idempotencyKey: "key-2" })
+    expect(db.inserted.map((entry) => entry.values.review)).toEqual([null, null])
+  })
+
+  it("returns the first record for a repeated idempotency key", async () => {
+    db.conflict = true
+    db.rows = { tg_audit_log: [{ id: 41 }] }
+    expect(await record(access(true, ["usr_10"]), {})).toEqual({ id: 41, duplicate: true })
+  })
+
+  it("needs an actor unless the action was automatic or made in Telegram's UI", async () => {
+    await expect(record(access(true, []), { actorTelegramId: null })).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 })
