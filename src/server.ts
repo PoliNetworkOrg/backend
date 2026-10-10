@@ -21,7 +21,7 @@ import { appRouter } from "./routers"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
 
 export const WSS = new WebSocketServer({
-  authenticate: (token) => authenticateSocket(token, idp?.verify ?? null),
+  authenticate: (token) => authenticateSocket(token, idp?.verify ?? null, env.OAUTH_BOT_CLIENT_ID),
   legacyAnonymous: env.LEGACY_ANONYMOUS,
 })
 const app = new Hono()

@@ -58,6 +58,8 @@ export const env = createEnv({
     OAUTH_BACKEND_RESOURCE_URI: z.url().optional(),
     OAUTH_INTERNAL_RESOURCE_URI: z.url().optional(),
     OAUTH_BACKEND_CLIENT_ID: z.string().min(1).optional(),
+    /** Registered Telegram service client ID; required to accept token-authenticated bot sockets. */
+    OAUTH_BOT_CLIENT_ID: z.string().min(1).optional(),
     /** The backend client's private signing key as a JWK (JSON), with `kid` and `alg`. */
     OAUTH_BACKEND_PRIVATE_JWK: z.string().min(1).optional(),
     IDP_SNAPSHOT_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
