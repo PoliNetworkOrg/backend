@@ -2,8 +2,9 @@ import { asc, eq } from "drizzle-orm"
 import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
+import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
-import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 import { getImageExtension } from "@/utils/web"
 
 const ASSOCIATIONS = SCHEMA.WEB.associations
@@ -74,18 +75,18 @@ export default createTRPCRouter({
       return associations.map(formatAssociation)
     }),
 
-  addAssociation: legacyProcedure
+  addAssociation: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
         .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
         .pipe(
           associationFormSchema.extend({
-            createdBy: z.coerce.number<string>(),
+            createdBy: z.coerce.number<string>().optional(),
           })
         )
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { name, descriptionIt, descriptionEn, logo, createdBy } = input
 
       const uploadedLogo = logo
@@ -98,14 +99,14 @@ export default createTRPCRouter({
           descriptionIt,
           descriptionEn,
           logo: uploadedLogo?.url ?? null,
-          createdBy,
+          ...createdByColumns(authorOf(ctx.actor, createdBy)),
         })
         .returning()
 
       return formatAssociation(res)
     }),
 
-  editAssociation: legacyProcedure
+  editAssociation: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
@@ -113,11 +114,11 @@ export default createTRPCRouter({
         .pipe(
           associationFormSchema.extend({
             id: z.coerce.number<string>(),
-            modifiedBy: z.coerce.number<string>(),
+            modifiedBy: z.coerce.number<string>().optional(),
           })
         )
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id, name, descriptionIt, descriptionEn, logo, modifiedBy } = input
 
       const uploadedLogo = logo
@@ -130,7 +131,7 @@ export default createTRPCRouter({
           descriptionIt,
           descriptionEn,
           ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
-          modifiedBy,
+          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
         })
         .where(eq(ASSOCIATIONS.id, id))
         .returning()
@@ -139,15 +140,15 @@ export default createTRPCRouter({
       return formatAssociation(res)
     }),
 
-  editAssociationLinks: legacyProcedure
+  editAssociationLinks: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),
         links: associationLinksSchema,
-        modifiedBy: z.number(),
+        modifiedBy: z.number().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id, links, modifiedBy } = input
       const { email, website, facebook, instagram, tiktok, x, youtube, telegram, linkedin, spotify } = links
 
@@ -163,7 +164,7 @@ export default createTRPCRouter({
           telegram,
           linkedin,
           spotify,
-          modifiedBy,
+          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
         })
         .where(eq(ASSOCIATIONS.id, id))
         .returning()

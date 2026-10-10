@@ -14,12 +14,16 @@ import { DB, SCHEMA } from "./db"
 import { sendWelcomeEmail } from "./emails/mailer"
 import { env } from "./env"
 import { authenticateRequest, idp, startIdp, stopIdp } from "./idp"
+import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
 import { redis } from "./redis"
 import { appRouter } from "./routers"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
 
-export const WSS = new WebSocketServer()
+export const WSS = new WebSocketServer({
+  authenticate: (token) => authenticateSocket(token, idp?.verify ?? null),
+  legacyAnonymous: env.LEGACY_ANONYMOUS,
+})
 const app = new Hono()
 
 const server = Bun.serve({
