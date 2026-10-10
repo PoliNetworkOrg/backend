@@ -97,6 +97,11 @@ describe("app router", () => {
     expect(policyOf("azure.members.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:members:create" },
     })
+    expect(policyOf("azure.groups.getAll")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "azure:groups:read" },
+    })
+    for (const path of ["azure.groups.addMember", "azure.groups.removeMember"])
+      expect(policyOf(path)?.policy).toEqual({ user: { scope: "backend:admin", permission: "azure:groups:write" } })
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })
@@ -115,7 +120,6 @@ describe("app router", () => {
       "test.dbQuery",
       "tg.permissions.addRole",
       "tg.link.link",
-      "azure.groups.addMember",
       "azure.members.setAssocNumber",
     ])
       expect(legacy).toContain(path)
