@@ -1,7 +1,8 @@
 import { and, eq, inArray, sql } from "drizzle-orm"
 import z from "zod"
 import { DB, SCHEMA, VIEWS } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard, SCOPE } from "@/idp/policies"
+import { createTRPCRouter, policy } from "@/trpc"
 
 const REPORTS = SCHEMA.WEB.groupLinkReports
 const GROUPS = VIEWS.GROUPS.groupsView
@@ -20,7 +21,7 @@ async function assertGroupExists(groupId: number, type: "tg" | "wa") {
 }
 
 export const reports = createTRPCRouter({
-  create: publicProcedure
+  create: policy({ service: { scope: SCOPE.publicRead } })
     .input(
       z.discriminatedUnion("reportType", [
         z.object({
@@ -46,7 +47,7 @@ export const reports = createTRPCRouter({
       return { ok: true as const }
     }),
 
-  list: publicProcedure
+  list: policy(dashboard("web:reports:manage"))
     .input(
       z.object({
         statuses: z.array(reportStatus).min(1).default(["pending"]),
@@ -71,11 +72,15 @@ export const reports = createTRPCRouter({
         .orderBy(REPORTS.createdAt)
     }),
 
-  resolve: publicProcedure.input(z.object({ ids: z.array(z.number().int()).min(1) })).mutation(async ({ input }) => {
-    return await DB.update(REPORTS).set({ status: "resolved" }).where(inArray(REPORTS.id, input.ids)).returning()
-  }),
+  resolve: policy(dashboard("web:reports:manage"))
+    .input(z.object({ ids: z.array(z.number().int()).min(1) }))
+    .mutation(async ({ input }) => {
+      return await DB.update(REPORTS).set({ status: "resolved" }).where(inArray(REPORTS.id, input.ids)).returning()
+    }),
 
-  dismiss: publicProcedure.input(z.object({ ids: z.array(z.number().int()).min(1) })).mutation(async ({ input }) => {
-    return await DB.update(REPORTS).set({ status: "dismissed" }).where(inArray(REPORTS.id, input.ids)).returning()
-  }),
+  dismiss: policy(dashboard("web:reports:manage"))
+    .input(z.object({ ids: z.array(z.number().int()).min(1) }))
+    .mutation(async ({ input }) => {
+      return await DB.update(REPORTS).set({ status: "dismissed" }).where(inArray(REPORTS.id, input.ids)).returning()
+    }),
 })

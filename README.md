@@ -39,3 +39,14 @@ Requirements:
    bun run seed:user
    ```
    The script sends a sign-in OTP to `test@example.com` and prints a link to a temporary inbox where you can read the code — paste it when prompted. Without this step, logging into admin with `test@example.com` lands on the "Link your Telegram account" onboarding page, since that account has no `telegramId` associated yet. Re-run with `--force` to recreate the test user from scratch.
+
+## Authentication
+
+The backend is moving to the PoliNetwork IdP ([RFC v3](https://github.com/PoliNetworkOrg/auth/blob/main/docs/idp-telegram-integration-rfc-v3.md), Phase 3). Both paths run side by side until every caller sends a token:
+
+- **With a token** (`Authorization: Bearer <IdP access token>`): the token is verified with [`@polinetwork/auth-kit`](https://github.com/PoliNetworkOrg/auth-kit), and the call is fully enforced. Every procedure declares, per actor kind, the scope it needs and, for people, the permission they must hold in the IdP's access snapshot. A token that fails verification is rejected; it never falls back to the legacy path. The bot acts for a Telegram user with `X-PN-Actor: telegram:<id>`, which only a service token with `backend:tg:act-as` may send.
+- **Without a token**: the legacy behaviour, while `LEGACY_ANONYMOUS=allow`. Each call is logged as `[AUTH] legacy anonymous call` with its procedure, so callers still on this path can be found. Procedures added for the IdP refuse anonymous calls.
+
+Procedures are built with `policy(...)` or `legacyProcedure` from `src/trpc.ts`; the bare tRPC procedure is not exported, and `tests/idp-router.test.ts` fails if any procedure lacks a policy. `legacyProcedure` marks procedures that token callers cannot use yet: those that still take actor fields such as `createdBy` or `adderId`, and those the RFC removes.
+
+The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.

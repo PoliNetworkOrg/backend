@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
+import { botReadOrDashboard, dashboard, SCOPE } from "@/idp/policies"
 import { logger } from "@/logger"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 import { DecryptError } from "@/utils/cipher"
 import { upsertMultipleSetSql } from "@/utils/db"
 import { decryptUser, encryptUser, TgUserSchema, userCipher } from "@/utils/users"
@@ -11,7 +12,7 @@ const s = SCHEMA.TG
 const upsertSet = upsertMultipleSetSql(s.users, ["firstName", "lastName", "username", "langCode", "isBot"])
 
 export default createTRPCRouter({
-  getAll: publicProcedure.query(async () => {
+  getAll: policy(dashboard("tg:users:read")).query(async () => {
     try {
       const res = await DB.select().from(s.users)
       const decryptedUsers = await Promise.all(res.map((user) => decryptUser(user).catch(() => null)))
@@ -30,7 +31,7 @@ export default createTRPCRouter({
     }
   }),
 
-  get: publicProcedure
+  get: policy(botReadOrDashboard("tg:users:read"))
     .input(z.object({ userId: z.number() }))
     .output(
       z.union([
@@ -65,7 +66,7 @@ export default createTRPCRouter({
       }
     }),
 
-  getByUsername: publicProcedure
+  getByUsername: policy(botReadOrDashboard("tg:users:read"))
     .input(z.object({ username: z.string() }))
     .output(
       z.union([
@@ -101,7 +102,7 @@ export default createTRPCRouter({
       }
     }),
 
-  add: publicProcedure
+  add: policy({ service: { scope: SCOPE.tgIngest } })
     .input(z.object({ users: z.array(TgUserSchema) }))
     .output(
       z.union([

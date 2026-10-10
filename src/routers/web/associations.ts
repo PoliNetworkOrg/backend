@@ -2,7 +2,8 @@ import { asc, eq } from "drizzle-orm"
 import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard, publicData } from "@/idp/policies"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 import { getImageExtension } from "@/utils/web"
 
 const ASSOCIATIONS = SCHEMA.WEB.associations
@@ -65,13 +66,15 @@ function formatAssociation(association: typeof ASSOCIATIONS.$inferSelect): z.inf
 }
 
 export default createTRPCRouter({
-  getAllAssociations: publicProcedure.output(z.array(associationSchema)).query(async () => {
-    const associations = await DB.select().from(ASSOCIATIONS).orderBy(asc(ASSOCIATIONS.id))
+  getAllAssociations: policy(publicData)
+    .output(z.array(associationSchema))
+    .query(async () => {
+      const associations = await DB.select().from(ASSOCIATIONS).orderBy(asc(ASSOCIATIONS.id))
 
-    return associations.map(formatAssociation)
-  }),
+      return associations.map(formatAssociation)
+    }),
 
-  addAssociation: publicProcedure
+  addAssociation: legacyProcedure
     .input(
       z
         .instanceof(FormData)
@@ -102,7 +105,7 @@ export default createTRPCRouter({
       return formatAssociation(res)
     }),
 
-  editAssociation: publicProcedure
+  editAssociation: legacyProcedure
     .input(
       z
         .instanceof(FormData)
@@ -136,7 +139,7 @@ export default createTRPCRouter({
       return formatAssociation(res)
     }),
 
-  editAssociationLinks: publicProcedure
+  editAssociationLinks: legacyProcedure
     .input(
       z.object({
         id: z.number(),
@@ -169,7 +172,7 @@ export default createTRPCRouter({
       return formatAssociation(res)
     }),
 
-  deleteAssociation: publicProcedure
+  deleteAssociation: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),

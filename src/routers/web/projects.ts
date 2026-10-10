@@ -3,7 +3,8 @@ import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { projectsCategories } from "@/db/schema/web/projects"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard, publicData } from "@/idp/policies"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 import { getImageExtension } from "@/utils/web"
 
 const PROJECTS = SCHEMA.WEB.projects
@@ -34,11 +35,13 @@ const projectSchema = z.object({
 })
 
 export default createTRPCRouter({
-  getAllProjects: publicProcedure.output(z.array(projectSchema)).query(async () => {
-    return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
-  }),
+  getAllProjects: policy(publicData)
+    .output(z.array(projectSchema))
+    .query(async () => {
+      return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
+    }),
 
-  addProject: publicProcedure
+  addProject: legacyProcedure
     .input(
       z
         .instanceof(FormData)
@@ -71,7 +74,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editProject: publicProcedure
+  editProject: legacyProcedure
     .input(
       z
         .instanceof(FormData)
@@ -106,7 +109,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  reorderProjects: publicProcedure
+  reorderProjects: policy(dashboard("web:content:write"))
     .input(
       z.object({
         projectIds: z
@@ -125,7 +128,7 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  deleteProject: publicProcedure
+  deleteProject: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),

@@ -2,13 +2,13 @@ import z from "zod"
 import { azureDirectory } from "@/azure/directory"
 import { sendWelcomeEmail } from "@/emails/mailer"
 import { logger } from "@/logger"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure } from "@/trpc"
 
 export default createTRPCRouter({
-  getAll: publicProcedure.query(async () => {
+  getAll: legacyProcedure.query(async () => {
     return await azureDirectory.getMembers()
   }),
-  setAssocNumber: publicProcedure
+  setAssocNumber: legacyProcedure
     .input(
       z.object({
         userId: z.string(),
@@ -20,7 +20,7 @@ export default createTRPCRouter({
       const { error } = await azureDirectory.setMemberNumber(input.userId, input.assocNumber)
       return { error }
     }),
-  create: publicProcedure
+  create: legacyProcedure
     .input(
       z.object({
         firstName: z.string().min(1),

@@ -1,14 +1,15 @@
 import { asc, eq } from "drizzle-orm"
 import z from "zod"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard, publicData } from "@/idp/policies"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 
 const FAQS = SCHEMA.WEB.faqs
 
 const FAQ_CATEGORIES = SCHEMA.WEB.faqCategories
 
 export default createTRPCRouter({
-  getAllFaqs: publicProcedure
+  getAllFaqs: policy(publicData)
     .output(
       z.array(
         z.object({
@@ -51,7 +52,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  addFaqs: publicProcedure
+  addFaqs: legacyProcedure
     .input(
       z.object({
         titleIt: z.string(),
@@ -79,7 +80,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  addFaqsCategory: publicProcedure
+  addFaqsCategory: legacyProcedure
     .input(
       z.object({
         titleIt: z.string(),
@@ -103,7 +104,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editFaqs: publicProcedure
+  editFaqs: legacyProcedure
     .input(
       z.object({
         id: z.number(),
@@ -134,7 +135,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editFaqsCategory: publicProcedure
+  editFaqsCategory: legacyProcedure
     .input(
       z.object({
         id: z.number(),
@@ -161,7 +162,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  deleteFaqs: publicProcedure
+  deleteFaqs: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),
@@ -175,7 +176,7 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  deleteFaqsCategory: publicProcedure
+  deleteFaqsCategory: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),

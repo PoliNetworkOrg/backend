@@ -49,6 +49,21 @@ export const env = createEnv({
     AZURE_BLOB_STORAGE_ACCOUNT: z.string().default("polinetworksa"),
     AZURE_BLOB_STORAGE_CONTAINER: z.string().default("file-blobs"),
 
+    // PoliNetwork IdP (RFC v3 §6, §12). Token authentication is enabled when IDP_PUBLIC_URL and
+    // OAUTH_BACKEND_RESOURCE_URI are set; snapshot pulls also need the internal resource and the
+    // backend client's credentials. Without them every permission check denies.
+    IDP_PUBLIC_URL: z.url().optional(),
+    /** In-cluster address for requests; identifiers always come from IDP_PUBLIC_URL. */
+    IDP_INTERNAL_URL: z.url().optional(),
+    OAUTH_BACKEND_RESOURCE_URI: z.url().optional(),
+    OAUTH_INTERNAL_RESOURCE_URI: z.url().optional(),
+    OAUTH_BACKEND_CLIENT_ID: z.string().min(1).optional(),
+    /** The backend client's private signing key as a JWK (JSON), with `kid` and `alg`. */
+    OAUTH_BACKEND_PRIVATE_JWK: z.string().min(1).optional(),
+    IDP_SNAPSHOT_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
+    /** Requests without a token take the legacy path while "allow" (RFC §13). */
+    LEGACY_ANONYMOUS: z.enum(["allow", "deny"]).default("allow"),
+
     // env config
     NODE_ENV: NODE_ENV.default(nodeEnv),
     LOG_LEVEL: z.string().default("DEBUG"),

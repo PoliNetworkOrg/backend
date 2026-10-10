@@ -3,10 +3,10 @@ import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure } from "@/trpc"
 
 export const authRouter = createTRPCRouter({
-  updateProfilePic: publicProcedure
+  updateProfilePic: legacyProcedure
     .input(
       z
         .instanceof(FormData)

@@ -2,10 +2,10 @@ import { eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { logger } from "@/logger"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure } from "@/trpc"
 
 export default createTRPCRouter({
-  link: publicProcedure
+  link: legacyProcedure
     .input(
       z.object({
         code: z.string().regex(/^\d+$/).length(6),

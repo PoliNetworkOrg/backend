@@ -71,7 +71,11 @@ vi.mock("@/trpc", () => {
     }),
     query: (handler: () => unknown) => ({ handler }),
   }
-  return { createTRPCRouter: <T>(router: T) => router, publicProcedure }
+  return {
+    createTRPCRouter: <T>(router: T) => router,
+    policy: () => publicProcedure,
+    legacyProcedure: publicProcedure,
+  }
 })
 
 const { default: labelsRouter } = await import("@/routers/groups/labels")

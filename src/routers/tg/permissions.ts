@@ -4,7 +4,7 @@ import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
 import { ARRAY_USER_ROLE, type TUserRole } from "@/db/schema/tg/permissions"
 import { logger } from "@/logger"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure } from "@/trpc"
 import { decryptUser, TgUserSchema } from "@/utils/users"
 
 const s = SCHEMA.TG
@@ -20,7 +20,7 @@ const direttivoMember = z.object({
 })
 
 export default createTRPCRouter({
-  getRoles: publicProcedure.input(z.object({ userId: z.number() })).query(async ({ input }) => {
+  getRoles: legacyProcedure.input(z.object({ userId: z.number() })).query(async ({ input }) => {
     const [res] = await DB.select({
       roles: s.permissions.roles,
     })
@@ -54,7 +54,7 @@ export default createTRPCRouter({
     }
   }),
 
-  getDirettivo: publicProcedure
+  getDirettivo: legacyProcedure
     .output(
       z.union([
         z.object({
@@ -106,7 +106,7 @@ export default createTRPCRouter({
       }
     }),
 
-  addRole: publicProcedure
+  addRole: legacyProcedure
     .input(
       z.object({
         userId: z.number(),
@@ -200,7 +200,7 @@ export default createTRPCRouter({
       }
     }),
 
-  removeRole: publicProcedure
+  removeRole: legacyProcedure
     .input(
       z.object({
         userId: z.number(),
@@ -270,7 +270,7 @@ export default createTRPCRouter({
       }
     }),
 
-  checkGroup: publicProcedure.input(z.object({ userId: z.number(), groupId: z.number() })).query(async ({ input }) => {
+  checkGroup: legacyProcedure.input(z.object({ userId: z.number(), groupId: z.number() })).query(async ({ input }) => {
     const res = await DB.$count(
       s.groupAdmins,
       and(eq(s.groupAdmins.userId, input.userId), eq(s.groupAdmins.groupId, input.groupId))
@@ -279,7 +279,7 @@ export default createTRPCRouter({
     return res !== 0
   }),
 
-  addGroup: publicProcedure
+  addGroup: legacyProcedure
     .input(
       z.object({
         userId: z.number(),
@@ -297,7 +297,7 @@ export default createTRPCRouter({
         .onConflictDoNothing()
     }),
 
-  removeGroup: publicProcedure
+  removeGroup: legacyProcedure
     .input(
       z.object({
         userId: z.number(),
@@ -340,7 +340,7 @@ export default createTRPCRouter({
       }
     }),
 
-  canAddBot: publicProcedure
+  canAddBot: legacyProcedure
     .input(
       z.object({
         userId: z.number(),

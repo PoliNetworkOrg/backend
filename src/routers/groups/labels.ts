@@ -1,7 +1,8 @@
 import { and, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { dashboard } from "@/idp/policies"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 
 const GROUP_LABELS = SCHEMA.COMMON.groupLabels
 const TG_RELATIONS = SCHEMA.TG.tgGroupLabelRelations
@@ -23,13 +24,13 @@ async function assertGroupExists(groupId: number, type: z.infer<typeof groupType
 }
 
 export default createTRPCRouter({
-  getAll: publicProcedure.query(async () => {
+  getAll: policy(dashboard("admin:access")).query(async () => {
     const results = await DB.select().from(GROUP_LABELS)
 
     return results
   }),
 
-  create: publicProcedure
+  create: legacyProcedure
     .input(
       z.object({
         label,
@@ -54,7 +55,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  delete: publicProcedure
+  delete: policy(dashboard("groups:labels:write"))
     .input(
       z.object({
         label,
@@ -85,7 +86,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  modify: publicProcedure
+  modify: legacyProcedure
     .input(
       z.object({
         label,
@@ -115,7 +116,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  tagGroup: publicProcedure
+  tagGroup: policy(dashboard("groups:labels:write"))
     .input(
       z.object({
         groupId: z.number(),
@@ -152,7 +153,7 @@ export default createTRPCRouter({
         .returning()
     }),
 
-  untagGroup: publicProcedure
+  untagGroup: policy(dashboard("groups:labels:write"))
     .input(
       z.object({
         groupId: z.number(),

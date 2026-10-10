@@ -1,9 +1,10 @@
 import { and, eq, exists, ilike, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
+import { botReadOrDashboard, dashboard, SCOPE } from "@/idp/policies"
 import { logger } from "@/logger"
 import { WSS } from "@/server"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 import { lower } from "@/utils/db"
 
 const GROUPS = SCHEMA.TG.groups
@@ -15,7 +16,7 @@ export default createTRPCRouter({
   // At the moment, this query is used by banall flowProducer in the telegram bot.
   // We may consider moving the flowProducer and ensure connection through the same Redis
   // instance or some other way of bridging the two parts together.
-  getAll: publicProcedure.query(async () => {
+  getAll: policy(botReadOrDashboard("admin:access")).query(async () => {
     const beforeMs = performance.now()
     const results = await DB.select().from(GROUPS)
     const afterMs = performance.now()
@@ -24,7 +25,7 @@ export default createTRPCRouter({
     return results
   }),
 
-  search: publicProcedure
+  search: policy({ service: { scope: [SCOPE.tgRead, SCOPE.publicRead] }, ...dashboard("admin:access") })
     .input(
       z.object({
         query: z.string().min(1).max(100).optional(),
@@ -34,7 +35,7 @@ export default createTRPCRouter({
         showHidden: z.boolean().default(false),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       // TODO: implement some kind of recommender system to promote groups that are more relevant
       // raw string search is weird, we should boost more used groups
 
@@ -79,7 +80,9 @@ export default createTRPCRouter({
         if (queryWhere) conditions.push(queryWhere) // or(...) returns undefined? idk
       }
 
-      if (input.showHidden === false) {
+      // Hidden groups are dashboard data (RFC v3 §8); legacy callers keep the old behaviour.
+      const showHidden = input.showHidden && (ctx.actor === null || ctx.actor.kind === "user")
+      if (showHidden === false) {
         conditions.push(not(GROUPS.hide))
       }
 
@@ -101,7 +104,7 @@ export default createTRPCRouter({
       }
     }),
 
-  getById: publicProcedure
+  getById: policy(botReadOrDashboard("admin:access"))
     .input(
       z.object({
         telegramId: z.number(),
@@ -117,7 +120,7 @@ export default createTRPCRouter({
       return res[0]
     }),
 
-  getByInviteLink: publicProcedure
+  getByInviteLink: policy(botReadOrDashboard("admin:access"))
     .input(
       z.object({
         inviteLink: z.url(),
@@ -133,7 +136,7 @@ export default createTRPCRouter({
       return res[0]
     }),
 
-  getByTag: publicProcedure
+  getByTag: policy(botReadOrDashboard("admin:access"))
     .input(
       z.object({
         tag: z.string(),
@@ -149,7 +152,7 @@ export default createTRPCRouter({
       return res[0]
     }),
 
-  create: publicProcedure
+  create: policy({ service: { scope: SCOPE.tgGroupsSync } })
     .input(
       z.array(
         z.object({
@@ -181,7 +184,7 @@ export default createTRPCRouter({
       return rows.map((r) => r.telegramId)
     }),
 
-  delete: publicProcedure
+  delete: policy({ service: { scope: SCOPE.tgGroupsSync } })
     .input(
       z.object({
         telegramId: z.number(),
@@ -193,7 +196,7 @@ export default createTRPCRouter({
       return rows.length === 1
     }),
 
-  setHide: publicProcedure
+  setHide: policy(dashboard("tg:groups:manage"))
     .input(
       z.object({
         telegramId: z.number(),
@@ -209,7 +212,7 @@ export default createTRPCRouter({
       return rows.length === 1
     }),
 
-  leaveChat: publicProcedure
+  leaveChat: legacyProcedure
     .input(
       z.object({
         chatId: z.number(),

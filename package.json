@@ -51,6 +51,7 @@
     "@hono/trpc-server": "^0.4.2",
     "@hono/zod-validator": "^0.7.6",
     "@microsoft/microsoft-graph-client": "^3.0.7",
+    "@polinetwork/auth-kit": "^1.1.0",
     "@react-email/components": "1.0.6",
     "@socket.io/bun-engine": "~0.1.0",
     "@socket.io/devalue-parser": "^0.1.0",
