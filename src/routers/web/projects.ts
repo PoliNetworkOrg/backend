@@ -3,9 +3,8 @@ import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { projectsCategories } from "@/db/schema/web/projects"
-import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
-import { createTRPCRouter, policy } from "@/trpc"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 import { getImageExtension } from "@/utils/web"
 
 const PROJECTS = SCHEMA.WEB.projects
@@ -42,18 +41,18 @@ export default createTRPCRouter({
       return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
     }),
 
-  addProject: policy(dashboard("web:content:write"))
+  addProject: legacyProcedure
     .input(
       z
         .instanceof(FormData)
         .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
         .pipe(
           projectFormSchema.extend({
-            createdBy: z.coerce.number<string>().optional(),
+            createdBy: z.coerce.number<string>(),
           })
         )
     )
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input }) => {
       const { title, descriptionIt, descriptionEn, logo, link, category, createdBy } = input
 
       const uploadedLogo = logo
@@ -68,14 +67,14 @@ export default createTRPCRouter({
           logo: uploadedLogo?.url ?? null,
           link,
           category,
-          ...createdByColumns(authorOf(ctx.actor, createdBy)),
+          createdBy,
         })
         .returning()
 
       return res
     }),
 
-  editProject: policy(dashboard("web:content:write"))
+  editProject: legacyProcedure
     .input(
       z
         .instanceof(FormData)
@@ -83,11 +82,11 @@ export default createTRPCRouter({
         .pipe(
           projectFormSchema.extend({
             id: z.coerce.number<string>(),
-            modifiedBy: z.coerce.number<string>().optional(),
+            modifiedBy: z.coerce.number<string>(),
           })
         )
     )
-    .mutation(async ({ input, ctx }) => {
+    .mutation(async ({ input }) => {
       const { title, descriptionIt, descriptionEn, logo, link, category, modifiedBy } = input
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
@@ -101,7 +100,7 @@ export default createTRPCRouter({
           ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
           link,
           category,
-          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
+          modifiedBy,
         })
         .where(eq(PROJECTS.id, input.id))
         .returning()

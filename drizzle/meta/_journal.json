@@ -148,13 +148,6 @@
       "when": 1791571957045,
       "tag": "0020_idp_state",
       "breakpoints": true
-    },
-    {
-      "idx": 21,
-      "version": "7",
-      "when": 1791589154604,
-      "tag": "0021_idp_audit_grants_authors",
-      "breakpoints": true
     }
   ]
 }

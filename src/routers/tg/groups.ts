@@ -1,12 +1,10 @@
-import { TRPCError } from "@trpc/server"
 import { and, eq, exists, ilike, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { describeActor } from "@/idp/actor-info"
 import { botReadOrDashboard, dashboard, SCOPE } from "@/idp/policies"
 import { logger } from "@/logger"
 import { WSS } from "@/server"
-import { createTRPCRouter, policy } from "@/trpc"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
 import { lower } from "@/utils/db"
 
 const GROUPS = SCHEMA.TG.groups
@@ -214,23 +212,15 @@ export default createTRPCRouter({
       return rows.length === 1
     }),
 
-  leaveChat: policy(dashboard("tg:groups:manage"))
+  leaveChat: legacyProcedure
     .input(
       z.object({
         chatId: z.number(),
-        /** Legacy callers only; token callers are taken from the token. */
-        performerId: z.number().optional(),
+        performerId: z.number(),
       })
     )
-    .mutation(async ({ input, ctx }) => {
-      if (!ctx.actor && input.performerId === undefined)
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Missing performerId" })
-      const performer = await describeActor(ctx.actor, input.performerId)
-      const left = await WSS.leaveChat({
-        chatId: input.chatId,
-        performerId: performer.telegramId ? Number(performer.telegramId) : null,
-        performer,
-      })
+    .mutation(async ({ input }) => {
+      const left = await WSS.leaveChat(input.chatId, input.performerId)
       if (!left) return { error: "BOT_ERROR" }
 
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.chatId)).returning()
