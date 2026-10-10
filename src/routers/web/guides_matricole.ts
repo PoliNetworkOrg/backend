@@ -2,8 +2,9 @@ import { desc, eq } from "drizzle-orm"
 import z from "zod"
 import { deleteBlob, uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
+import { authorOf, createdByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
-import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 
 const GUIDES_MATRICOLE = SCHEMA.WEB.guidesMatricole
 
@@ -40,7 +41,7 @@ export default createTRPCRouter({
       return res[0] || null
     }),
 
-  addGuide: legacyProcedure
+  addGuide: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
@@ -48,11 +49,11 @@ export default createTRPCRouter({
         .pipe(
           guideFormSchema.extend({
             file: guideFileSchema,
-            createdBy: z.coerce.number<string>(),
+            createdBy: z.coerce.number<string>().optional(),
           })
         )
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { version, date, file, createdBy } = input
 
       const [existing] = await DB.select({ id: GUIDES_MATRICOLE.id })
@@ -67,7 +68,7 @@ export default createTRPCRouter({
           version,
           date,
           file: uploadedFile.url,
-          createdBy,
+          ...createdByColumns(authorOf(ctx.actor, createdBy)),
         })
         .returning()
 

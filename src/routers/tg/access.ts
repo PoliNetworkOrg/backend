@@ -1,10 +1,8 @@
-import { and, gt, inArray, isNull, lte } from "drizzle-orm"
 import { z } from "zod"
-import { DB, SCHEMA } from "@/db"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
+import { activeGrantByUser } from "@/utils/grants"
 
-const GRANTS = SCHEMA.TG.grants
 // Telegram user IDs fit in 52 bits; anything outside the safe-integer range is not one.
 const telegramId = z
   .union([
@@ -28,25 +26,13 @@ export default createTRPCRouter({
     .query(async ({ input, ctx }) => {
       const ids = [...new Set(input.telegramIds)]
       const now = new Date()
-      // Active means valid_since ≤ now < valid_until and not interrupted (RFC v3 §9.3).
-      const grants = await DB.select({ userId: GRANTS.userId, validUntil: GRANTS.validUntil })
-        .from(GRANTS)
-        .where(
-          and(
-            inArray(GRANTS.userId, ids.map(Number)),
-            lte(GRANTS.validSince, now),
-            gt(GRANTS.validUntil, now),
-            isNull(GRANTS.interruptedBy)
-          )
-        )
+      const grants = await activeGrantByUser(ids.map(Number), now)
       const index = ctx.access?.current() ?? null
       const result: Record<string, { sub: string | null; permissions: string[]; grant: { validUntil: Date } | null }> =
         {}
       for (const id of ids) {
         const subject = ctx.access?.subjectByTelegramId(id)
-        const grant = grants
-          .filter((entry) => String(entry.userId) === id)
-          .sort((a, b) => b.validUntil.getTime() - a.validUntil.getTime())[0]
+        const grant = grants.get(Number(id))
         result[id] = {
           sub: subject?.sub ?? null,
           permissions: index && subject ? index.permissions(subject, now.getTime()) : [],

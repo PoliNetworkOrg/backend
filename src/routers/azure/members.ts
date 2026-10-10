@@ -1,8 +1,17 @@
 import z from "zod"
 import { azureDirectory } from "@/azure/directory"
 import { sendWelcomeEmail } from "@/emails/mailer"
+import { dashboard } from "@/idp/policies"
 import { logger } from "@/logger"
-import { createTRPCRouter, legacyProcedure } from "@/trpc"
+import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+
+// Becomes the Entra display name and mail nickname.
+const personName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[\p{L}\p{M}' -]+$/u, "Only letters, spaces, apostrophes and hyphens")
 
 export default createTRPCRouter({
   getAll: legacyProcedure.query(async () => {
@@ -20,12 +29,16 @@ export default createTRPCRouter({
       const { error } = await azureDirectory.setMemberNumber(input.userId, input.assocNumber)
       return { error }
     }),
-  create: legacyProcedure
+  /**
+   * The dashboard's only Azure capability (RFC v3 §4 decision 9): create a new Entra user and add
+   * only that user to the fixed Soci group. No caller-supplied group or existing user.
+   */
+  create: policy(dashboard("azure:members:create"))
     .input(
       z.object({
-        firstName: z.string().min(1),
-        lastName: z.string().min(1),
-        assocNumber: z.number(),
+        firstName: personName,
+        lastName: personName,
+        assocNumber: z.number().int().positive(),
         sendEmailTo: z.email(),
       })
     )
@@ -40,13 +53,15 @@ export default createTRPCRouter({
         }),
       ])
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const by = ctx.actor?.kind === "user" ? { sub: ctx.actor.sub, client: ctx.actor.client } : { legacy: true }
       try {
         const member = await azureDirectory.createMember({
           firstName: input.firstName,
           lastName: input.lastName,
           assocNumber: input.assocNumber,
         })
+        logger.info({ by, memberId: member.id, assocNumber: input.assocNumber }, "[AZURE] member created")
 
         const mailOk = await sendWelcomeEmail(
           input.sendEmailTo,
@@ -64,7 +79,7 @@ export default createTRPCRouter({
           welcomeMailSent: mailOk,
         }
       } catch (error) {
-        logger.error({ error }, "[trpc:azure:members] error in create procedure")
+        logger.error({ error, by, assocNumber: input.assocNumber }, "[trpc:azure:members] error in create procedure")
         return { error: error instanceof Error ? error.message : "Unknown error, see backend logs" }
       }
     }),
