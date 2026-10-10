@@ -14,7 +14,7 @@ const personName = z
   .regex(/^[\p{L}\p{M}' -]+$/u, "Only letters, spaces, apostrophes and hyphens")
 
 export default createTRPCRouter({
-  getAll: legacyProcedure.query(async () => {
+  getAll: policy(dashboard("azure:members:read")).query(async () => {
     return await azureDirectory.getMembers()
   }),
   setAssocNumber: legacyProcedure
@@ -30,7 +30,7 @@ export default createTRPCRouter({
       return { error }
     }),
   /**
-   * The dashboard's only Azure capability (RFC v3 §4 decision 9): create a new Entra user and add
+   * The dashboard's only Azure mutation (RFC v3 §4 decision 9): create a new Entra user and add
    * only that user to the fixed Soci group. No caller-supplied group or existing user.
    */
   create: policy(dashboard("azure:members:create"))
