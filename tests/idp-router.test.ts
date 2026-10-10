@@ -91,6 +91,9 @@ describe("app router", () => {
       telegram: { scope: "backend:tg:act-as", permission: "tg:grants:manage" },
       user: { scope: "backend:admin", permission: "tg:grants:manage" },
     })
+    expect(policyOf("azure.members.getAll")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "azure:members:read" },
+    })
     expect(policyOf("azure.members.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:members:create" },
     })
@@ -113,7 +116,7 @@ describe("app router", () => {
       "tg.permissions.addRole",
       "tg.link.link",
       "azure.groups.addMember",
-      "azure.members.getAll",
+      "azure.members.setAssocNumber",
     ])
       expect(legacy).toContain(path)
   })
