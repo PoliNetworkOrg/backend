@@ -16,10 +16,12 @@ const seedEnv = {
   ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 }
 
+/** Runs the production CLI against the disposable integration database. */
 async function seed(force = false) {
   return exec("bun", ["scripts/seed-db.ts", ...(force ? ["--force"] : [])], { env: seedEnv })
 }
 
+/** Uses a Bun subprocess so Vitest can query PostgreSQL with the production SQL driver. */
 async function query(sql: string): Promise<Record<string, unknown>[]> {
   const { stdout } = await exec(
     "bun",
@@ -139,14 +141,15 @@ describe.skipIf(!testPort)("database seed", () => {
         UNION ALL SELECT 'staff', count(*)::int FROM tg_permissions WHERE user_id <> 1
         UNION ALL SELECT 'admins', count(*)::int FROM tg_group_admins
         UNION ALL SELECT 'faqs', count(*)::int FROM web_faqs
-        UNION ALL SELECT 'grants', count(*)::int FROM tg_grants_v2`)
+        UNION ALL SELECT 'grants', count(*)::int FROM tg_grants_v2
+        ORDER BY name`)
     const expected = [
-      { name: "users", count: 2000 },
-      { name: "messages", count: 60000 },
-      { name: "staff", count: 7 },
       { name: "admins", count: 12 },
       { name: "faqs", count: 9 },
       { name: "grants", count: 11 },
+      { name: "messages", count: 60000 },
+      { name: "staff", count: 7 },
+      { name: "users", count: 2000 },
     ]
     expect(await counts()).toEqual(expected)
     const fingerprints = async () =>
@@ -155,7 +158,7 @@ describe.skipIf(!testPort)("database seed", () => {
           FROM tg_messages m
         UNION ALL SELECT 'web_faqs', md5(string_agg(row_to_json(f)::text, ',' ORDER BY id)) FROM web_faqs f
         UNION ALL SELECT 'tg_grants_v2', md5(string_agg(row_to_json(g)::text, ',' ORDER BY id)) FROM tg_grants_v2 g
-      ) t`)
+      ) t ORDER BY tablename`)
     const before = await fingerprints()
 
     await seed()

@@ -38,7 +38,9 @@ Requirements:
    ```sh
    bun run seed:db
    ```
-   Each table is seeded only while it is empty. New Telegram messages reference retained users and groups, and missing sample FAQ categories are added when the FAQ table is empty. Staff roles, group-admin assignments, and grants are only added for Telegram users created by the current run; group-admin assignments also require groups created by the run. `--force` wipes the seeded tables and recreates them.
+   Each table is seeded only while it is empty. New Telegram messages reference retained users and groups, and missing sample FAQ categories are added when the FAQ table is empty. Staff roles, group-admin assignments, and grants are only added for Telegram users created by the current run; group-admin assignments also require groups created by the run.
+
+   `--force` replaces the Telegram activity tables, sample web content, audit logs, and `tg_grants_v2` grants. Existing staff roles and group-admin assignments are preserved.
 6. (Optional, for logging into the admin panel locally) Seed a test user with Telegram already linked and the `owner` role:
    ```sh
    bun run seed:user
