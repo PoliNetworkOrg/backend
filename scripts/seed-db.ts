@@ -109,77 +109,93 @@ if (tgHasData && force) {
   await DB.execute(sql`TRUNCATE TABLE tg_messages, tg_groups, tg_users CASCADE`)
 }
 
-if (tgHasData && !force) {
-  console.log("SEED: tg_users, tg_groups or tg_messages already contain data, skipping (--force to wipe and reseed)")
-} else {
-  await seedTelegramActivity()
-}
+const { userIds, groupIds, createdUserIds, createdGroupIds } = await seedTelegramActivity()
 
+/** Seeds each empty activity table, using retained users and groups for new messages. */
 async function seedTelegramActivity() {
-  console.log(`SEED: generating ${USERS_COUNT} users`)
-  const users = await Promise.all(
-    Array.from({ length: USERS_COUNT }, async (_, i) => {
-      const userId = seededUserId(i)
-      const user = await encryptUser({
-        id: userId,
-        firstName: randomItem(FIRST_NAMES),
-        lastName: Math.random() < 0.9 ? randomItem(LAST_NAMES) : undefined,
-        username: Math.random() < 0.7 ? `user_${userId}_${Math.random().toString(36).slice(2, 6)}` : undefined,
-        isBot: Math.random() < 0.02,
-        langCode: randomItem(LANG_CODES),
+  const createdUserIds = new Set<number>()
+  const createdGroupIds = new Set<number>()
+  const [firstUser] = await DB.select().from(SCHEMA.TG.users).limit(1)
+  if (!firstUser) {
+    console.log(`SEED: generating ${USERS_COUNT} users`)
+    const users = await Promise.all(
+      Array.from({ length: USERS_COUNT }, async (_, i) => {
+        const userId = seededUserId(i)
+        const user = await encryptUser({
+          id: userId,
+          firstName: randomItem(FIRST_NAMES),
+          lastName: Math.random() < 0.9 ? randomItem(LAST_NAMES) : undefined,
+          username: Math.random() < 0.7 ? `user_${userId}_${Math.random().toString(36).slice(2, 6)}` : undefined,
+          isBot: Math.random() < 0.02,
+          langCode: randomItem(LANG_CODES),
+        })
+        return { ...user, createdAt: daysAgo(365) }
       })
-      return { ...user, createdAt: daysAgo(365) }
-    })
-  )
-  for (const batch of chunk(users, CHUNK_SIZE)) {
-    await DB.insert(SCHEMA.TG.users).values(batch)
+    )
+    for (const batch of chunk(users, CHUNK_SIZE)) {
+      await DB.insert(SCHEMA.TG.users).values(batch)
+      for (const user of batch) createdUserIds.add(user.userId)
+    }
+  } else {
+    console.log("SEED: tg_users already contains data, skipping")
   }
+  const userIds = (await DB.select({ id: SCHEMA.TG.users.userId }).from(SCHEMA.TG.users).limit(USERS_COUNT)).map(
+    (user) => user.id
+  )
 
-  console.log(`SEED: generating ${GROUPS_COUNT} groups`)
-  const groups = Array.from({ length: GROUPS_COUNT }, (_, i) => {
-    const telegramId = -1_000_000_000_000 - i - 1
-    return {
-      telegramId,
+  const [firstGroup] = await DB.select().from(SCHEMA.TG.groups).limit(1)
+  if (!firstGroup) {
+    console.log(`SEED: generating ${GROUPS_COUNT} groups`)
+    const groups = Array.from({ length: GROUPS_COUNT }, (_, i) => ({
+      telegramId: -1_000_000_000_000 - i - 1,
       title: `Gruppo ${randomItem(GROUP_TOPICS)} ${i + 1}`,
       tag: Math.random() < 0.5 ? `#${randomItem(GROUP_TAGS)}` : null,
       link: Math.random() < 0.6 ? `https://t.me/joinchat/${Math.random().toString(36).slice(2, 18)}` : null,
       hide: Math.random() < 0.05,
       createdAt: daysAgo(365),
+    }))
+    for (const batch of chunk(groups, CHUNK_SIZE)) {
+      await DB.insert(SCHEMA.TG.groups).values(batch)
+      for (const group of batch) createdGroupIds.add(group.telegramId)
     }
-  })
-  for (const batch of chunk(groups, CHUNK_SIZE)) {
-    await DB.insert(SCHEMA.TG.groups).values(batch)
+  } else {
+    console.log("SEED: tg_groups already contains data, skipping")
+  }
+  const groupIds = (
+    await DB.select({ id: SCHEMA.TG.groups.telegramId }).from(SCHEMA.TG.groups).limit(GROUPS_COUNT)
+  ).map((group) => group.id)
+
+  const [firstMessage] = await DB.select().from(SCHEMA.TG.messages).limit(1)
+  if (!firstMessage) {
+    console.log(`SEED: generating ${userIds.length * MESSAGES_PER_USER} messages (${MESSAGES_PER_USER} per user)`)
+    const chatMessageCounters = new Map<number, number>()
+    const nextMessageId = (chatId: number) => {
+      const next = (chatMessageCounters.get(chatId) ?? 0) + 1
+      chatMessageCounters.set(chatId, next)
+      return next
+    }
+
+    const messages = userIds.flatMap((authorId) =>
+      Array.from({ length: MESSAGES_PER_USER }, () => {
+        const chatId = randomItem(groupIds)
+        return {
+          chatId,
+          messageId: nextMessageId(chatId),
+          authorId,
+          timestamp: daysAgo(180),
+          message: tgMessagesCipher.encrypt(randomItem(MESSAGE_TEMPLATES)),
+        }
+      })
+    )
+    for (const batch of chunk(messages, CHUNK_SIZE)) {
+      await DB.insert(SCHEMA.TG.messages).values(batch)
+    }
+    console.log(`SEED: tg_messages → ${messages.length} rows`)
+  } else {
+    console.log("SEED: tg_messages already contains data, skipping")
   }
 
-  console.log(`SEED: generating ${USERS_COUNT * MESSAGES_PER_USER} messages (${MESSAGES_PER_USER} per user)`)
-  const chatMessageCounters = new Map<number, number>()
-  const nextMessageId = (chatId: number) => {
-    const next = (chatMessageCounters.get(chatId) ?? 0) + 1
-    chatMessageCounters.set(chatId, next)
-    return next
-  }
-
-  const messages = users.flatMap((user) =>
-    Array.from({ length: MESSAGES_PER_USER }, () => {
-      const chatId = randomItem(groups).telegramId
-      return {
-        chatId,
-        messageId: nextMessageId(chatId),
-        authorId: user.userId,
-        timestamp: daysAgo(180),
-        message: tgMessagesCipher.encrypt(randomItem(MESSAGE_TEMPLATES)),
-      }
-    })
-  )
-  for (const batch of chunk(messages, CHUNK_SIZE)) {
-    await DB.insert(SCHEMA.TG.messages).values(batch)
-  }
-
-  console.log("SEED: done", {
-    users: USERS_COUNT,
-    groups: GROUPS_COUNT,
-    messages: messages.length,
-  })
+  return { userIds, groupIds, createdUserIds, createdGroupIds }
 }
 
 const CATEGORY_ROOT = "didattica"
@@ -439,7 +455,7 @@ console.log("SEED: course groups done", {
 
 /**
  * Inserts `rows` only into an empty table, so re-running the seed never duplicates content; with
- * `--force` the table is emptied first.
+ * `--force` the table is emptied first. Empty row sets are skipped.
  */
 async function seedTable<T extends PgTable>(name: string, table: T, rows: () => PgInsertValue<T>[]) {
   const [first] = await DB.select()
@@ -449,8 +465,12 @@ async function seedTable<T extends PgTable>(name: string, table: T, rows: () => 
     console.log(`SEED: ${name} already contains data, skipping`)
     return
   }
-  if (first) await DB.delete(table)
   const values = rows()
+  if (!values.length) {
+    console.log(`SEED: ${name} has no eligible sample rows, skipping`)
+    return
+  }
+  if (first) await DB.delete(table)
   await DB.insert(table).values(values)
   console.log(`SEED: ${name} → ${values.length} rows`)
 }
@@ -460,7 +480,6 @@ const SEED_SUB = "seed-owner"
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
 
-console.log("SEED: granting roles to a few seeded Telegram users")
 const STAFF: { userId: number; roles: TUserRole[] }[] = [
   { userId: seededUserId(0), roles: [USER_ROLE.OWNER, USER_ROLE.ADMIN] },
   { userId: seededUserId(1), roles: [USER_ROLE.PRESIDENT, USER_ROLE.DIRETTIVO] },
@@ -470,18 +489,23 @@ const STAFF: { userId: number; roles: TUserRole[] }[] = [
   { userId: seededUserId(5), roles: [USER_ROLE.CREATOR] },
   { userId: seededUserId(6), roles: [USER_ROLE.WEB] },
 ]
-await DB.insert(SCHEMA.TG.permissions)
-  .values(STAFF.map((s) => ({ ...s, addedBy: SEED_OWNER_ID })))
-  .onConflictDoNothing()
+const newStaff = STAFF.filter((staff) => createdUserIds.has(staff.userId))
+if (newStaff.length) {
+  console.log("SEED: granting roles to newly seeded Telegram users")
+  await DB.insert(SCHEMA.TG.permissions)
+    .values(newStaff.map((s) => ({ ...s, addedBy: SEED_OWNER_ID })))
+    .onConflictDoNothing()
+}
 
 const bulkGroupId = (i: number) => -1_000_000_000_000 - i - 1
-await DB.insert(SCHEMA.TG.groupAdmins)
-  .values(
-    STAFF.slice(3).flatMap((s, i) =>
-      [0, 1, 2].map((g) => ({ userId: s.userId, groupId: bulkGroupId(i * 3 + g), addedBy: SEED_OWNER_ID }))
-    )
+const newGroupAdmins = STAFF.slice(3)
+  .flatMap((s, i) =>
+    [0, 1, 2].map((g) => ({ userId: s.userId, groupId: bulkGroupId(i * 3 + g), addedBy: SEED_OWNER_ID }))
   )
-  .onConflictDoNothing()
+  .filter((admin) => createdUserIds.has(admin.userId) && createdGroupIds.has(admin.groupId))
+if (newGroupAdmins.length) {
+  await DB.insert(SCHEMA.TG.groupAdmins).values(newGroupAdmins).onConflictDoNothing()
+}
 
 await seedTable("web_projects", SCHEMA.WEB.projects, () =>
   [
@@ -684,10 +708,20 @@ await seedTable("web_faq_categories", SCHEMA.WEB.faqCategories, () =>
   FAQ_CONTENT.map(({ titleIt, titleEn, icon }) => ({ titleIt, titleEn, icon, ...seedAuthor }))
 )
 const faqCategoryIdByTitle = new Map((await DB.select().from(SCHEMA.WEB.faqCategories)).map((c) => [c.titleIt, c.id]))
+const [firstFaq] = await DB.select().from(SCHEMA.WEB.faqs).limit(1)
+if (!firstFaq || force) {
+  const missingCategories = FAQ_CONTENT.filter((category) => !faqCategoryIdByTitle.has(category.titleIt))
+  if (missingCategories.length) {
+    const categories = await DB.insert(SCHEMA.WEB.faqCategories)
+      .values(missingCategories.map(({ titleIt, titleEn, icon }) => ({ titleIt, titleEn, icon, ...seedAuthor })))
+      .returning()
+    for (const category of categories) faqCategoryIdByTitle.set(category.titleIt, category.id)
+  }
+}
 await seedTable("web_faqs", SCHEMA.WEB.faqs, () =>
   FAQ_CONTENT.flatMap((category) => {
     const categoryId = faqCategoryIdByTitle.get(category.titleIt)
-    if (categoryId == null) return []
+    if (categoryId == null) throw new Error(`SEED: FAQ category "${category.titleIt}" was not created`)
     return category.faqs.map(([titleIt, titleEn, descriptionIt, descriptionEn]) => ({
       titleIt,
       titleEn,
@@ -743,7 +777,7 @@ await seedTable("web_group_link_reports", SCHEMA.WEB.groupLinkReports, () => {
 })
 
 await seedTable("tg_audit_log", SCHEMA.TG.auditLog, () => {
-  const moderators = STAFF.slice(0, 5).map((s) => s.userId)
+  const moderators = userIds.slice(0, 5)
   const bases = [AUDIT_BASIS.IDP_PERMISSION, AUDIT_BASIS.TELEGRAM_CHAT_ADMIN, AUDIT_BASIS.LEGACY] as const
   const reasons = ["Spam", "Linguaggio offensivo", "Pubblicità non autorizzata", "Flood", undefined]
   return Array.from({ length: 60 }, (_, i) => {
@@ -758,8 +792,8 @@ await seedTable("tg_audit_log", SCHEMA.TG.auditLog, () => {
       adminId: actor,
       actorTgId: actor,
       actorSub: basis === AUDIT_BASIS.IDP_PERMISSION ? SEED_SUB : null,
-      targetId: seededUserId(randomInt(10, USERS_COUNT - 1)),
-      groupId: global ? null : bulkGroupId(randomInt(0, 50)),
+      targetId: randomItem(userIds),
+      groupId: global ? null : randomItem(groupIds),
       type,
       until: timed ? new Date(createdAt.getTime() + randomInt(1, 72) * HOUR) : null,
       reason: randomItem(reasons),
@@ -799,7 +833,7 @@ await seedTable("tg_grants_v2", SCHEMA.TG.grantsV2, () => {
     // interrupted
     grant(9, -5 * DAY, 72, true),
     grant(10, -2 * DAY, 96, true),
-  ]
+  ].filter((row) => createdUserIds.has(row.telegramUserId))
 })
 
 process.exit(0)
