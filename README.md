@@ -34,7 +34,12 @@ Requirements:
    ```sh
    bun dev
    ```
-5. (Optional, for logging into the admin panel locally) Seed a test user with Telegram already linked and the `owner` role:
+5. (Optional) Fill the database with sample data: Telegram users, groups and messages, course groups and labels, projects, associations, FAQs, freshman guides, group link reports, audit log entries, grants and staff roles:
+   ```sh
+   bun run seed:db
+   ```
+   Each table is seeded only while it is empty, so re-running it is safe and fills in what is missing. `--force` wipes the seeded tables and recreates them.
+6. (Optional, for logging into the admin panel locally) Seed a test user with Telegram already linked and the `owner` role:
    ```sh
    bun run seed:user
    ```
