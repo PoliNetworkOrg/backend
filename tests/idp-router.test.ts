@@ -84,6 +84,10 @@ describe("app router", () => {
       policy: { service: { scope: "backend:tg:audit" } },
       tokenOnly: true,
     })
+    expect(policyOf("tg.users.getCreationHistory")).toMatchObject({
+      policy: { user: { scope: "backend:admin", permission: "tg:users:read" } },
+      tokenOnly: true,
+    })
     expect(policyOf("tg.grants.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:grants:manage" },
     })

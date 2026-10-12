@@ -41,8 +41,8 @@ vi.mock("@/trpc", () => {
   }
   return {
     createTRPCRouter: <T>(router: T) => router,
-    policy: (rule: unknown) => {
-      state.policies.push(rule)
+    policy: (rule: unknown, options: unknown = {}) => {
+      state.policies.push({ rule, options })
       return procedure
     },
   }
@@ -56,8 +56,11 @@ beforeEach(() => {
 })
 
 describe("getCreationHistory", () => {
-  it("is limited to dashboard users who can read Telegram users", () => {
-    expect(state.policies).toContainEqual({ user: { permission: "tg:users:read" } })
+  it("is limited to token callers who can read Telegram users", () => {
+    expect(state.policies).toContainEqual({
+      rule: { user: { permission: "tg:users:read" } },
+      options: { tokenOnly: true },
+    })
   })
 
   it("returns only dates and counts, grouped and ordered by creation day", async () => {
@@ -68,6 +71,13 @@ describe("getCreationHistory", () => {
     expect(state.from).toHaveBeenCalledWith(state.users)
     expect(state.groupBy).toHaveBeenCalledWith(fields.date)
     expect(state.orderBy).toHaveBeenCalledWith(fields.date)
+  })
+
+  it("buckets by the Europe/Rome calendar day", async () => {
+    await history.handler()
+
+    const fields = state.select.mock.calls[0]?.[0] as Record<string, { sql: string }>
+    expect(fields.date.sql).toBe("to_char(? AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD')")
   })
 
   it("reports a database failure without throwing", async () => {
