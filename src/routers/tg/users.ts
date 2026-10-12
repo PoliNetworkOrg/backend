@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm"
+import { count, eq, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { botReadOrDashboard, dashboard, SCOPE } from "@/idp/policies"
@@ -10,6 +10,20 @@ import { decryptUser, encryptUser, TgUserSchema, userCipher } from "@/utils/user
 
 const s = SCHEMA.TG
 const upsertSet = upsertMultipleSetSql(s.users, ["firstName", "lastName", "username", "langCode", "isBot"])
+
+/** The calendar day a user was first stored, in the association's time zone ("2026-10-11"). */
+const creationDay = sql<string>`to_char(${s.users.createdAt} AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD')`
+
+const CreationHistorySchema = z.union([
+  z.object({
+    days: z.array(z.object({ date: z.string(), count: z.number().int().nonnegative() })),
+    error: z.null(),
+  }),
+  z.object({
+    error: z.literal("INTERNAL_SERVER_ERROR"),
+    days: z.null().optional(),
+  }),
+])
 
 export default createTRPCRouter({
   getAll: policy(dashboard("tg:users:read")).query(async () => {
@@ -30,6 +44,27 @@ export default createTRPCRouter({
       return { error: "INTERNAL_SERVER_ERROR" }
     }
   }),
+
+  /**
+   * How many Telegram users were first stored on each day, from `created_at`, oldest day first. Days without new users
+   * are omitted. Only dates and counts leave the database: the dashboard charts user growth without loading or
+   * decrypting the users themselves.
+   */
+  getCreationHistory: policy(dashboard("tg:users:read"))
+    .output(CreationHistorySchema)
+    .query(async () => {
+      try {
+        const days = await DB.select({ date: creationDay, count: count() })
+          .from(s.users)
+          .groupBy(creationDay)
+          .orderBy(creationDay)
+
+        return { days, error: null }
+      } catch (error) {
+        logger.error(error, "error while counting telegram users by creation day")
+        return { error: "INTERNAL_SERVER_ERROR" as const }
+      }
+    }),
 
   get: policy(botReadOrDashboard("tg:users:read"))
     .input(z.object({ userId: z.number() }))
