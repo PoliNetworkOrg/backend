@@ -2,9 +2,12 @@ import type { Actor } from "@polinetwork/auth-kit"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Context } from "@/trpc"
 
-vi.mock("@/emails/mailer", () => ({
+const mailer = vi.hoisted(() => ({
   sendWelcomeEmail: vi.fn().mockResolvedValue(true),
+  sendMemberNumberChangedEmail: vi.fn().mockResolvedValue(true),
 }))
+
+vi.mock("@/emails/mailer", () => mailer)
 
 const REQUIRED_ENV: Record<string, string> = {
   NODE_ENV: "test",
@@ -47,17 +50,6 @@ describe("Azure tRPC routes without credentials", () => {
     )
   })
 
-  it("updates a member number", async () => {
-    const caller = await createCaller()
-
-    await expect(caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })).resolves.toEqual({
-      error: null,
-    })
-
-    const members = await caller.members.getAll()
-    expect(members.find((member) => member.id === "mock-member-grace")?.employeeId).toBe("2042")
-  })
-
   it("creates a member and exposes it in later reads", async () => {
     const caller = await createCaller()
 
@@ -79,6 +71,92 @@ describe("Azure tRPC routes without credentials", () => {
       employeeId: "2043",
       isMember: true,
     })
+  })
+
+  it("creates a member at a custom address", async () => {
+    const caller = await createCaller()
+
+    const result = await caller.members.create({
+      firstName: "Katherine",
+      lastName: "Johnson",
+      assocNumber: 2043,
+      sendEmailTo: "developer@example.com",
+      mailbox: { kind: "custom", localPart: "K.Johnson" },
+    })
+
+    expect(result).toMatchObject({ error: null, email: "k.johnson@polinetwork.org" })
+  })
+
+  it("builds the standard address without accents, apostrophes or spaces", async () => {
+    const caller = await createCaller()
+
+    const result = await caller.members.create({
+      firstName: "Maria Chiara",
+      lastName: "D'Amicò",
+      assocNumber: 2043,
+      sendEmailTo: "developer@example.com",
+      mailbox: { kind: "standard" },
+    })
+
+    expect(result).toMatchObject({ error: null, email: "mariachiara.damico@polinetwork.org" })
+  })
+
+  it.each([
+    [
+      "an address already in use",
+      { mailbox: { kind: "custom", localPart: "ada.lovelace" } },
+      "The address ada.lovelace@polinetwork.org is already in use.",
+    ],
+    [
+      "a member number already assigned",
+      { assocNumber: 1001 },
+      "Member number 1001 is already assigned to Ada Lovelace.",
+    ],
+    [
+      "a welcome email to the address being created",
+      { sendEmailTo: "Katherine.Johnson@polinetwork.org" },
+      "The welcome email cannot go to the address being created: it has no mailbox yet.",
+    ],
+    [
+      "a name without a standard address",
+      { firstName: "Łukasz" },
+      "This name cannot form a standard address: choose a custom one.",
+    ],
+  ] as const)("refuses to create a member with %s", async (_, override, error) => {
+    const caller = await createCaller()
+
+    const result = await caller.members.create({
+      firstName: "Katherine",
+      lastName: "Johnson",
+      assocNumber: 2043,
+      sendEmailTo: "developer@example.com",
+      ...override,
+    })
+
+    expect(result).toEqual({ error })
+    expect(mailer.sendWelcomeEmail).not.toHaveBeenCalled()
+  })
+
+  it("refuses an invalid custom address", async () => {
+    const caller = await createCaller()
+
+    await expect(
+      caller.members.create({
+        firstName: "Katherine",
+        lastName: "Johnson",
+        assocNumber: 2043,
+        sendEmailTo: "developer@example.com",
+        mailbox: { kind: "custom", localPart: "k johnson@polinetwork.org" },
+      })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+
+  it("refuses anonymous member number changes", async () => {
+    const caller = await createCaller()
+
+    await expect(
+      caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" })
   })
 
   it("adds and removes group memberships", async () => {
@@ -148,7 +226,7 @@ describe("Azure directory token authorization", () => {
     await expect(caller.members.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("keeps existing-user and group changes unavailable even with both member permissions", async () => {
+  it("keeps member number and group changes unavailable with only read and create", async () => {
     const caller = await createCaller(tokenContext(["azure:members:read", "azure:members:create"]))
     await expect(
       caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })
@@ -162,6 +240,89 @@ describe("Azure directory token authorization", () => {
   it("refuses anonymous reads when legacy access is disabled", async () => {
     const caller = await createCaller({ legacyAnonymous: "deny" })
     await expect(caller.members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+  })
+})
+
+describe("Azure member number changes", () => {
+  const writer = () => createCaller(tokenContext(["azure:members:read", "azure:members:write"]))
+
+  it("changes the number and emails the member", async () => {
+    const caller = await writer()
+
+    await expect(
+      caller.members.setAssocNumber({ userId: "mock-member-alan", assocNumber: 2042, notifyEmail: "alan@example.com" })
+    ).resolves.toEqual({ error: null, notificationSent: true })
+
+    expect((await caller.members.getAll()).find((member) => member.id === "mock-member-alan")?.employeeId).toBe("2042")
+    expect(mailer.sendMemberNumberChangedEmail).toHaveBeenCalledWith("alan@example.com", {
+      firstName: "Alan",
+      assocNumber: 2042,
+      previousAssocNumber: "1002",
+      email: "alan.turing@polinetwork.org",
+    })
+  })
+
+  it("changes the number without a notification", async () => {
+    const caller = await writer()
+
+    await expect(caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })).resolves.toEqual({
+      error: null,
+      notificationSent: null,
+    })
+    expect(mailer.sendMemberNumberChangedEmail).not.toHaveBeenCalled()
+  })
+
+  it("reports a failed notification after a saved change", async () => {
+    mailer.sendMemberNumberChangedEmail.mockResolvedValueOnce(false)
+    const caller = await writer()
+
+    await expect(
+      caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042, notifyEmail: "g@example.com" })
+    ).resolves.toEqual({ error: null, notificationSent: false })
+    expect((await caller.members.getAll()).find((member) => member.id === "mock-member-grace")?.employeeId).toBe("2042")
+  })
+
+  it.each([
+    [
+      "a number another member holds",
+      { userId: "mock-member-grace", assocNumber: 1001 },
+      "Member number 1001 is already assigned to Ada Lovelace.",
+    ],
+    ["the current number", { userId: "mock-member-ada", assocNumber: 1001 }, "The member already has number 1001."],
+    [
+      "an unknown member",
+      { userId: "mock-member-nobody", assocNumber: 2042 },
+      "This member no longer exists in the directory.",
+    ],
+  ])("refuses %s", async (_, input, error) => {
+    const caller = await writer()
+
+    await expect(caller.members.setAssocNumber({ ...input, notifyEmail: "x@example.com" })).resolves.toEqual({
+      error,
+      notificationSent: null,
+    })
+    expect(mailer.sendMemberNumberChangedEmail).not.toHaveBeenCalled()
+  })
+
+  it("refuses a non-positive number", async () => {
+    const caller = await writer()
+    await expect(caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 0 })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+  })
+
+  it.each([
+    ["read and create alone", tokenContext(["azure:members:read", "azure:members:create"])],
+    ["no admin scope", tokenContext(["azure:members:write"], undefined, [])],
+    ["stale snapshot", tokenContext(["azure:members:write"], undefined, undefined, false)],
+    ["service actor", tokenContext(["azure:members:write"], { kind: "service", client: "telegram-bot" })],
+  ])("refuses changes with %s", async (_, context) => {
+    const caller = await createCaller(context)
+    await expect(
+      caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
   })
 })
 

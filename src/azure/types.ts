@@ -47,7 +47,12 @@ export type CreateMemberInput = {
   firstName: string
   lastName: string
   assocNumber: number
+  /** The part before `@polinetwork.org`, already validated. */
+  localPart: string
 }
+
+/** The directory fields the member number workflow reads. */
+export type MemberSummary = Pick<ParsedUser, "id" | "displayName" | "givenName" | "mail" | "employeeId">
 
 export type CreatedMember = {
   firstName: string
@@ -59,6 +64,12 @@ export type CreatedMember = {
 
 export type AzureDirectory = {
   getMembers(): Promise<ParsedUser[]>
+  /** Null when no user has this id. */
+  getMember(userId: string): Promise<MemberSummary | null>
+  /** Any user whose `employeeId` is this number. */
+  findByMemberNumber(assocNumber: number): Promise<MemberSummary | null>
+  /** Any user whose sign-in name or mail is this address. */
+  findByMail(mail: string): Promise<MemberSummary | null>
   setMemberNumber(userId: string, assocNumber: number): Promise<{ error: string | null }>
   createMember(input: CreateMemberInput): Promise<CreatedMember>
   getAllGroups(): Promise<ParsedGroup[]>

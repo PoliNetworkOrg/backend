@@ -4,6 +4,7 @@ import type { JSX } from "react"
 import { sendEmail as azureSendEmail } from "@/azure/functions/emails"
 import { env } from "@/env"
 import { logger } from "@/logger"
+import MemberNumberChanged from "./templates/member-number-changed"
 import OtpEmail from "./templates/otp"
 import Welcome from "./templates/welcome"
 
@@ -48,6 +49,28 @@ export async function sendWelcomeEmail(
       password={accountCredentials.password}
       assocNum={memberInfo.assocNumber}
       firstName={memberInfo.firstName}
+    />
+  )
+}
+
+export async function sendMemberNumberChangedEmail(
+  toAddress: string,
+  memberInfo: {
+    firstName: string | null
+    assocNumber: number
+    previousAssocNumber: string | null
+    email: string | null
+  }
+) {
+  const subject = makeSubject("Your PoliNetwork member number has changed")
+  return sendEmail(
+    toAddress,
+    subject,
+    <MemberNumberChanged
+      firstName={memberInfo.firstName}
+      assocNum={memberInfo.assocNumber}
+      previousAssocNum={memberInfo.previousAssocNumber}
+      email={memberInfo.email}
     />
   )
 }

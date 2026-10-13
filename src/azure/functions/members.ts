@@ -2,7 +2,8 @@ import { logger } from "@/logger"
 import { generatePassword } from "@/utils/password"
 import { withRetry } from "@/utils/wait"
 import { getAzureClient } from "../client"
-import type { CreatedMember, CreateMemberInput, ParsedUser, User } from "../types"
+import { MAIL_DOMAIN } from "../mailbox"
+import type { CreatedMember, CreateMemberInput, MemberSummary, ParsedUser, User } from "../types"
 
 const GruppoSociID = "1c68dbb8-4ac3-4569-a886-283b5a825cbd"
 const Licenses = {
@@ -46,6 +47,53 @@ export async function getMembers(): Promise<ParsedUser[]> {
   }
 }
 
+const SUMMARY_FIELDS = ["id", "displayName", "givenName", "mail", "employeeId"]
+
+function toSummary(user: Partial<MemberSummary> & { id: string }): MemberSummary {
+  return {
+    id: user.id,
+    displayName: user.displayName ?? null,
+    givenName: user.givenName ?? null,
+    mail: user.mail ?? null,
+    employeeId: user.employeeId ?? null,
+  }
+}
+
+export async function getMember(userId: string): Promise<MemberSummary | null> {
+  try {
+    const user = await getAzureClient()
+      .api(`/users/${encodeURIComponent(userId)}`)
+      .select(SUMMARY_FIELDS)
+      .get()
+    return toSummary(user)
+  } catch (error) {
+    if ((error as { statusCode?: number }).statusCode === 404) return null
+    throw error
+  }
+}
+
+/** Callers pass only validated values (integers, `localPartSchema` addresses), so the filter needs no escaping. */
+async function findOne(filter: string): Promise<MemberSummary | null> {
+  const users: MemberSummary[] = await getAzureClient()
+    .api("/users")
+    .header("ConsistencyLevel", "eventual")
+    .count(true)
+    .filter(filter)
+    .select(SUMMARY_FIELDS)
+    .top(1)
+    .get()
+    .then((r) => r.value)
+  return users[0] ? toSummary(users[0]) : null
+}
+
+export async function findByMemberNumber(assocNumber: number) {
+  return findOne(`employeeId eq '${assocNumber}'`)
+}
+
+export async function findByMail(mail: string) {
+  return findOne(`userPrincipalName eq '${mail}' or mail eq '${mail}'`)
+}
+
 export async function setMemberNumber(userId: string, assocNumber: number) {
   try {
     const client = getAzureClient()
@@ -58,18 +106,22 @@ export async function setMemberNumber(userId: string, assocNumber: number) {
   }
 }
 
-export async function createMember({ firstName, lastName, assocNumber }: CreateMemberInput): Promise<CreatedMember> {
+export async function createMember({
+  firstName,
+  lastName,
+  assocNumber,
+  localPart,
+}: CreateMemberInput): Promise<CreatedMember> {
   const client = getAzureClient()
   // TODO: separate steps and add better error handling, maybe with neverthrow
   const password = generatePassword()
-  const mailNickname = `${firstName.replaceAll(" ", "")}.${lastName.replaceAll(" ", "")}`.toLowerCase()
-  const mail = `${mailNickname}@polinetwork.org`
+  const mail = `${localPart}@${MAIL_DOMAIN}`
 
   // create user
   const { id }: { id: string } = await client.api("/users").post({
     accountEnabled: true,
     displayName: `${firstName} ${lastName}`,
-    mailNickname,
+    mailNickname: localPart,
     userPrincipalName: mail,
     passwordProfile: {
       forceChangePasswordNextSignIn: true,
