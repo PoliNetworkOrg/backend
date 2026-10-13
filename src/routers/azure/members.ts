@@ -20,6 +20,22 @@ function auditActor(actor: Actor | null) {
   return actor?.kind === "user" ? { sub: actor.sub, client: actor.client } : { legacy: true }
 }
 
+/**
+ * Runs member writes one at a time, so two requests cannot both pass the duplicate checks before either writes.
+ * Entra does not enforce a unique `employeeId`, and the backend runs as a single instance.
+ */
+let memberWrites: Promise<unknown> = Promise.resolve()
+function serializeMemberWrite<T>(task: () => Promise<T>): Promise<T> {
+  const run = memberWrites.then(task, task)
+  memberWrites = run.catch(() => undefined)
+  return run
+}
+
+/** Entra's message when the sign-in name or an address already belongs to another object. */
+function isAddressConflict(error: unknown) {
+  return error instanceof Error && /same value for property (userPrincipalName|proxyAddresses)/i.test(error.message)
+}
+
 function numberTaken(assocNumber: number, holder: MemberSummary) {
   return `Member number ${assocNumber} is already assigned to ${holder.displayName ?? holder.mail ?? "another user"}.`
 }
@@ -44,22 +60,32 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
       try {
-        const member = await azureDirectory.getMember(input.userId)
-        if (!member) return { error: "This member no longer exists in the directory.", notificationSent: null }
-        if (member.employeeId === input.assocNumber.toString())
-          return { error: `The member already has number ${input.assocNumber}.`, notificationSent: null }
+        const changed = await serializeMemberWrite(async () => {
+          const member = await azureDirectory.getMember(input.userId)
+          if (!member) return { error: "This member no longer exists in the directory." }
+          if (member.employeeId === input.assocNumber.toString())
+            return { error: `The member already has number ${input.assocNumber}.` }
 
-        const holder = await azureDirectory.findByMemberNumber(input.assocNumber)
-        if (holder && holder.id !== member.id)
-          return { error: numberTaken(input.assocNumber, holder), notificationSent: null }
+          const holder = await azureDirectory.findByMemberNumber(input.assocNumber)
+          if (holder && holder.id !== member.id) return { error: numberTaken(input.assocNumber, holder) }
 
-        const { error } = await azureDirectory.setMemberNumber(member.id, input.assocNumber)
-        if (error) {
-          logger.error({ error, by, memberId: member.id }, "[trpc:azure:members] could not set the member number")
-          return { error: "Microsoft 365 refused the change, see the backend logs.", notificationSent: null }
-        }
+          const { error } = await azureDirectory.setMemberNumber(member.id, input.assocNumber)
+          if (error) {
+            logger.error({ error, by, memberId: member.id }, "[trpc:azure:members] could not set the member number")
+            return { error: "Microsoft 365 refused the change, see the backend logs." }
+          }
+          return { error: null, member }
+        })
+        if (changed.error !== null) return { error: changed.error, notificationSent: null }
+        const { member } = changed
         logger.info(
-          { by, memberId: member.id, from: member.employeeId, to: input.assocNumber, notifyEmail: input.notifyEmail },
+          {
+            by,
+            memberId: member.id,
+            from: member.employeeId,
+            to: input.assocNumber,
+            notify: Boolean(input.notifyEmail),
+          },
           "[AZURE] member number changed"
         )
 
@@ -107,22 +133,27 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
+      const localPart = mailboxLocalPart(input.firstName, input.lastName, input.mailbox)
+      if (localPart === null) return { error: "This name cannot form a standard address: choose a custom one." }
+      const mail = `${localPart}@${MAIL_DOMAIN}`
+      if (input.sendEmailTo.toLowerCase() === mail)
+        return { error: "The welcome email cannot go to the address being created: it has no mailbox yet." }
       try {
-        const localPart = mailboxLocalPart(input.firstName, input.lastName, input.mailbox)
-        if (localPart === null) return { error: "This name cannot form a standard address: choose a custom one." }
-        const mail = `${localPart}@${MAIL_DOMAIN}`
-        if (input.sendEmailTo.toLowerCase() === mail)
-          return { error: "The welcome email cannot go to the address being created: it has no mailbox yet." }
-        if (await azureDirectory.findByMail(mail)) return { error: `The address ${mail} is already in use.` }
-        const holder = await azureDirectory.findByMemberNumber(input.assocNumber)
-        if (holder) return { error: numberTaken(input.assocNumber, holder) }
+        const created = await serializeMemberWrite(async () => {
+          if (await azureDirectory.findByMail(mail)) return { error: `The address ${mail} is already in use.` }
+          const holder = await azureDirectory.findByMemberNumber(input.assocNumber)
+          if (holder) return { error: numberTaken(input.assocNumber, holder) }
 
-        const member = await azureDirectory.createMember({
-          firstName: input.firstName,
-          lastName: input.lastName,
-          assocNumber: input.assocNumber,
-          localPart,
+          const member = await azureDirectory.createMember({
+            firstName: input.firstName,
+            lastName: input.lastName,
+            assocNumber: input.assocNumber,
+            localPart,
+          })
+          return { error: null, member }
         })
+        if (created.error !== null) return { error: created.error }
+        const { member } = created
         logger.info({ by, memberId: member.id, assocNumber: input.assocNumber }, "[AZURE] member created")
 
         const mailOk = await sendWelcomeEmail(
@@ -142,6 +173,7 @@ export default createTRPCRouter({
         }
       } catch (error) {
         logger.error({ error, by, assocNumber: input.assocNumber }, "[trpc:azure:members] error in create procedure")
+        if (isAddressConflict(error)) return { error: `The address ${mail} is already in use.` }
         return { error: error instanceof Error ? error.message : "Unknown error, see backend logs" }
       }
     }),

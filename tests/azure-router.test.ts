@@ -31,6 +31,17 @@ async function createCaller(context: Context = {}) {
   return azureRouter.createCaller(context)
 }
 
+/** Widens the gap between the duplicate check and the write, as a slow Graph call would. */
+async function slowNumberLookups() {
+  const { azureDirectory } = await import("@/azure/directory")
+  const find = azureDirectory.findByMemberNumber
+  vi.spyOn(azureDirectory, "findByMemberNumber").mockImplementation(async (assocNumber) => {
+    const found = await find(assocNumber)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    return found
+  })
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -135,6 +146,44 @@ describe("Azure tRPC routes without credentials", () => {
 
     expect(result).toEqual({ error })
     expect(mailer.sendWelcomeEmail).not.toHaveBeenCalled()
+  })
+
+  it("lets only one of two concurrent creations take the same number", async () => {
+    const caller = await createCaller()
+    await slowNumberLookups()
+    const member = (firstName: string) => ({
+      firstName,
+      lastName: "Johnson",
+      assocNumber: 2043,
+      sendEmailTo: "developer@example.com",
+    })
+
+    const results = await Promise.all([
+      caller.members.create(member("Katherine")),
+      caller.members.create(member("Mary")),
+    ])
+
+    expect(results.filter((result) => result.error === null)).toHaveLength(1)
+    expect(results.map((result) => result.error)).toContainEqual(
+      expect.stringMatching(/^Member number 2043 is already assigned to (Katherine|Mary) Johnson\.$/)
+    )
+  })
+
+  it("reports an address Entra refuses as already in use", async () => {
+    const caller = await createCaller()
+    const { azureDirectory } = await import("@/azure/directory")
+    vi.spyOn(azureDirectory, "createMember").mockRejectedValueOnce(
+      new Error("Another object with the same value for property proxyAddresses already exists.")
+    )
+
+    await expect(
+      caller.members.create({
+        firstName: "Katherine",
+        lastName: "Johnson",
+        assocNumber: 2043,
+        sendEmailTo: "developer@example.com",
+      })
+    ).resolves.toEqual({ error: "The address katherine.johnson@polinetwork.org is already in use." })
   })
 
   it("refuses an invalid custom address", async () => {
@@ -302,6 +351,20 @@ describe("Azure member number changes", () => {
       notificationSent: null,
     })
     expect(mailer.sendMemberNumberChangedEmail).not.toHaveBeenCalled()
+  })
+
+  it("lets only one of two concurrent changes take the same number", async () => {
+    const caller = await writer()
+    await slowNumberLookups()
+
+    const results = await Promise.all([
+      caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 }),
+      caller.members.setAssocNumber({ userId: "mock-member-alan", assocNumber: 2042 }),
+    ])
+
+    expect(results.filter((result) => result.error === null)).toHaveLength(1)
+    const members = await caller.members.getAll()
+    expect(members.filter((member) => member.employeeId === "2042")).toHaveLength(1)
   })
 
   it("refuses a non-positive number", async () => {
