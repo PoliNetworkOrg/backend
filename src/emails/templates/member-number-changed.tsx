@@ -47,16 +47,13 @@ const MemberNumberChangedEmail: EmailTemplate<Props> = (props) => {
                 ) : (
                   "Hi,"
                 )}
-                <br /> your membership of <span className="whitespace-nowrap">PoliNetwork APS</span> is now registered
-                with <strong>number {props.assocNum}</strong>
+                <br /> your PoliNetwork member number is now <strong>{props.assocNum}</strong>
                 {props.previousAssocNum ? <> (previously number {props.previousAssocNum})</> : null}.
               </Text>
 
               {props.email ? (
                 <>
-                  <Text className="my-4 text-base leading-normal">
-                    Nothing else changes: you keep signing in to your Office 365 account with the same address.
-                  </Text>
+                  <Text className="my-4 text-base leading-normal">Microsoft 365 account</Text>
 
                   <Section className="p-4 bg-blue-100 rounded-md">
                     <CodeInline className="text-xs sm:text-sm">{props.email}</CodeInline>
@@ -65,11 +62,7 @@ const MemberNumberChangedEmail: EmailTemplate<Props> = (props) => {
               ) : null}
 
               <Text className="my-4 text-base leading-normal">
-                Please use the new number from now on, for example in renewals and official communications.
-              </Text>
-
-              <Text className="my-4 text-base leading-normal">
-                If you think this is a mistake or have some questions, please contact me on{" "}
+                For help, contact IT on{" "}
                 <Link href="https://t.me/lorenzocorallo" className="text-[#1156AE] underline">
                   Telegram
                 </Link>{" "}

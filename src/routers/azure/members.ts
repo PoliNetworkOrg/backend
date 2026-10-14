@@ -1,8 +1,9 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import z from "zod"
 import { azureDirectory } from "@/azure/directory"
+import { IncompleteMemberError } from "@/azure/errors"
 import { MAIL_DOMAIN, mailboxLocalPart, mailboxSchema } from "@/azure/mailbox"
-import type { MemberSummary } from "@/azure/types"
+import type { CreatedMember, MemberSummary } from "@/azure/types"
 import { sendMemberNumberChangedEmail, sendWelcomeEmail } from "@/emails/mailer"
 import { dashboard } from "@/idp/policies"
 import { logger } from "@/logger"
@@ -29,6 +30,62 @@ function serializeMemberWrite<T>(task: () => Promise<T>): Promise<T> {
   const run = memberWrites.then(task, task)
   memberWrites = run.catch(() => undefined)
   return run
+}
+
+// Keep successful writes until both directory searches and user reads can see them.
+const pendingNumbers = new Map<
+  number,
+  { member: MemberSummary; previousNumbers: Set<string | null>; created: boolean; userVisible: boolean }
+>()
+
+function rememberNumber(member: MemberSummary, assocNumber: number, created = false) {
+  const previousNumbers = new Set([member.employeeId])
+  for (const [number, pending] of pendingNumbers) {
+    if (pending.member.id === member.id) {
+      for (const previous of pending.previousNumbers) previousNumbers.add(previous)
+      previousNumbers.add(pending.member.employeeId)
+      created ||= pending.created && !pending.userVisible
+      pendingNumbers.delete(number)
+    }
+  }
+  if (created) previousNumbers.add(null)
+  pendingNumbers.set(assocNumber, {
+    member: { ...member, employeeId: assocNumber.toString() },
+    previousNumbers,
+    created,
+    userVisible: false,
+  })
+}
+
+async function currentMember(userId: string) {
+  const member = await azureDirectory.getMember(userId)
+  const entry = [...pendingNumbers.entries()].find(([, pending]) => pending.member.id === userId)
+  if (!entry) return member
+  const [number, pending] = entry
+  if (member?.employeeId === pending.member.employeeId) pending.userVisible = true
+  const externalChange =
+    (member === null && !pending.created) ||
+    (member !== null &&
+      !pending.previousNumbers.has(member.employeeId) &&
+      member.employeeId !== pending.member.employeeId)
+  if (pending.userVisible || externalChange) {
+    // Once the user read has caught up, later edits or deletions in Entra are authoritative.
+    if (member?.employeeId !== pending.member.employeeId) pendingNumbers.delete(number)
+    return member
+  }
+  return { ...(member ?? pending.member), employeeId: pending.member.employeeId }
+}
+
+async function numberHolder(assocNumber: number) {
+  const holder = await azureDirectory.findByMemberNumber(assocNumber)
+  const pending = pendingNumbers.get(assocNumber)
+  if (pending) {
+    await currentMember(pending.member.id)
+    if (!pendingNumbers.has(assocNumber)) return holder
+    if (holder?.id === pending.member.id && pending.userVisible) pendingNumbers.delete(assocNumber)
+    return pending.member
+  }
+  return holder
 }
 
 /** Entra's message when the sign-in name or an address already belongs to another object. */
@@ -61,12 +118,12 @@ export default createTRPCRouter({
       const by = auditActor(ctx.actor)
       try {
         const changed = await serializeMemberWrite(async () => {
-          const member = await azureDirectory.getMember(input.userId)
+          const member = await currentMember(input.userId)
           if (!member) return { error: "This member no longer exists in the directory." }
           if (member.employeeId === input.assocNumber.toString())
             return { error: `The member already has number ${input.assocNumber}.` }
 
-          const holder = await azureDirectory.findByMemberNumber(input.assocNumber)
+          const holder = await numberHolder(input.assocNumber)
           if (holder && holder.id !== member.id) return { error: numberTaken(input.assocNumber, holder) }
 
           const { error } = await azureDirectory.setMemberNumber(member.id, input.assocNumber)
@@ -74,6 +131,7 @@ export default createTRPCRouter({
             logger.error({ error, by, memberId: member.id }, "[trpc:azure:members] could not set the member number")
             return { error: "Microsoft 365 refused the change, see the backend logs." }
           }
+          rememberNumber(member, input.assocNumber)
           return { error: null, member }
         })
         if (changed.error !== null) return { error: changed.error, notificationSent: null }
@@ -89,14 +147,20 @@ export default createTRPCRouter({
           "[AZURE] member number changed"
         )
 
-        const notificationSent = input.notifyEmail
-          ? await sendMemberNumberChangedEmail(input.notifyEmail, {
+        let notificationSent: boolean | null = null
+        if (input.notifyEmail) {
+          try {
+            notificationSent = await sendMemberNumberChangedEmail(input.notifyEmail, {
               firstName: member.givenName,
               assocNumber: input.assocNumber,
               previousAssocNumber: member.employeeId,
               email: member.mail,
             })
-          : null
+          } catch (error) {
+            logger.error({ error, by, memberId: member.id }, "[AZURE] member number notification failed")
+            notificationSent = false
+          }
+        }
         return { error: null, notificationSent }
       } catch (error) {
         logger.error({ error, by, userId: input.userId }, "[trpc:azure:members] error in setAssocNumber procedure")
@@ -141,29 +205,48 @@ export default createTRPCRouter({
       try {
         const created = await serializeMemberWrite(async () => {
           if (await azureDirectory.findByMail(mail)) return { error: `The address ${mail} is already in use.` }
-          const holder = await azureDirectory.findByMemberNumber(input.assocNumber)
+          const holder = await numberHolder(input.assocNumber)
           if (holder) return { error: numberTaken(input.assocNumber, holder) }
 
-          const member = await azureDirectory.createMember({
-            firstName: input.firstName,
-            lastName: input.lastName,
-            assocNumber: input.assocNumber,
-            localPart,
-          })
+          let member: CreatedMember
+          try {
+            member = await azureDirectory.createMember({
+              firstName: input.firstName,
+              lastName: input.lastName,
+              assocNumber: input.assocNumber,
+              localPart,
+            })
+          } catch (error) {
+            if (error instanceof IncompleteMemberError) rememberNumber(error.member, input.assocNumber, true)
+            throw error
+          }
+          rememberNumber(
+            {
+              id: member.id,
+              displayName: `${input.firstName} ${input.lastName}`,
+              givenName: input.firstName,
+              mail: member.mail,
+              employeeId: input.assocNumber.toString(),
+            },
+            input.assocNumber,
+            true
+          )
           return { error: null, member }
         })
         if (created.error !== null) return { error: created.error }
         const { member } = created
         logger.info({ by, memberId: member.id, assocNumber: input.assocNumber }, "[AZURE] member created")
 
-        const mailOk = await sendWelcomeEmail(
-          input.sendEmailTo,
-          { email: member.mail, password: member.password },
-          {
-            firstName: input.firstName,
-            assocNumber: input.assocNumber,
-          }
-        )
+        let mailOk = false
+        try {
+          mailOk = await sendWelcomeEmail(
+            input.sendEmailTo,
+            { email: member.mail, password: member.password },
+            { firstName: input.firstName, assocNumber: input.assocNumber }
+          )
+        } catch (error) {
+          logger.error({ error, by, memberId: member.id }, "[AZURE] welcome email failed")
+        }
 
         return {
           error: null,
@@ -172,6 +255,10 @@ export default createTRPCRouter({
           welcomeMailSent: mailOk,
         }
       } catch (error) {
+        if (error instanceof IncompleteMemberError) {
+          logger.error({ error: error.cause, by, memberId: error.member.id }, "[AZURE] member setup incomplete")
+          return { error: error.message }
+        }
         logger.error({ error, by, assocNumber: input.assocNumber }, "[trpc:azure:members] error in create procedure")
         if (isAddressConflict(error)) return { error: `The address ${mail} is already in use.` }
         return { error: error instanceof Error ? error.message : "Unknown error, see backend logs" }

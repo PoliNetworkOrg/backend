@@ -2,6 +2,7 @@ import { logger } from "@/logger"
 import { generatePassword } from "@/utils/password"
 import { withRetry } from "@/utils/wait"
 import { getAzureClient } from "../client"
+import { IncompleteMemberError } from "../errors"
 import { MAIL_DOMAIN } from "../mailbox"
 import type { CreatedMember, CreateMemberInput, MemberSummary, ParsedUser, User } from "../types"
 
@@ -14,22 +15,41 @@ const Licenses = {
 } as const
 const FlippedLicenses = Object.fromEntries(Object.entries(Licenses).map(([key, value]) => [value, key]))
 
+type Page<T> = { value: T[]; "@odata.nextLink"?: string }
+
+async function allPages<T>(client: ReturnType<typeof getAzureClient>, first: Page<T>, advanced = false): Promise<T[]> {
+  const items = [...first.value]
+  let next = first["@odata.nextLink"]
+  while (next) {
+    const request = client.api(next)
+    if (advanced) request.header("ConsistencyLevel", "eventual")
+    const page: Page<T> = await request.get()
+    items.push(...page.value)
+    next = page["@odata.nextLink"]
+  }
+  return items
+}
+
 export async function getMembers(): Promise<ParsedUser[]> {
   try {
     const client = getAzureClient()
-    const allPolinetworkUsers: User[] = await client
-      .api(`/users`)
-      .header("ConsistencyLevel", "eventual")
-      .select(["displayName", "mail", "givenName", "surname", "id", "assignedLicenses", "employeeId"])
-      .filter("endswith(mail, '@polinetwork.org')")
-      .get()
-      .then<User[]>((r) => r.value)
+    const allPolinetworkUsers = await allPages<User>(
+      client,
+      await client
+        .api(`/users`)
+        .header("ConsistencyLevel", "eventual")
+        .count(true)
+        .select(["displayName", "mail", "givenName", "surname", "id", "assignedLicenses", "employeeId"])
+        .filter("endswith(mail, '@polinetwork.org') or endswith(userPrincipalName, '@polinetwork.org')")
+        .get(),
+      true
+    )
 
-    const members: { id: string }[] = await client
-      .api(`/groups/${GruppoSociID}/members`)
-      .select(["id"])
-      .get()
-      .then((r) => r.value)
+    const members = await allPages<{ id: string }>(
+      client,
+      await client.api(`/groups/${GruppoSociID}/members`).select(["id"]).get()
+    )
+    const memberIds = new Set(members.map((member) => member.id))
 
     logger.debug({ count: members.length }, "[Azure Graph API] Get members")
 
@@ -37,13 +57,13 @@ export async function getMembers(): Promise<ParsedUser[]> {
       ({ assignedLicenses, ...u }) =>
         ({
           ...u,
-          isMember: members.findIndex((m) => m.id === u.id) !== -1,
+          isMember: memberIds.has(u.id),
           assignedLicensesIds: assignedLicenses.map((al) => (al.skuId ? FlippedLicenses[al.skuId] : "UNKNOWN")),
         }) satisfies ParsedUser
     )
   } catch (error) {
     logger.error({ error }, "[Azure Graph API] Could not get users")
-    return []
+    throw error
   }
 }
 
@@ -76,8 +96,6 @@ export async function getMember(userId: string): Promise<MemberSummary | null> {
 async function findOne(filter: string): Promise<MemberSummary | null> {
   const users: MemberSummary[] = await getAzureClient()
     .api("/users")
-    .header("ConsistencyLevel", "eventual")
-    .count(true)
     .filter(filter)
     .select(SUMMARY_FIELDS)
     .top(1)
@@ -113,7 +131,6 @@ export async function createMember({
   localPart,
 }: CreateMemberInput): Promise<CreatedMember> {
   const client = getAzureClient()
-  // TODO: separate steps and add better error handling, maybe with neverthrow
   const password = generatePassword()
   const mail = `${localPart}@${MAIL_DOMAIN}`
 
@@ -121,6 +138,10 @@ export async function createMember({
   const { id }: { id: string } = await client.api("/users").post({
     accountEnabled: true,
     displayName: `${firstName} ${lastName}`,
+    givenName: firstName,
+    surname: lastName,
+    usageLocation: "IT",
+    employeeId: assocNumber.toString(),
     mailNickname: localPart,
     userPrincipalName: mail,
     passwordProfile: {
@@ -129,25 +150,31 @@ export async function createMember({
     },
   })
 
-  // set firstName and lastName
-  await withRetry(() =>
-    client.api(`/users/${id}`).patch({
-      givenName: firstName,
-      surname: lastName,
-      usageLocation: "IT",
-      employeeId: assocNumber.toString(),
-    })
-  )
-
-  // add to group Soci
-  await withRetry(() =>
-    client.api(`/groups/${GruppoSociID}/members/$ref`).post({
-      "@odata.id": `https://graph.microsoft.com/v1.0/directoryObjects/${id}`,
-    })
-  )
-
-  // assign licenses
-  await manageLicenses(id, ["OFFICE_365", "POWER_AUTOMATE"], [])
+  try {
+    await withRetry(() =>
+      client.api(`/groups/${GruppoSociID}/members/$ref`).post({
+        "@odata.id": `https://graph.microsoft.com/v1.0/directoryObjects/${id}`,
+      })
+    )
+    await manageLicenses(id, ["OFFICE_365", "POWER_AUTOMATE"], [])
+  } catch (error) {
+    try {
+      await withRetry(async () => {
+        try {
+          await client.api(`/users/${id}`).delete()
+        } catch (cleanupError) {
+          if ((cleanupError as { statusCode?: number }).statusCode !== 404) throw cleanupError
+        }
+      })
+    } catch (cleanupError) {
+      logger.error({ error: cleanupError, memberId: id }, "[AZURE] incomplete account cleanup failed")
+      throw new IncompleteMemberError(
+        { id, displayName: `${firstName} ${lastName}`, givenName: firstName, mail, employeeId: assocNumber.toString() },
+        error
+      )
+    }
+    throw error
+  }
 
   return {
     firstName,
@@ -187,6 +214,6 @@ export async function manageLicenses(
       })),
       removeLicenses: removeLicenses.map((l) => Licenses[l]),
     })
-  ).catch((e) => logger.error({ error: e }, "[Azure Graph API] members:manageLicenses ERROR"))
+  )
   logger.info("[Azure Graph API] members:manageLicenses OK")
 }
