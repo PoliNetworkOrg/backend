@@ -101,6 +101,10 @@ describe("app router", () => {
     expect(policyOf("azure.members.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:members:create" },
     })
+    expect(policyOf("azure.members.setAssocNumber")).toMatchObject({
+      policy: { user: { scope: "backend:admin", permission: "azure:members:write" } },
+      tokenOnly: true,
+    })
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
     })
@@ -119,13 +123,7 @@ describe("app router", () => {
         .filter(([, procedure]) => procedure._def.meta?.policy === "legacy")
         .map(([path]) => path)
     )
-    for (const path of [
-      "auth.updateProfilePic",
-      "test.dbQuery",
-      "tg.permissions.addRole",
-      "tg.link.link",
-      "azure.members.setAssocNumber",
-    ])
+    for (const path of ["auth.updateProfilePic", "test.dbQuery", "tg.permissions.addRole", "tg.link.link"])
       expect(legacy).toContain(path)
   })
 
