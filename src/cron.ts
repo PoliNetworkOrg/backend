@@ -1,15 +1,18 @@
 import { Cron } from "croner"
 import { lt } from "drizzle-orm"
-import { MESSAGES_RETENTION_DAYS } from "./constants"
+import { MESSAGES_RETENTION_DAYS, SESSIONS_RETENTION_DAYS } from "./constants"
 import { DB, SCHEMA } from "./db"
 import { env } from "./env"
 import { logger } from "./logger"
+import { endedMeasures } from "./utils/audit-log"
 
 export function cron() {
   new Cron("0 23 4 * * *", async () => {
     logger.info("[CRON] start")
     await cleanMessages()
     await cleanLinkCodes()
+    await cleanSessions()
+    await cleanAuditLog()
     logger.info("[CRON] end")
   })
 
@@ -43,5 +46,33 @@ async function cleanMessages() {
     logger.info(`[CRON] END(cleanMessages) deleted ${deleted.length} message(s).`)
   } catch (err) {
     logger.error(err, "[CRON] cleanMessages")
+  }
+}
+
+export async function cleanSessions() {
+  logger.info(`[CRON] START(cleanSessions) retention days = ${SESSIONS_RETENTION_DAYS}`)
+
+  const expiredBefore = new Date()
+  expiredBefore.setDate(expiredBefore.getDate() - SESSIONS_RETENTION_DAYS)
+  try {
+    const deleted = await DB.delete(SCHEMA.AUTH.session)
+      .where(lt(SCHEMA.AUTH.session.expiresAt, expiredBefore))
+      .returning({ id: SCHEMA.AUTH.session.id })
+    logger.info(`[CRON] END(cleanSessions) deleted ${deleted.length} session(s).`)
+  } catch (err) {
+    logger.error(err, "[CRON] cleanSessions")
+  }
+}
+
+export async function cleanAuditLog() {
+  logger.info(`[CRON] START(cleanAuditLog)`)
+
+  try {
+    const deleted = await DB.delete(SCHEMA.TG.auditLog)
+      .where(endedMeasures(new Date()))
+      .returning({ id: SCHEMA.TG.auditLog.id })
+    logger.info(`[CRON] END(cleanAuditLog) deleted ${deleted.length} audit log record(s).`)
+  } catch (err) {
+    logger.error(err, "[CRON] cleanAuditLog")
   }
 }

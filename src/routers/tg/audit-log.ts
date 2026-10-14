@@ -12,6 +12,7 @@ import {
 } from "@/db/schema/tg/audit-log"
 import { dashboard, SCOPE } from "@/idp/policies"
 import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { revokedMeasures } from "@/utils/audit-log"
 import { decryptUser } from "@/utils/users"
 
 const AUDIT_LOG = SCHEMA.TG.auditLog
@@ -49,9 +50,15 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
-      await DB.insert(AUDIT_LOG)
-        .values({ ...input, actorTgId: input.adminId, basis: AUDIT_BASIS.LEGACY })
-        .onConflictDoNothing()
+      await DB.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(AUDIT_LOG)
+          .values({ ...input, actorTgId: input.adminId, basis: AUDIT_BASIS.LEGACY })
+          .onConflictDoNothing()
+          .returning({ id: AUDIT_LOG.id })
+        const revoked = inserted && revokedMeasures({ ...input, id: inserted.id })
+        if (revoked) await tx.delete(AUDIT_LOG).where(revoked)
+      })
     }),
 
   /**
@@ -100,23 +107,31 @@ export default createTRPCRouter({
         else if (!backed) review = AUDIT_REVIEW.PERMISSION_MISSING
       }
 
-      const [inserted] = await DB.insert(AUDIT_LOG)
-        .values({
-          adminId: input.actorTelegramId,
-          actorTgId: input.actorTelegramId,
-          actorSub: subject?.sub ?? null,
-          targetId: input.targetId,
-          groupId: input.groupId,
-          type: input.type,
-          until: input.until,
-          reason: input.reason,
-          client: actor.client,
-          basis: input.basis,
-          review,
-          idempotencyKey: input.idempotencyKey,
-        })
-        .onConflictDoNothing({ target: AUDIT_LOG.idempotencyKey })
-        .returning({ id: AUDIT_LOG.id })
+      // A revocation deletes the records of the measures it lifts, in the same transaction so a
+      // failed delete is retried with the record instead of being skipped as a duplicate.
+      const inserted = await DB.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(AUDIT_LOG)
+          .values({
+            adminId: input.actorTelegramId,
+            actorTgId: input.actorTelegramId,
+            actorSub: subject?.sub ?? null,
+            targetId: input.targetId,
+            groupId: input.groupId,
+            type: input.type,
+            until: input.until,
+            reason: input.reason,
+            client: actor.client,
+            basis: input.basis,
+            review,
+            idempotencyKey: input.idempotencyKey,
+          })
+          .onConflictDoNothing({ target: AUDIT_LOG.idempotencyKey })
+          .returning({ id: AUDIT_LOG.id })
+        const revoked = row && revokedMeasures({ ...input, id: row.id })
+        if (revoked) await tx.delete(AUDIT_LOG).where(revoked)
+        return row
+      })
       if (inserted) return { id: inserted.id, duplicate: false }
 
       const [existing] = await DB.select({ id: AUDIT_LOG.id })
