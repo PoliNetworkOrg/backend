@@ -14,7 +14,9 @@ export const TRUSTED_ORIGINS = [
 export const MESSAGES_RETENTION_DAYS = 7
 /** Expired sessions are deleted this many days after they expire (privacy policy, data retention). */
 export const SESSIONS_RETENTION_DAYS = 30
-/** How long kicks and revocations stay in the moderation audit log; see `endedMeasures`. */
+/** Temporary moderation measures are deleted this many months after they end (privacy policy, data retention). */
+export const MODERATION_RETENTION_MONTHS = 24
+/** How long revocations of permanent measures stay in the moderation audit log; see `endedMeasures`. */
 export const ENDED_MODERATION_RETENTION_DAYS = 1
 
 export const USER_ROLE = {

@@ -47,10 +47,14 @@ describe("cleanSessions", () => {
 })
 
 describe("cleanAuditLog", () => {
-  it("deletes the moderation records with nothing left in force", async () => {
+  it("deletes the moderation records past their retention", async () => {
+    const before = Date.now()
     await cleanAuditLog()
 
     expect(state.endedMeasures).toHaveBeenCalledWith(expect.any(Date))
+    const now = (state.endedMeasures.mock.calls[0] as unknown[])[0] as Date
+    expect(now.getTime()).toBeGreaterThanOrEqual(before)
+    expect(now.getTime()).toBeLessThanOrEqual(Date.now())
     expect(state.deleteFrom).toHaveBeenCalledWith(state.auditLog)
     expect(state.where).toHaveBeenCalledWith(state.ended)
   })
