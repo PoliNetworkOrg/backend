@@ -111,6 +111,14 @@ describe("app router", () => {
     })
     for (const path of ["web.faqs.addFaqs", "web.projects.editProject", "groups.labels.create"])
       expect(policyOf(path)?.policy).not.toBe("legacy")
+    expect(policyOf("web.projects.getProject")?.policy).toEqual(policyOf("web.projects.getAllProjects")?.policy)
+    for (const path of [
+      "web.projects.addProjectResource",
+      "web.projects.editProjectResource",
+      "web.projects.reorderProjectResources",
+      "web.projects.deleteProjectResource",
+    ])
+      expect(policyOf(path)?.policy).toEqual(policyOf("web.projects.editProject")?.policy)
   })
 
   it("keeps procedures that RFC v3 removes on the legacy path only", () => {

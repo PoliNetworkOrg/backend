@@ -5,6 +5,7 @@ import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
 import { ARRAY_AUDIT_TYPE, AUDIT_BASIS, AUDIT_REVIEW, AUDIT_TYPE } from "@/db/schema/tg/audit-log"
 import type { TUserRole } from "@/db/schema/tg/permissions"
+import type { ProjectResourceKind } from "@/db/schema/web/projects"
 import { tgMessagesCipher } from "@/routers/tg/messages"
 import { encryptUser } from "@/utils/users"
 
@@ -566,6 +567,32 @@ await seedTable("web_projects", SCHEMA.WEB.projects, () =>
       category: "deprecated" as const,
     },
   ].map((p, order) => ({ ...p, order, logo: null, ...seedAuthor }))
+)
+
+const seededProjects = await DB.select({ id: SCHEMA.WEB.projects.id, title: SCHEMA.WEB.projects.title }).from(
+  SCHEMA.WEB.projects
+)
+const projectId = (title: string) => seededProjects.find((project) => project.title === title)?.id
+const projectResources: { project: string; kind: ProjectResourceKind; url: string }[] = [
+  {
+    project: "PoliNetwork App",
+    kind: "android",
+    url: "https://play.google.com/store/apps/details?id=org.polinetwork.seed",
+  },
+  { project: "PoliNetwork App", kind: "ios", url: "https://apps.apple.com/app/id0000000000" },
+  { project: "PoliNetwork App", kind: "source", url: "https://github.com/PoliNetworkOrg/seed-app" },
+  { project: "Guida Matricole", kind: "web", url: "https://polinetwork.org/matricole" },
+  { project: "Bot Telegram", kind: "source", url: "https://github.com/PoliNetworkOrg/seed-bot" },
+  { project: "Materiale Didattico", kind: "windows", url: "https://example.com/materiale/setup.exe" },
+  { project: "Materiale Didattico", kind: "macos", url: "https://example.com/materiale/setup.dmg" },
+  { project: "Materiale Didattico", kind: "linux", url: "https://example.com/materiale/setup.AppImage" },
+]
+
+await seedTable("web_project_resources", SCHEMA.WEB.projectResources, () =>
+  projectResources.flatMap(({ project, kind, url }, order) => {
+    const id = projectId(project)
+    return id === undefined ? [] : [{ projectId: id, kind, url, order, ...seedAuthor }]
+  })
 )
 
 await seedTable("web_associations", SCHEMA.WEB.associations, () =>
