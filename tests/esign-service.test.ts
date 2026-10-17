@@ -1,5 +1,5 @@
 import { randomBytes, X509Certificate } from "node:crypto"
-import { PDFDocument } from "pdf-lib"
+import { PDFDocument, PDFName, PDFRef } from "pdf-lib"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createMockDrive } from "@/esign/drive/mock"
 import { EsignError } from "@/esign/errors"
@@ -9,7 +9,7 @@ import { inspectPdf } from "@/esign/pdf/inspect"
 import { finalizeSignature, prepareSignature } from "@/esign/pdf/pades"
 import { type Caller, createEsignService, type Mailer } from "@/esign/service"
 import { createMemoryStore } from "@/esign/store-memory"
-import { cardSign, createTestCa, samplePdf, type TestSigner } from "./esign-fixtures"
+import { appendRevision, cardSign, createTestCa, samplePdf, type TestSigner } from "./esign-fixtures"
 
 const ca = await createTestCa()
 const secretarySigner = await ca.issue("ROSSI MARIO", "RSSMRA80A01F205X")
@@ -302,6 +302,44 @@ describe("e-signing service", () => {
     const { request: after, events } = await env.service.getRequest(manager, request.id)
     expect(after.signers[0]).toMatchObject({ status: "signed", fiscalCode: "RSSMRA80A01F205X" })
     expect(events.find((e) => e.type === "signed")?.data).toMatchObject({ method: "upload" })
+  })
+
+  it("refuses an uploaded signature over a revision that draws on the page", async () => {
+    const request = await prepareRequest(env)
+    const { currentDocumentId } = await env.service.getRequest(manager, request.id)
+    const original = (await env.service.document(secretary, currentDocumentId ?? "")).content
+    // A valid signature by the right signer, over a revision that also covers the text with a free-text annotation.
+    const doc = await PDFDocument.load(original)
+    const page = doc.getPage(0)
+    const n = doc.context.largestObjectNumber + 1
+    page.node.set(PDFName.of("Annots"), doc.context.obj([PDFRef.of(n)]))
+    const overlay = "q 1 1 1 rg 0 0 300 40 re f 0 g BT /F1 18 Tf 10 12 Td (Pagina modificata) Tj ET Q"
+    const edited = await appendRevision(
+      original,
+      {
+        [page.ref.objectNumber]: page.node.toString(),
+        [n]: `<< /Type /Annot /Subtype /FreeText /F 4 /Rect [50 770 350 810] /DA (/F1 18 Tf 0 g) /AP << /N ${n + 1} 0 R >> >>`,
+        [n + 1]:
+          `<< /Type /XObject /Subtype /Form /BBox [0 0 300 40] /Resources << /Font << /F1 << /Type /Font ` +
+          `/Subtype /Type1 /BaseFont /Helvetica >> >> >> /Length ${overlay.length} >>\nstream\n${overlay}\nendstream`,
+      },
+      n + 2
+    )
+    const prepared = await prepareSignature(edited, secretarySigner.cert, {
+      placement: { page: 0, x: 0.1, y: 0.1, width: 0.3, height: 0.1 },
+      fieldName: "Signature1",
+      signerName: secretarySigner.name,
+      signingTime: new Date(),
+      appearance: { lines: [{ text: secretarySigner.name }] },
+    })
+    const forged = finalizeSignature(prepared, await cardSign(secretarySigner, prepared.toBeSigned))
+    const check = await inspectPdf(forged)
+    expect(check.signatures.at(-1)).toMatchObject({ intact: true, verified: true, coversWholeDocument: true })
+    await expect(env.service.uploadSigned(secretary, request.id, forged)).rejects.toMatchObject({
+      code: "pdf_invalid",
+      message: expect.stringMatching(/annotation that is not the signature on page 1/),
+    })
+    expect((await env.service.getRequest(manager, request.id)).request.signers[0].status).not.toBe("signed")
   })
 
   it("binds the CIE atomically when two prepared signatures use different cards", async () => {

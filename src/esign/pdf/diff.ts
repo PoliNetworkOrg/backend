@@ -35,9 +35,10 @@ function load(pdf: Uint8Array) {
 
 /**
  * Checks that `after` differs from `before` only by what adding an approval signature needs: new objects (signature,
- * widget, appearance, fonts), appended page annotations and form fields, form flags and resources, and metadata.
- * Anything else — page content, page boxes, resources, other objects — is refused, so a signer can't change the
- * document in the same revision they sign.
+ * widget, appearance, fonts), signature widgets appended to page annotations and form fields (each with a new
+ * signature value and no actions), form flags and resources, and metadata. Anything else — page content, page boxes,
+ * resources, other annotations, other objects — is refused, so a signer can't change the document in the same
+ * revision they sign.
  */
 export async function assertSignatureOnlyUpdate(before: Uint8Array, after: Uint8Array): Promise<void> {
   const refuse = (what: string) => {
@@ -69,6 +70,8 @@ export async function assertSignatureOnlyUpdate(before: Uint8Array, after: Uint8
   const info = old.context.trailerInfo.Info
   if (info instanceof PDFRef) kinds.set(info.toString(), "info")
 
+  /** Existing empty signature fields the update fills in. */
+  const signedFields: [string, PDFDict][] = []
   const oldObjects = new Map(old.context.enumerateIndirectObjects().map(([ref, obj]) => [ref.toString(), obj]))
   for (const [ref, obj] of neu.context.enumerateIndirectObjects()) {
     const key = ref.toString()
@@ -101,21 +104,50 @@ export async function assertSignatureOnlyUpdate(before: Uint8Array, after: Uint8
               : new Set<string>()
     const extra = changed.find((k) => !allowed.has(k))
     if (extra) refuse(`${extra} of object ${key}`)
-    if (kind === "page") {
-      const annotsBefore = old.context.lookupMaybe(before.get(PDFName.of("Annots")), PDFArray)
-      const annotsAfter = neu.context.lookupMaybe(after.get(PDFName.of("Annots")), PDFArray)
-      if (!appendsTo(annotsBefore, annotsAfter)) refuse(`annotations of page object ${key}`)
-    }
-    if (kind === "acroform" || kind === "catalog") {
-      const formBefore =
-        kind === "acroform" ? before : old.context.lookupMaybe(before.get(PDFName.of("AcroForm")), PDFDict)
-      const formAfter =
-        kind === "acroform" ? after : neu.context.lookupMaybe(after.get(PDFName.of("AcroForm")), PDFDict)
-      const fieldsBefore = formBefore
-        ? old.context.lookupMaybe(formBefore.get(PDFName.of("Fields")), PDFArray)
-        : undefined
-      const fieldsAfter = formAfter ? neu.context.lookupMaybe(formAfter.get(PDFName.of("Fields")), PDFArray) : undefined
-      if (!appendsTo(fieldsBefore, fieldsAfter)) refuse("form fields")
-    }
+    if (allowed === SIGNATURE_FIELD_KEYS) signedFields.push([key, after])
   }
+
+  // A viewer draws every annotation on a page and runs every action, so what the update adds there must be the new
+  // signature's widget: anything else (a stamp, free text, a link, a script) would change what the document shows.
+  const isNew = (ref: PDFObject | undefined): ref is PDFRef => ref instanceof PDFRef && !oldObjects.has(ref.toString())
+  const indirect = (ref: PDFObject | undefined) =>
+    ref instanceof PDFRef ? neu.context.lookupMaybe(ref, PDFDict) : undefined
+  const hasAction = (dict: PDFDict) => dict.has(PDFName.of("A")) || dict.has(PDFName.of("AA"))
+  const assertSignatureField = (field: PDFDict | undefined, what: string) => {
+    const value = field?.get(PDFName.of("V"))
+    if (
+      !field ||
+      field.get(PDFName.of("FT"))?.toString() !== "/Sig" ||
+      hasAction(field) ||
+      !isNew(value) ||
+      !neu.context.lookupMaybe(value, PDFDict)?.has(PDFName.of("ByteRange"))
+    )
+      refuse(what)
+  }
+  for (const [key, field] of signedFields) assertSignatureField(field, `object ${key}`)
+  newPages.forEach((page, i) => {
+    const before = old.context.lookupMaybe(oldPages[i].node.get(PDFName.of("Annots")), PDFArray)
+    const after = neu.context.lookupMaybe(page.node.get(PDFName.of("Annots")), PDFArray)
+    if (!appendsTo(before, after)) refuse(`annotations of page ${i + 1}`)
+    for (const ref of after?.asArray().slice(before?.size() ?? 0) ?? []) {
+      const what = `an annotation that is not the signature on page ${i + 1}`
+      const annot = indirect(ref)
+      if (!annot || annot.get(PDFName.of("Subtype"))?.toString() !== "/Widget" || hasAction(annot)) refuse(what)
+      const widget = annot as PDFDict
+      assertSignatureField(widget.has(PDFName.of("FT")) ? widget : indirect(widget.get(PDFName.of("Parent"))), what)
+    }
+  })
+
+  // The form may only gain signature fields, and only the keys signing needs (not /XFA, which viewers draw instead).
+  const formBefore = old.context.lookupMaybe(old.catalog.get(PDFName.of("AcroForm")), PDFDict)
+  const formAfter = neu.context.lookupMaybe(neu.catalog.get(PDFName.of("AcroForm")), PDFDict)
+  const formKey = changedKeys(formBefore ?? old.context.obj({}), formAfter ?? neu.context.obj({})).find(
+    (k) => !ACROFORM_KEYS.has(k)
+  )
+  if (formKey) refuse(`${formKey} of the form`)
+  const fieldsBefore = formBefore ? old.context.lookupMaybe(formBefore.get(PDFName.of("Fields")), PDFArray) : undefined
+  const fieldsAfter = formAfter ? neu.context.lookupMaybe(formAfter.get(PDFName.of("Fields")), PDFArray) : undefined
+  if (!appendsTo(fieldsBefore, fieldsAfter)) refuse("form fields")
+  for (const ref of fieldsAfter?.asArray().slice(fieldsBefore?.size() ?? 0) ?? [])
+    assertSignatureField(indirect(ref), "a form field that is not the signature")
 }
