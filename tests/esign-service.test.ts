@@ -7,7 +7,7 @@ import { dataToBeSigned, sha256, signedAttributes } from "@/esign/pdf/cms"
 import { signedBytes } from "@/esign/pdf/incremental"
 import { inspectPdf } from "@/esign/pdf/inspect"
 import { finalizeSignature, prepareSignature } from "@/esign/pdf/pades"
-import { type Caller, createEsignService, type Mailer } from "@/esign/service"
+import { type Access, type Caller, createEsignService, type Mailer } from "@/esign/service"
 import { createMemoryStore } from "@/esign/store-memory"
 import { appendRevision, cardSign, createTestCa, samplePdf, type TestSigner } from "./esign-fixtures"
 
@@ -26,12 +26,15 @@ function setup(
     allowTestCertificates?: boolean
     revocation?: "good" | "revoked" | "unknown"
     policy?: "require" | "prefer" | "off"
+    directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
   } = {}
 ) {
   let clock = new Date("2026-10-17T10:00:00Z").getTime()
   const store = createMemoryStore()
   const drive = createMockDrive()
   const archive = createMockDrive({ id: "archive", label: "Archive" })
+  /** Roles and permissions by subject, for drive access rules. */
+  const people = new Map<string, Access>()
   const mailer = {
     signatureRequest: vi.fn<Mailer["signatureRequest"]>().mockResolvedValue(true),
     signedDocument: vi.fn<Mailer["signedDocument"]>().mockResolvedValue(true),
@@ -39,6 +42,8 @@ function setup(
   const service = createEsignService({
     store,
     drives: [drive, archive],
+    access: (sub) => people.get(sub) ?? null,
+    directory: opts.directory,
     mailer,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
     dashboardUrl: "https://admin.example.org",
@@ -58,7 +63,7 @@ function setup(
   const advance = (ms: number) => {
     clock += ms
   }
-  return { service, store, drive, archive, mailer, advance }
+  return { service, store, drive, archive, people, mailer, advance }
 }
 
 async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {
@@ -111,6 +116,57 @@ describe("e-signing service", () => {
   let env: ReturnType<typeof setup>
   beforeEach(() => {
     env = setup()
+  })
+
+  it("lists and accepts registered eligible signers before their first visit", async () => {
+    const fresh = { sub: "sub-new", name: "New Signer", email: "new@example.org" }
+    env = setup({ directory: async () => [fresh, { sub: "sub-no-access", name: "No Access", email: null }] })
+    env.people.set(fresh.sub, { roles: [], permissions: ["esign:sign"] })
+    expect(await env.store.getProfile(fresh.sub)).toBeNull()
+    expect((await env.service.listProfiles()).map((person) => person.sub)).toEqual([fresh.sub])
+
+    const { document } = await env.service.stageUpload(manager, "request.pdf", await samplePdf())
+    await expect(
+      env.service.createRequest(manager, {
+        title: "Request",
+        documentId: document.id,
+        ordered: true,
+        signers: [{ sub: "sub-no-access", role: null, places: [{ ...placement(0), kind: "signature" }] }],
+        output: null,
+        email: null,
+      })
+    ).rejects.toThrow("No Access is not allowed to sign")
+    const request = await env.service.createRequest(manager, {
+      title: "Request",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: fresh.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+      output: null,
+      email: null,
+    })
+    expect(request.signers[0]).toMatchObject({ sub: fresh.sub, name: fresh.name })
+    expect(await env.store.getProfile(fresh.sub)).toMatchObject(fresh)
+  })
+
+  it("keeps a signer's known email when the IdP directory has none", async () => {
+    const known = { sub: "sub-known", name: "Known Signer", email: "known@polinetwork.org" }
+    env = setup({ directory: async () => [{ ...known, name: "Known Signer (IdP)", email: null }] })
+    env.people.set(known.sub, { roles: [], permissions: ["esign:sign"] })
+    await env.store.upsertProfile(known)
+    expect(await env.service.listProfiles()).toEqual([
+      expect.objectContaining({ sub: known.sub, name: "Known Signer (IdP)", email: known.email }),
+    ])
+
+    const { document } = await env.service.stageUpload(manager, "request.pdf", await samplePdf())
+    await env.service.createRequest(manager, {
+      title: "Request",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: known.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+      output: null,
+      email: null,
+    })
+    expect(await env.store.getProfile(known.sub)).toMatchObject({ name: "Known Signer (IdP)", email: known.email })
   })
 
   it("collects signatures in order, then uploads and emails the signed PDF", async () => {
@@ -287,7 +343,8 @@ describe("e-signing service", () => {
     const match = /\/ByteRange (\[[^\]]+\])/.exec(text)
     if (!match) throw new Error("no ByteRange")
     const range: [number, number, number, number] = [0, original.length, gap.placeholder.pdf.length, 0]
-    const entry = `[${range.join(" ")}`.padEnd(match[1].length - 1, " ") + "]"
+    const padded = `[${range.join(" ")}`.padEnd(match[1].length - 1, " ")
+    const entry = `${padded}]`
     gap.placeholder.pdf.set(Buffer.from(entry), match.index + "/ByteRange ".length)
     gap.placeholder.byteRange = range
     gap.signedAttrs = signedAttributes(sha256(signedBytes(gap.placeholder.pdf, range)), secretarySigner.cert)
@@ -466,11 +523,11 @@ describe("e-signing service", () => {
   })
 
   it("reads from and saves to the drive each request names", async () => {
-    expect(env.service.drives).toEqual([
+    expect(await env.service.drivesFor(manager)).toEqual([
       { id: "dev", label: "OneDrive (development copy)" },
       { id: "archive", label: "Archive" },
     ])
-    await expect(env.service.listDrive("missing")).rejects.toMatchObject({ code: "not_found" })
+    await expect(env.service.listDrive(manager, "missing")).rejects.toMatchObject({ code: "not_found" })
     const { document } = await env.service.stageDriveItem(manager, "archive", "mock-verbale-cd")
     expect(document.source).toMatchObject({ kind: "drive", driveId: "archive", itemId: "mock-verbale-cd" })
 
@@ -645,6 +702,92 @@ describe("e-signing service", () => {
     })
   })
 
+  it("restricts each drive to the roles and permissions its rule names", async () => {
+    const boardOnly = { roles: ["direttivo"], permissions: [] }
+    const admin: Caller = { ...manager, canManageDrives: true }
+    await expect(
+      env.service.setDriveAccess(manager, "archive", { request: boardOnly, sign: boardOnly })
+    ).rejects.toMatchObject({ code: "forbidden" })
+    await env.service.setDriveAccess(admin, "archive", { request: boardOnly, sign: boardOnly })
+    expect((await env.service.driveAccess(admin)).drives.find((d) => d.id === "archive")).toMatchObject({
+      request: boardOnly,
+      sign: boardOnly,
+    })
+
+    // Without the role the manager sees only the other drive, and can't use the restricted one.
+    expect((await env.service.drivesFor(manager)).map((d) => d.id)).toEqual(["dev"])
+    await expect(env.service.listDrive(manager, "archive")).rejects.toMatchObject({ code: "forbidden" })
+    await expect(env.service.stageDriveItem(manager, "archive", "mock-verbale-cd")).rejects.toMatchObject({
+      code: "forbidden",
+    })
+
+    env.people.set(manager.sub, { roles: ["direttivo"], permissions: ["esign:requests:manage"] })
+    env.people.set(president.sub, { roles: ["direttivo"], permissions: ["esign:sign"] })
+    expect((await env.service.drivesFor(manager)).map((d) => d.id)).toEqual(["dev", "archive"])
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    await env.service.syncProfile(president, { name: "Anna Bianchi", email: "anna@example.org" })
+    expect(
+      (await env.service.listProfiles())
+        .map((p) => [p.sub, p.drives])
+        .sort(([a], [b]) => String(a).localeCompare(String(b)))
+    ).toEqual([
+      [president.sub, ["dev", "archive"]],
+      [secretary.sub, ["dev"]],
+    ])
+
+    // Only people allowed on the drive can be asked to sign its documents.
+    const { document } = await env.service.stageDriveItem(manager, "archive", "mock-verbale-cd")
+    const base = {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: true,
+      output: null,
+      email: null,
+    }
+    await expect(
+      env.service.createRequest(manager, {
+        ...base,
+        signers: [{ sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+      })
+    ).rejects.toThrow("Mario Rossi can't sign documents of Archive")
+    const request = await env.service.createRequest(manager, {
+      ...base,
+      signers: [{ sub: president.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+    })
+    expect(request.drives).toEqual(["archive"])
+
+    // Other managers don't see the drive's requests; its creator and signers do.
+    const other: Caller = { sub: "sub-other-manager", canManage: true }
+    expect(await env.service.listRequests(other, "all")).toHaveLength(0)
+    await expect(env.service.getRequest(other, request.id)).rejects.toMatchObject({ code: "not_found" })
+    expect(await env.service.listRequests(manager, "all")).toHaveLength(1)
+    expect(await env.service.listRequests(president, "inbox")).toHaveLength(1)
+
+    // A signer who loses access can't sign any more.
+    env.people.set(president.sub, { roles: [], permissions: ["esign:sign"] })
+    await expect(env.service.createJob(president, request.id)).rejects.toThrow(/no longer sign documents of Archive/)
+
+    // Clearing the rule restores the default.
+    await env.service.setDriveAccess(admin, "archive", {
+      request: { roles: [], permissions: [] },
+      sign: { roles: [], permissions: [] },
+    })
+    expect((await env.service.drivesFor(other)).map((d) => d.id)).toEqual(["dev", "archive"])
+    await expect(env.service.createJob(president, request.id)).resolves.toMatchObject({ ticket: expect.any(String) })
+  })
+
+  it("matches a rule by permission as well as by role", async () => {
+    const admin: Caller = { ...manager, canManageDrives: true }
+    await env.service.setDriveAccess(admin, "archive", {
+      request: { roles: ["direttivo"], permissions: ["esign:archive"] },
+      sign: { roles: [], permissions: [] },
+    })
+    env.people.set(manager.sub, { roles: [], permissions: ["esign:archive"] })
+    expect((await env.service.drivesFor(manager)).map((d) => d.id)).toEqual(["dev", "archive"])
+    expect((await env.service.drivesFor({ sub: "nobody", canManage: true })).map((d) => d.id)).toEqual(["dev"])
+    expect(await env.service.drivesFor({ sub: manager.sub, canManage: false })).toEqual([])
+  })
+
   it("lets a signer decline", async () => {
     const request = await prepareRequest(env)
     await env.service.declineRequest(secretary, request.id, "Errore nel testo")
@@ -659,5 +802,76 @@ describe("e-signing service", () => {
     await expect(env.service.getRequest(stranger, request.id)).rejects.toBeInstanceOf(EsignError)
     expect(await env.service.listRequests(stranger, "mine")).toHaveLength(0)
     await expect(env.service.listRequests(stranger, "all")).rejects.toMatchObject({ code: "forbidden" })
+  })
+
+  describe("inbox", () => {
+    const pdf = samplePdf()
+
+    beforeEach(async () => {
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+      await env.service.syncProfile(president, { name: "Anna Bianchi", email: "anna@example.org" })
+    })
+
+    async function request(ordered: boolean, order: Caller[]) {
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await pdf)
+      return env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered,
+        signers: order.map((c, i) => ({
+          sub: c.sub,
+          role: `ruolo ${i}`,
+          places: [{ ...placement(0), kind: "signature" as const }],
+        })),
+        output: { driveId: "dev", folderId: "mock-firmati", fileName: "Verbale firmato" },
+        email: { to: [], message: "" },
+      })
+    }
+
+    async function markSigned(requestId: string, caller: Caller) {
+      const stored = await env.store.getRequest(requestId)
+      const signer = stored?.signers.find((s) => s.sub === caller.sub)
+      if (!signer) throw new Error("no such signer")
+      await env.store.updateSigner(signer.id, { status: "signed" })
+    }
+
+    const ids = async (caller: Caller) => (await env.service.listRequests(caller, "inbox")).map((r) => r.id).sort()
+
+    it("is not hidden behind more than 200 newer requests awaiting someone else", async () => {
+      const actionable = await request(true, [secretary, president])
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      for (let i = 0; i < 110; i++) await request(true, [president, secretary])
+      for (let i = 0; i < 110; i++) {
+        const r = await request(false, [secretary, president])
+        await markSigned(r.id, secretary)
+      }
+
+      const inbox = await env.service.listRequests(secretary, "inbox")
+      expect(inbox.map((r) => r.id)).toEqual([actionable.id])
+      expect(inbox[0]?.myTurn).toBe(true)
+      expect(await env.service.listRequests(president, "inbox")).toHaveLength(200)
+      expect(await ids(president)).not.toContain(actionable.id)
+      // The creator is involved in every request but signs none of them.
+      expect(await env.service.listRequests(manager, "inbox")).toHaveLength(0)
+      expect(await env.service.listRequests(secretary, "mine")).toHaveLength(200)
+    })
+
+    it("follows the turn of ordered and unordered requests", async () => {
+      const ordered = await request(true, [secretary, president])
+      const unordered = await request(false, [secretary, president])
+      const cancelled = await request(false, [secretary, president])
+      await env.service.cancelRequest(manager, cancelled.id)
+      const stranger: Caller = { sub: "sub-stranger", canManage: true }
+
+      expect(await ids(secretary)).toEqual([ordered.id, unordered.id].sort())
+      expect(await ids(president)).toEqual([unordered.id])
+      expect(await ids(stranger)).toEqual([])
+
+      await markSigned(ordered.id, secretary)
+      await markSigned(unordered.id, secretary)
+      expect(await ids(secretary)).toEqual([])
+      expect(await ids(president)).toEqual([ordered.id, unordered.id].sort())
+    })
   })
 })

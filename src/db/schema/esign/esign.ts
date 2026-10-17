@@ -66,6 +66,8 @@ export const requests = createTable.esign(
     output: jsonb().$type<OutputJson>(),
     email: jsonb().$type<EmailJson>(),
     delivery: jsonb().$type<DeliveryJson>(),
+    /** Drives the request reads from or saves to: their access rules decide who may see and sign it. */
+    drives: text().array().notNull().default(sql`'{}'::text[]`),
     createdBySub: text("created_by_sub").notNull(),
     completedAt: tstz("completed_at"),
     cancelledAt: tstz("cancelled_at"),
@@ -194,3 +196,20 @@ export const events = createTable.esign(
   },
   (t) => [index("esign_events_request_idx").on(t.requestId)]
 )
+
+/**
+ * Who may use each drive, by role or permission. Holding any listed role or permission is enough; an empty list (or no
+ * row) keeps the default: everyone who manages requests may request, everyone who signs may be asked to sign.
+ */
+export const driveAccess = createTable.esign("drive_access", {
+  /** The drive's id from ESIGN_DRIVES. */
+  driveId: text("drive_id").primaryKey(),
+  /** Browse the drive, use its PDFs and folders in requests, and see its requests. */
+  requestRoles: text("request_roles").array().notNull().default(sql`'{}'::text[]`),
+  requestPermissions: text("request_permissions").array().notNull().default(sql`'{}'::text[]`),
+  /** Be asked to sign its documents. */
+  signRoles: text("sign_roles").array().notNull().default(sql`'{}'::text[]`),
+  signPermissions: text("sign_permissions").array().notNull().default(sql`'{}'::text[]`),
+  updatedBySub: text("updated_by_sub"),
+  ...timeColumns,
+})

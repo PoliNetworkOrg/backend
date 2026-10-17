@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, exists, inArray, isNull, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, exists, inArray, isNull, lt, notExists, or, sql } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import type { DB as Database } from "@/db"
 import { schema } from "@/db/schema/esign"
 import type {
@@ -12,7 +13,7 @@ import type {
   SigningRequest,
 } from "./store"
 
-const { profiles, requests, documents, signers, jobs, events } = schema
+const { profiles, requests, documents, signers, jobs, events, driveAccess } = schema
 
 /**
  * `delivery` as a JSON object. drizzle's bun-sql driver stores jsonb values as a JSON string scalar; `#>> '{}'` then
@@ -100,6 +101,7 @@ export function createPgStore(db: Db): EsignStore {
       status: r.status,
       ordered: r.ordered,
       output: r.output,
+      drives: r.drives,
       email: r.email,
       delivery: r.delivery,
       createdBySub: r.createdBySub,
@@ -177,6 +179,7 @@ export function createPgStore(db: Db): EsignStore {
           .values({
             title: input.title,
             ordered: input.ordered,
+            drives: input.drives,
             output: input.output,
             email: input.email,
             createdBySub: input.createdBySub,
@@ -221,6 +224,40 @@ export function createPgStore(db: Db): EsignStore {
             )
           )
         )
+      if (filter.awaiting) {
+        // Mirrors `turnOf`: a pending signer, and in an ordered request the first pending one.
+        const earlier = alias(signers, "earlier")
+        conditions.push(
+          eq(requests.status, "in_progress"),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(signers)
+              .where(
+                and(
+                  eq(signers.requestId, requests.id),
+                  eq(signers.sub, filter.awaiting),
+                  eq(signers.status, "pending"),
+                  or(
+                    eq(requests.ordered, false),
+                    notExists(
+                      db
+                        .select({ one: sql`1` })
+                        .from(earlier)
+                        .where(
+                          and(
+                            eq(earlier.requestId, requests.id),
+                            eq(earlier.status, "pending"),
+                            lt(earlier.position, signers.position)
+                          )
+                        )
+                    )
+                  )
+                )
+              )
+          )
+        )
+      }
       if (filter.status) conditions.push(inArray(requests.status, filter.status))
       const rows = await db
         .select()
@@ -235,6 +272,30 @@ export function createPgStore(db: Db): EsignStore {
     },
     async updateSigner(id, patch) {
       await db.update(signers).set(patch).where(eq(signers.id, id))
+    },
+
+    async listDriveAccess() {
+      const rows = await db.select().from(driveAccess).orderBy(asc(driveAccess.driveId))
+      return rows.map((row) => ({
+        driveId: row.driveId,
+        request: { roles: row.requestRoles, permissions: row.requestPermissions },
+        sign: { roles: row.signRoles, permissions: row.signPermissions },
+        updatedBySub: row.updatedBySub,
+        updatedAt: row.updatedAt,
+      }))
+    },
+    async setDriveAccess(access) {
+      const values = {
+        requestRoles: access.request.roles,
+        requestPermissions: access.request.permissions,
+        signRoles: access.sign.roles,
+        signPermissions: access.sign.permissions,
+        updatedBySub: access.updatedBySub,
+      }
+      await db
+        .insert(driveAccess)
+        .values({ driveId: access.driveId, ...values })
+        .onConflictDoUpdate({ target: driveAccess.driveId, set: values })
     },
 
     async addEvent(event) {

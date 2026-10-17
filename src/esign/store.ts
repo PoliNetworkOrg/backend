@@ -65,6 +65,8 @@ export type SigningRequest = {
   output: OutputJson | null
   email: EmailJson | null
   delivery: DeliveryJson | null
+  /** Drives it reads from or saves to. */
+  drives: string[]
   createdBySub: string
   createdAt: Date
   updatedAt: Date | null
@@ -76,6 +78,7 @@ export type SigningRequest = {
 export type NewRequest = {
   title: string
   ordered: boolean
+  drives: string[]
   output: OutputJson | null
   email: EmailJson | null
   createdBySub: string
@@ -125,6 +128,8 @@ export type NewEvent = Omit<RequestEvent, "id" | "at">
 export type RequestFilter = {
   /** Requests where this subject signs or that it created; all requests when absent. */
   involving?: string
+  /** In-progress requests where it is this subject's turn to sign (see `turnOf`), applied before `limit`. */
+  awaiting?: string
   status?: RequestStatus[]
   limit?: number
 }
@@ -150,6 +155,18 @@ export type SignatureCommit = {
    * transaction, so two prepared signatures with different cards cannot both pass.
    */
   identity: { sub: string; fiscalCode: string | null; certificateSubject: string }
+}
+
+/** Roles and permissions, any of which grants an access; empty for the default. */
+export type DriveRule = { roles: string[]; permissions: string[] }
+
+/** Who may use a drive: request signatures with it, and be asked to sign its documents. */
+export type DriveAccess = {
+  driveId: string
+  request: DriveRule
+  sign: DriveRule
+  updatedBySub: string | null
+  updatedAt: Date | null
 }
 
 /** Persistence for e-signing. Implemented over Postgres, and in memory for tests. */
@@ -185,6 +202,10 @@ export interface EsignStore {
   /** Completed requests whose delivery is pending and was not attempted after `staleBefore`. */
   pendingDeliveries(staleBefore: Date): Promise<string[]>
   updateSigner(id: string, patch: Partial<Pick<Signer, "status" | "declineReason" | "places">>): Promise<void>
+
+  /** The drives that have access rules. */
+  listDriveAccess(): Promise<DriveAccess[]>
+  setDriveAccess(access: Omit<DriveAccess, "updatedAt">): Promise<void>
 
   addEvent(event: NewEvent): Promise<void>
   listEvents(requestId: string): Promise<RequestEvent[]>

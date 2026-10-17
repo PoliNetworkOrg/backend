@@ -87,6 +87,7 @@ ESIGN_DRIVES='[{"id":"segreteria","label":"Segreteria","driveId":"b!…"},{"id":
 Requirements:
 
 - IdP permissions `esign:sign` (sign and see one's requests) and `esign:requests:manage` (create and manage requests).
+  `esign:drives:manage` sets which roles and permissions may use each drive (dashboard: Signatures › Drives).
 - Graph application permission `Files.ReadWrite.All` (or `Sites.Selected` with write access to the site), with admin
   consent, for the drive; emails use the existing `Mail.Send` sender.
 - The dashboard proxies `/api/esign/agent/*` to this backend's `/esign/agent/*`; the agent never calls the backend

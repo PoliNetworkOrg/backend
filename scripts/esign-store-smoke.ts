@@ -31,6 +31,7 @@ const create = async () =>
   store.createRequest({
     title: "smoke",
     ordered: true,
+    drives: [],
     output: null,
     email: null,
     createdBySub: sub,
@@ -123,6 +124,7 @@ check(
 const d = await store.createRequest({
   title: "smoke",
   ordered: true,
+  drives: [],
   output: null,
   email: null,
   createdBySub: sub,
@@ -162,7 +164,30 @@ await store.transitionJob(job3.id, ["pending"], { status: "prepared" })
 check("last place commits", (await commit("AAA", job3.id, d.id, d.signers[0].id, true, 1)) === "ok")
 check("request completed", (await store.getRequest(d.id))?.status === "completed")
 
+// Drive access rules: insert, then replace.
+const driveId = `smoke-${randomUUID()}`
+await store.setDriveAccess({
+  driveId,
+  request: { roles: ["direttivo"], permissions: [] },
+  sign: { roles: [], permissions: ["esign:sign"] },
+  updatedBySub: sub,
+})
+await store.setDriveAccess({
+  driveId,
+  request: { roles: ["direttivo", "socio"], permissions: ["esign:x"] },
+  sign: { roles: [], permissions: [] },
+  updatedBySub: sub,
+})
+const rule = (await store.listDriveAccess()).find((r) => r.driveId === driveId)
+check(
+  "drive access replaced",
+  rule?.request.roles.join() === "direttivo,socio" &&
+    rule.request.permissions.join() === "esign:x" &&
+    rule.sign.permissions.length === 0
+)
+
 const { sql } = await import("drizzle-orm")
 await DB.execute(sql`delete from esign_requests where created_by_sub = ${sub}`)
 await DB.execute(sql`delete from esign_profiles where sub = ${sub}`)
+await DB.execute(sql`delete from esign_drive_access where drive_id = ${driveId}`)
 process.exit()
