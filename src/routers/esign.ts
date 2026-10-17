@@ -197,6 +197,9 @@ export const esignRouter = createTRPCRouter({
     cancel: user
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => run(() => esign.cancelRequest(callerOf(ctx), input.id))),
+    delete: user
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => run(() => esign.deleteRequest(callerOf(ctx), input.id))),
     decline: user
       .input(z.object({ id: z.uuid(), reason: z.string().max(500).nullable() }))
       .mutation(({ ctx, input }) => run(() => esign.declineRequest(callerOf(ctx), input.id, input.reason))),

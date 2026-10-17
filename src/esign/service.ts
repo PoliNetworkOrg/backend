@@ -815,6 +815,16 @@ export function createEsignService(options: ServiceOptions) {
       if (result === "conflict") throw new EsignError("conflict", "The request is not in progress")
     },
 
+    /** Deletes a finished request and everything recorded about it, signed documents included. */
+    async deleteRequest(caller: Caller, id: string) {
+      const request = await requestFor(caller, id)
+      if (!caller.canManage) throw new EsignError("forbidden", "Only managers can delete requests")
+      if (request.status === "in_progress") throw new EsignError("conflict", "Cancel the request before deleting it")
+      const result = await store.deleteRequest(id)
+      if (result === "conflict") throw new EsignError("conflict", "The request is being delivered or signed; try again")
+      logger.info({ requestId: id, title: request.title, by: caller.sub }, "[ESIGN] request deleted")
+    },
+
     async declineRequest(caller: Caller, id: string, reason: string | null) {
       const request = await requestFor(caller, id)
       const signer = request.signers.find((s) => s.sub === caller.sub && s.status === "pending")

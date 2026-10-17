@@ -386,6 +386,29 @@ describe("e-signing service", () => {
     await expect(env.service.cancelRequest(manager, request.id)).rejects.toMatchObject({ code: "conflict" })
   })
 
+  it("deletes only a finished request, and only managers delete", async () => {
+    const request = await prepareRequest(env, false)
+    await expect(env.service.deleteRequest(manager, request.id)).rejects.toMatchObject({ code: "conflict" })
+    await sign(env, secretary, secretarySigner, request.id)
+    await sign(env, president, presidentSigner, request.id)
+    await expect(env.service.deleteRequest({ ...manager, canManage: false }, request.id)).rejects.toMatchObject({
+      code: "forbidden",
+    })
+    await env.service.deleteRequest(manager, request.id)
+    await expect(env.service.getRequest(manager, request.id)).rejects.toMatchObject({ code: "not_found" })
+    expect(await env.store.listVersions(request.id)).toEqual([])
+    expect(await env.store.listEvents(request.id)).toEqual([])
+  })
+
+  it("can't delete a request while its delivery is pending", async () => {
+    const request = await prepareRequest(env)
+    await env.service.cancelRequest(manager, request.id)
+    await env.store.updateRequest(request.id, {
+      delivery: { status: "pending", driveItem: null, emailedTo: [], error: null, attemptedAt: null },
+    })
+    await expect(env.service.deleteRequest(manager, request.id)).rejects.toMatchObject({ code: "conflict" })
+  })
+
   it("refuses a revoked CIE and, when required, an unknown status", async () => {
     env = setup({ revocation: "revoked" })
     let request = await prepareRequest(env)
