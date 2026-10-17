@@ -129,6 +129,31 @@ export function parseOcspResponse(
   return unknown("no status for this certificate")
 }
 
+const MAX_RESPONSE_BYTES = 64 * 1024
+
+/** Reads a response body up to `limit` bytes, cancelling as soon as it is exceeded. Null when too large. */
+async function readBounded(response: Response, limit: number): Promise<Uint8Array | null> {
+  if (Number(response.headers.get("content-length") ?? 0) > limit) {
+    await response.body?.cancel()
+    return null
+  }
+  const reader = response.body?.getReader()
+  if (!reader) return new Uint8Array()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > limit) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  return new Uint8Array(Buffer.concat(chunks))
+}
+
 /** Asks the certificate's OCSP responder whether it is revoked. Network and format failures give "unknown". */
 export async function checkRevocation(
   cert: X509Certificate,
@@ -146,9 +171,8 @@ export async function checkRevocation(
     })
     if (!response.ok)
       return { status: "unknown", detail: `HTTP ${response.status}`, checkedAt: options.now.toISOString() }
-    const body = new Uint8Array(await response.arrayBuffer())
-    if (body.length > 64 * 1024)
-      return { status: "unknown", detail: "response too large", checkedAt: options.now.toISOString() }
+    const body = await readBounded(response, MAX_RESPONSE_BYTES)
+    if (!body) return { status: "unknown", detail: "response too large", checkedAt: options.now.toISOString() }
     return parseOcspResponse(body, cert, issuer, options.now)
   } catch (error) {
     return {

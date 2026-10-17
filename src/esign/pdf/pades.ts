@@ -98,9 +98,22 @@ export function checkSignature(
     return { intact: false, verified: false, coversWholeDocument: false, parsed: null }
   }
   const [a, b, c, d] = byteRange
-  const coversWholeDocument = a === 0 && c + d === pdf.length && b < c
+  // The only bytes left out may be this signature's own /Contents value, delimiters included: a ByteRange that skips
+  // anything else leaves those bytes unsigned.
+  const gapStart = a + b
+  const gapIsContents =
+    byteRange.length === 4 &&
+    byteRange.every((n) => Number.isSafeInteger(n) && n >= 0) &&
+    a === 0 &&
+    gapStart < c &&
+    c + d <= pdf.length &&
+    pdf[gapStart] === 0x3c &&
+    pdf[c - 1] === 0x3e &&
+    hexEquals(pdf.subarray(gapStart + 1, c - 1), contents)
+  const coversWholeDocument = gapIsContents && c + d === pdf.length
   const digest = sha256(signedBytes(pdf, byteRange))
-  const intact = parsed.messageDigest !== null && Buffer.from(digest).equals(Buffer.from(parsed.messageDigest))
+  const intact =
+    gapIsContents && parsed.messageDigest !== null && Buffer.from(digest).equals(Buffer.from(parsed.messageDigest))
   let verified = false
   if (parsed.signedAttrs && parsed.certificate) {
     try {
@@ -110,4 +123,14 @@ export function checkSignature(
     }
   }
   return { intact, verified, coversWholeDocument, parsed }
+}
+
+/** Whether `hex` (ASCII hex digits, possibly with whitespace) encodes `bytes`, zero-padded to its length. */
+function hexEquals(hex: Uint8Array, bytes: Uint8Array): boolean {
+  const text = Buffer.from(hex).toString("latin1").replace(/\s+/g, "")
+  if (!/^[0-9A-Fa-f]*$/.test(text) || text.length % 2 !== 0) return false
+  const decoded = Buffer.from(text, "hex")
+  if (decoded.length < bytes.length) return false
+  if (!decoded.subarray(0, bytes.length).equals(Buffer.from(bytes))) return false
+  return decoded.subarray(bytes.length).every((v) => v === 0)
 }

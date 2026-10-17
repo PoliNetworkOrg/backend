@@ -240,9 +240,11 @@ export function createMemoryStore(): EsignStore {
       const request = requests.get(id)
       const delivery = request?.delivery
       if (!request || request.status !== "completed" || !delivery) return false
-      if (!(delivery.status === "pending" || (retry && delivery.status === "failed"))) return false
-      if (!retry && delivery.attemptedAt && new Date(delivery.attemptedAt) >= staleBefore) return false
-      requests.set(id, { ...request, delivery: { ...delivery, attemptedAt: at.toISOString() } })
+      const claimable = retry
+        ? delivery.status === "failed"
+        : delivery.status === "pending" && (!delivery.attemptedAt || new Date(delivery.attemptedAt) < staleBefore)
+      if (!claimable) return false
+      requests.set(id, { ...request, delivery: { ...delivery, status: "pending", attemptedAt: at.toISOString() } })
       return true
     },
     async pendingDeliveries(staleBefore) {

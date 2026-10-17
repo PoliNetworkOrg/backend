@@ -2,6 +2,7 @@ import { createHash, randomBytes, X509Certificate } from "node:crypto"
 import { type Drive, DriveError, MAX_PDF_BYTES } from "./drive/types"
 import { EsignError } from "./errors"
 import { identityOf, titleCase } from "./identity"
+import { assertSignatureOnlyUpdate } from "./pdf/diff"
 import { PdfError } from "./pdf/incremental"
 import { inspectPdf, type PdfInfo } from "./pdf/inspect"
 import { finalizeSignature, type PreparedSignature, prepareSignature, SignatureError } from "./pdf/pades"
@@ -74,6 +75,8 @@ export type ServiceOptions = {
  * base64-encoded, holding the attachment base64-encoded: about 1.8× the PDF, under Graph's 4 MB request limit.
  */
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+/** A conservative bound on the size one signature adds to the PDF. */
+const SIGNATURE_GROWTH_BYTES = 48 * 1024
 /** A delivery attempt older than this is presumed dead and may be resumed. */
 const DELIVERY_CLAIM_MS = 5 * 60 * 1000
 const STAGED_TTL_MS = 24 * 60 * 60 * 1000
@@ -480,7 +483,9 @@ export function createEsignService(options: ServiceOptions) {
         if (!folder) throw new EsignError("bad_request", "Choose a folder in the shared drive")
         output = { folderId: folder.id, folderPath: folder.path, fileName: safeFileName(input.output.fileName) }
       }
-      if (input.email?.to.length && !output && document.size > MAX_ATTACHMENT_BYTES * 0.9)
+      // Each signature adds an incremental update of about 34 KB (16 KB of CMS written as hex, plus the appearance).
+      const expectedSize = document.size + input.signers.length * SIGNATURE_GROWTH_BYTES
+      if (input.email?.to.length && !output && expectedSize > MAX_ATTACHMENT_BYTES)
         throw new EsignError(
           "bad_request",
           "The PDF is too large to email as an attachment: also save it to OneDrive so the email can link it"
@@ -806,6 +811,12 @@ export function createEsignService(options: ServiceOptions) {
         throw new EsignError("pdf_invalid", "The file must add exactly one signature")
       if (!last.intact || !last.verified || !last.coversWholeDocument || !check.lastCertificate)
         throw new EsignError("signature_invalid", "The signature in the file is not valid")
+      try {
+        await assertSignatureOnlyUpdate(current.content, bytes)
+      } catch (error) {
+        if (error instanceof PdfError) throw new EsignError("pdf_invalid", error.message)
+        throw error
+      }
       const cert = check.lastCertificate
       const at = now()
       if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))

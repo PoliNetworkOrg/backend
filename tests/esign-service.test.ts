@@ -1,7 +1,10 @@
-import { X509Certificate } from "node:crypto"
+import { randomBytes, X509Certificate } from "node:crypto"
+import { PDFDocument } from "pdf-lib"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createMockDrive } from "@/esign/drive/mock"
 import { EsignError } from "@/esign/errors"
+import { dataToBeSigned, sha256, signedAttributes } from "@/esign/pdf/cms"
+import { signedBytes } from "@/esign/pdf/incremental"
 import { inspectPdf } from "@/esign/pdf/inspect"
 import { finalizeSignature, prepareSignature } from "@/esign/pdf/pades"
 import { type Caller, createEsignService, type Mailer } from "@/esign/service"
@@ -230,6 +233,51 @@ describe("e-signing service", () => {
       code: "pdf_invalid",
     })
 
+    // The signer can't change the document in the revision they sign…
+    const rewritten = await prepareSignature(original, secretarySigner.cert, {
+      placement: { page: 0, x: 0.1, y: 0.1, width: 0.3, height: 0.1 },
+      fieldName: "Signature1",
+      signerName: secretarySigner.name,
+      signingTime: new Date(),
+      appearance: { lines: [{ text: secretarySigner.name }] },
+    })
+    const tail = Buffer.from(rewritten.placeholder.pdf.subarray(original.length)).toString("latin1")
+    rewritten.placeholder.pdf.set(
+      Buffer.from(tail.replace(/\/Contents(?=\s*(?:\[|\d))/, "/ContenXs"), "latin1"),
+      original.length
+    )
+    rewritten.signedAttrs = signedAttributes(
+      sha256(signedBytes(rewritten.placeholder.pdf, rewritten.placeholder.byteRange)),
+      secretarySigner.cert
+    )
+    rewritten.toBeSigned = dataToBeSigned(rewritten.signedAttrs)
+    const contentRemoved = finalizeSignature(rewritten, await cardSign(secretarySigner, rewritten.toBeSigned))
+    await expect(env.service.uploadSigned(secretary, request.id, contentRemoved)).rejects.toThrow(
+      /changes the document/
+    )
+
+    // …nor leave the new revision out of the signed bytes.
+    const gap = await prepareSignature(original, secretarySigner.cert, {
+      placement: { page: 0, x: 0.1, y: 0.1, width: 0.3, height: 0.1 },
+      fieldName: "Signature1",
+      signerName: secretarySigner.name,
+      signingTime: new Date(),
+      appearance: { lines: [{ text: secretarySigner.name }] },
+    })
+    const text = Buffer.from(gap.placeholder.pdf).toString("latin1")
+    const match = /\/ByteRange (\[[^\]]+\])/.exec(text)
+    if (!match) throw new Error("no ByteRange")
+    const range: [number, number, number, number] = [0, original.length, gap.placeholder.pdf.length, 0]
+    const entry = `[${range.join(" ")}`.padEnd(match[1].length - 1, " ") + "]"
+    gap.placeholder.pdf.set(Buffer.from(entry), match.index + "/ByteRange ".length)
+    gap.placeholder.byteRange = range
+    gap.signedAttrs = signedAttributes(sha256(signedBytes(gap.placeholder.pdf, range)), secretarySigner.cert)
+    gap.toBeSigned = dataToBeSigned(gap.signedAttrs)
+    const uncovered = finalizeSignature(gap, await cardSign(secretarySigner, gap.toBeSigned))
+    await expect(env.service.uploadSigned(secretary, request.id, uncovered)).rejects.toMatchObject({
+      code: "signature_invalid",
+    })
+
     const done = await env.service.uploadSigned(secretary, request.id, await externallySigned(secretarySigner))
     expect(done.request).toEqual({ status: "in_progress", remaining: 1 })
     const { request: after, events } = await env.service.getRequest(manager, request.id)
@@ -303,6 +351,58 @@ describe("e-signing service", () => {
     })
     await env.service.sweep()
     expect((await env.service.getRequest(manager, request.id)).request.delivery?.status).toBe("delivered")
+  })
+
+  it("delivers once when two managers retry at the same time", async () => {
+    const request = await prepareRequest(env)
+    env.mailer.signedDocument.mockRejectedValueOnce(new Error("mailbox down"))
+    await sign(env, secretary, secretarySigner, request.id)
+    await sign(env, president, presidentSigner, request.id)
+    await vi.waitFor(async () =>
+      expect((await env.service.getRequest(manager, request.id)).request.delivery?.status).toBe("failed")
+    )
+    env.mailer.signedDocument.mockClear()
+    let release: () => void = () => {}
+    env.mailer.signedDocument.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(true)
+        })
+    )
+    const first = env.service.retryDelivery(manager, request.id)
+    const second = env.service.retryDelivery(manager, request.id).catch((error) => error)
+    await vi.waitFor(() => expect(env.mailer.signedDocument).toHaveBeenCalledTimes(1))
+    release()
+    await first
+    await second
+    expect(env.mailer.signedDocument).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses an email-only request whose signed PDF would be too large to attach", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: null })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: null })
+    await env.service.syncProfile(president, { name: "Anna Bianchi", email: null })
+    // A valid PDF just under the attachment cap, with an uncompressible 2 MB stream: it fits under the cap alone, not with two signatures.
+    const doc = await PDFDocument.create()
+    doc.addPage([595, 842])
+    doc.context.register(doc.context.stream(new Uint8Array(randomBytes(2_000_000))))
+    const { document } = await env.service.stageUpload(manager, "big.pdf", await doc.save())
+    const input = {
+      title: "Big",
+      documentId: document.id,
+      ordered: true,
+      signers: [
+        { sub: secretary.sub, role: null, placement: placement(0) },
+        { sub: president.sub, role: null, placement: placement(0) },
+      ],
+      email: { to: ["archivio@example.org"], message: null },
+    }
+    await expect(env.service.createRequest(manager, { ...input, output: null })).rejects.toMatchObject({
+      code: "bad_request",
+    })
+    await expect(
+      env.service.createRequest(manager, { ...input, output: { folderId: "mock-firmati", fileName: "big" } })
+    ).resolves.toMatchObject({ title: "Big" })
   })
 
   it("lets a signer decline", async () => {

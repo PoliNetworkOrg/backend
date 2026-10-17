@@ -309,18 +309,17 @@ export function createPgStore(db: Db): EsignStore {
       })
     },
     async claimDelivery(id, at, staleBefore, retry) {
-      const statuses = retry ? sql`('pending', 'failed')` : sql`('pending')`
+      // A claim turns the delivery pending with a fresh attempt time, so every other caller, retries included, sees an
+      // active lease until it goes stale. A retry may only take a failed delivery.
+      const claimable = retry
+        ? sql`${delivery}->>'status' = 'failed'`
+        : sql`(${delivery}->>'status' = 'pending' and (${delivery}->>'attemptedAt' is null or (${delivery}->>'attemptedAt')::timestamptz < ${staleBefore.toISOString()}::timestamptz))`
       const rows = await db
         .update(requests)
-        .set({ delivery: sql`jsonb_set(${delivery}, '{attemptedAt}', to_jsonb(${at.toISOString()}::text))` })
-        .where(
-          and(
-            eq(requests.id, id),
-            eq(requests.status, "completed"),
-            sql`${delivery}->>'status' in ${statuses}`,
-            sql`(${delivery}->>'attemptedAt' is null or (${delivery}->>'attemptedAt')::timestamptz < ${staleBefore.toISOString()}::timestamptz or ${retry})`
-          )
-        )
+        .set({
+          delivery: sql`jsonb_set(jsonb_set(${delivery}, '{status}', '"pending"'), '{attemptedAt}', to_jsonb(${at.toISOString()}::text))`,
+        })
+        .where(and(eq(requests.id, id), eq(requests.status, "completed"), claimable))
         .returning({ id: requests.id })
       return rows.length === 1
     },

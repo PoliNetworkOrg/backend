@@ -89,5 +89,19 @@ describe("OCSP", () => {
       }) as unknown as typeof fetch,
     })
     expect(down).toMatchObject({ status: "unknown", detail: "ECONNREFUSED" })
+    let pulled = 0
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 16 * 1024
+        controller.enqueue(new Uint8Array(16 * 1024))
+      },
+    })
+    const huge = await checkRevocation(cert, issuer, {
+      now,
+      defaultUrl: "https://ocsp.example",
+      fetch: (async () => new Response(endless)) as unknown as typeof fetch,
+    })
+    expect(huge).toMatchObject({ status: "unknown", detail: "response too large" })
+    expect(pulled).toBeLessThan(256 * 1024)
   })
 })
