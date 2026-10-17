@@ -33,7 +33,10 @@ function setup(opts: { allowTestCertificates?: boolean } = {}) {
     allowTestCertificates: opts.allowTestCertificates ?? true,
     now: () => new Date(clock),
   })
-  return { service, store, drive, mailer, advance: (ms: number) => (clock += ms) }
+  const advance = (ms: number) => {
+    clock += ms
+  }
+  return { service, store, drive, mailer, advance }
 }
 
 async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {

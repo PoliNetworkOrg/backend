@@ -87,7 +87,8 @@ const fromB64 = (data: string) => new Uint8Array(Buffer.from(data, "base64"))
 /** "Verbale CD.pdf" with characters OneDrive refuses removed. */
 export function safeFileName(name: string): string {
   const cleaned = name
-    .replace(/[\\/:*?"<>|#%\u0000-\u001f]/g, " ")
+    .replace(/[\\/:*?"<>|#%]/g, " ")
+    .replace(/\p{Cc}/gu, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 180)
