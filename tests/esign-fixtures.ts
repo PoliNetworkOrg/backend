@@ -30,7 +30,8 @@ export async function createTestCa() {
     const [surname, given] = name.split(" ")
     const leaf = await x509.X509CertificateGenerator.create({
       serialNumber: Math.floor(Math.random() * 1e9).toString(16),
-      subject: `C=IT, 2.5.4.4=${surname}, 2.5.4.42=${given}, 2.5.4.5=TINIT-${fiscalCode}, CN=${name}`,
+      // Shaped like a CIE authentication certificate: CN "<codice fiscale>/<NIS>", serialNumber the document number.
+      subject: `C=IT, 2.5.4.4=${surname}, 2.5.4.42=${given}, 2.5.4.5=IDCIT-CA00000AA, CN=${fiscalCode}/041001234567`,
       issuer: cert.subject,
       notBefore: new Date(Date.now() - 86_400_000),
       notAfter: new Date(Date.now() + 365 * 86_400_000),

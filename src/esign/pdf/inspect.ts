@@ -1,5 +1,6 @@
 import type { X509Certificate } from "node:crypto"
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFString } from "pdf-lib"
+import { fiscalCodeOf } from "../identity"
 import { displayedSize } from "./geometry"
 import { PdfError } from "./incremental"
 import { checkSignature } from "./pades"
@@ -8,7 +9,7 @@ export type PdfSignatureInfo = {
   fieldName: string
   /** /Name in the signature dictionary, else the certificate's common name. */
   signerName: string | null
-  /** Italian fiscal code from the certificate's serialNumber ("TINIT-…"). */
+  /** Italian fiscal code from the certificate's subject (see fiscalCodeOf). */
   fiscalCode: string | null
   issuer: string | null
   /** /M of the signature dictionary, as written. */
@@ -85,14 +86,13 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
     const check = checkSignature(bytes, byteRange, contents.asBytes())
     const cert = check.parsed?.certificate ?? null
     const subject = cert?.subject ?? ""
-    const serial = /(?:^|\n)serialNumber=TINIT-([A-Z0-9]+)/.exec(subject)?.[1] ?? null
     const commonName = /(?:^|\n)CN=([^\n]+)/.exec(subject)?.[1] ?? null
     const issuerCn = cert ? (/(?:^|\n)CN=([^\n]+)/.exec(cert.issuer)?.[1] ?? cert.issuer) : null
     const widgetPage = field.get(PDFName.of("P"))
     signatures.push({
       fieldName: name,
       signerName: text(sig.get(PDFName.of("Name"))) ?? commonName,
-      fiscalCode: serial,
+      fiscalCode: fiscalCodeOf(subject),
       issuer: issuerCn,
       signedAt: text(sig.get(PDFName.of("M"))),
       subFilter: text(sig.get(PDFName.of("SubFilter"))),
