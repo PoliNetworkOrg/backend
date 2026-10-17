@@ -622,4 +622,75 @@ describe("e-signing service", () => {
     expect(await env.service.listRequests(stranger, "mine")).toHaveLength(0)
     await expect(env.service.listRequests(stranger, "all")).rejects.toMatchObject({ code: "forbidden" })
   })
+
+  describe("inbox", () => {
+    const pdf = samplePdf()
+
+    beforeEach(async () => {
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+      await env.service.syncProfile(president, { name: "Anna Bianchi", email: "anna@example.org" })
+    })
+
+    async function request(ordered: boolean, order: Caller[]) {
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await pdf)
+      return env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered,
+        signers: order.map((c, i) => ({
+          sub: c.sub,
+          role: `ruolo ${i}`,
+          places: [{ ...placement(0), kind: "signature" as const }],
+        })),
+        output: { driveId: "dev", folderId: "mock-firmati", fileName: "Verbale firmato" },
+        email: { to: [], message: "" },
+      })
+    }
+
+    async function markSigned(requestId: string, caller: Caller) {
+      const stored = await env.store.getRequest(requestId)
+      const signer = stored?.signers.find((s) => s.sub === caller.sub)
+      if (!signer) throw new Error("no such signer")
+      await env.store.updateSigner(signer.id, { status: "signed" })
+    }
+
+    const ids = async (caller: Caller) => (await env.service.listRequests(caller, "inbox")).map((r) => r.id).sort()
+
+    it("is not hidden behind more than 200 newer requests awaiting someone else", async () => {
+      const actionable = await request(true, [secretary, president])
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      for (let i = 0; i < 110; i++) await request(true, [president, secretary])
+      for (let i = 0; i < 110; i++) {
+        const r = await request(false, [secretary, president])
+        await markSigned(r.id, secretary)
+      }
+
+      const inbox = await env.service.listRequests(secretary, "inbox")
+      expect(inbox.map((r) => r.id)).toEqual([actionable.id])
+      expect(inbox[0]?.myTurn).toBe(true)
+      expect(await env.service.listRequests(president, "inbox")).toHaveLength(200)
+      expect(await ids(president)).not.toContain(actionable.id)
+      // The creator is involved in every request but signs none of them.
+      expect(await env.service.listRequests(manager, "inbox")).toHaveLength(0)
+      expect(await env.service.listRequests(secretary, "mine")).toHaveLength(200)
+    })
+
+    it("follows the turn of ordered and unordered requests", async () => {
+      const ordered = await request(true, [secretary, president])
+      const unordered = await request(false, [secretary, president])
+      const cancelled = await request(false, [secretary, president])
+      await env.service.cancelRequest(manager, cancelled.id)
+      const stranger: Caller = { sub: "sub-stranger", canManage: true }
+
+      expect(await ids(secretary)).toEqual([ordered.id, unordered.id].sort())
+      expect(await ids(president)).toEqual([unordered.id])
+      expect(await ids(stranger)).toEqual([])
+
+      await markSigned(ordered.id, secretary)
+      await markSigned(unordered.id, secretary)
+      expect(await ids(secretary)).toEqual([])
+      expect(await ids(president)).toEqual([ordered.id, unordered.id].sort())
+    })
+  })
 })

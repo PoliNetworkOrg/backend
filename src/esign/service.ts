@@ -626,12 +626,11 @@ export function createEsignService(options: ServiceOptions) {
 
     async listRequests(caller: Caller, scope: "inbox" | "mine" | "all") {
       if (scope === "all" && !caller.canManage) throw new EsignError("forbidden", "You cannot see every request")
-      const requests = await store.listRequests({
-        involving: scope === "all" ? undefined : caller.sub,
-        status: scope === "inbox" ? ["in_progress"] : undefined,
-      })
-      const views = await Promise.all(requests.map((r) => view(caller, r)))
-      return scope === "inbox" ? views.filter((r) => r.myTurn) : views
+      // The inbox filters by turn in the store, so the limit cannot hide them behind requests awaiting others.
+      const requests = await store.listRequests(
+        scope === "inbox" ? { awaiting: caller.sub } : { involving: scope === "all" ? undefined : caller.sub }
+      )
+      return Promise.all(requests.map((r) => view(caller, r)))
     },
 
     async getRequest(caller: Caller, id: string) {
