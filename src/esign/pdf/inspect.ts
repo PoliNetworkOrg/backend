@@ -22,9 +22,13 @@ export type PdfSignatureInfo = {
   page: number | null
 }
 
+/** Indirect objects belonging to a signature, kept server-side for upload validation. */
+export type PdfSignatureReference = { field: string; value: string }
+
 export type PdfInfo = {
   /** The signer's certificate of the newest signature; server-side only, never sent to clients. */
   lastCertificate?: X509Certificate | null
+  lastSignature?: PdfSignatureReference | null
   pages: { width: number; height: number }[]
   signatures: PdfSignatureInfo[]
   /** Field names in use, so a new field can get a unique one. */
@@ -51,7 +55,11 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
   const pages = doc.getPages()
   const pageIndex = new Map(pages.map((p, i) => [p.ref.toString(), i]))
   const { context } = doc
-  const signatures: (PdfSignatureInfo & { revisionEnd: number; certificate: X509Certificate | null })[] = []
+  const signatures: (PdfSignatureInfo & {
+    revisionEnd: number
+    certificate: X509Certificate | null
+    reference: PdfSignatureReference | null
+  })[] = []
   const fieldNames: string[] = []
 
   const acroForm = context.lookupMaybe(doc.catalog.get(PDFName.of("AcroForm")), PDFDict)
@@ -77,7 +85,8 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
     if (partial !== null) fieldNames.push(name)
     const ft = field.get(PDFName.of("FT"))
     if (!(ft instanceof PDFName) || ft.asString() !== "/Sig") return
-    const sig = context.lookupMaybe(field.get(PDFName.of("V")), PDFDict)
+    const value = field.get(PDFName.of("V"))
+    const sig = context.lookupMaybe(value, PDFDict)
     if (!sig) return
     const byteRangeArray = context.lookupMaybe(sig.get(PDFName.of("ByteRange")), PDFArray)
     const contents = sig.get(PDFName.of("Contents"))
@@ -102,6 +111,8 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
       page: widgetPage instanceof PDFRef ? (pageIndex.get(widgetPage.toString()) ?? null) : null,
       revisionEnd: (byteRange[2] ?? 0) + (byteRange[3] ?? 0),
       certificate: cert,
+      reference:
+        ref instanceof PDFRef && value instanceof PDFRef ? { field: ref.toString(), value: value.toString() } : null,
     })
   }
   if (fields) for (let i = 0; i < fields.size(); i++) visit(fields.get(i), "", 0)
@@ -110,8 +121,9 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
   signatures.sort((a, b) => a.revisionEnd - b.revisionEnd)
   return {
     pages: pages.map((p) => displayedSize(p)),
-    signatures: signatures.map(({ revisionEnd: _, certificate: __, ...info }) => info),
+    signatures: signatures.map(({ revisionEnd: _, certificate: __, reference: ___, ...info }) => info),
     fieldNames,
     lastCertificate: signatures.at(-1)?.certificate ?? null,
+    lastSignature: signatures.at(-1)?.reference ?? null,
   }
 }

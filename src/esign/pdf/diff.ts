@@ -1,5 +1,6 @@
 import { PDFArray, PDFDict, PDFDocument, PDFName, type PDFObject, PDFRawStream, PDFRef } from "pdf-lib"
 import { PdfError } from "./incremental"
+import type { PdfSignatureReference } from "./inspect"
 
 /** Keys a signing update may change, per kind of existing object. */
 const PAGE_KEYS = new Set(["/Annots"])
@@ -38,10 +39,14 @@ function load(pdf: Uint8Array) {
  * widget, appearance, fonts), signature widgets appended to page annotations and form fields (each with a new
  * signature value and no actions), form flags and resources, and metadata. Anything else — page content, page boxes,
  * resources, other annotations, other objects — is refused, so a signer can't change the document in the same
- * revision they sign.
+ * revision they sign. `signature` must come from inspecting and verifying the uploaded signature first.
  */
-export async function assertSignatureOnlyUpdate(before: Uint8Array, after: Uint8Array): Promise<void> {
-  const refuse = (what: string) => {
+export async function assertSignatureOnlyUpdate(
+  before: Uint8Array,
+  after: Uint8Array,
+  signature: PdfSignatureReference
+): Promise<void> {
+  function refuse(what: string): never {
     throw new PdfError("malformed", `The signed file changes the document (${what}), not only adds a signature`)
   }
   const [old, neu] = await Promise.all([load(before), load(after)])
@@ -113,17 +118,45 @@ export async function assertSignatureOnlyUpdate(before: Uint8Array, after: Uint8
   const indirect = (ref: PDFObject | undefined) =>
     ref instanceof PDFRef ? neu.context.lookupMaybe(ref, PDFDict) : undefined
   const hasAction = (dict: PDFDict) => dict.has(PDFName.of("A")) || dict.has(PDFName.of("AA"))
+  const signatureField = neu.context.enumerateIndirectObjects().find(([ref]) => ref.toString() === signature.field)?.[1]
+  const widgetRefs =
+    signatureField instanceof PDFDict
+      ? (neu.context.lookupMaybe(signatureField.get(PDFName.of("Kids")), PDFArray)?.asArray() ?? [])
+      : []
+  const widgets = new Set(widgetRefs.filter((ref) => ref instanceof PDFRef).map((ref) => ref.toString()))
+  const assertSignatureWidget = (ref: PDFObject, what: string) => {
+    const widget = indirect(ref)
+    if (
+      !widget ||
+      widget.get(PDFName.of("Subtype"))?.toString() !== "/Widget" ||
+      hasAction(widget) ||
+      widget.has(PDFName.of("Kids"))
+    )
+      refuse(what)
+    if (widget === signatureField) return
+    if (
+      widget.get(PDFName.of("Parent"))?.toString() !== signature.field ||
+      widget.has(PDFName.of("FT")) ||
+      widget.has(PDFName.of("V")) ||
+      !widgets.has(ref.toString())
+    )
+      refuse(what)
+  }
   const assertSignatureField = (field: PDFDict | undefined, what: string) => {
     const value = field?.get(PDFName.of("V"))
     if (
       !field ||
+      field !== signatureField ||
       field.get(PDFName.of("FT"))?.toString() !== "/Sig" ||
       hasAction(field) ||
       !isNew(value) ||
+      value.toString() !== signature.value ||
       !neu.context.lookupMaybe(value, PDFDict)?.has(PDFName.of("ByteRange"))
     )
       refuse(what)
   }
+  assertSignatureField(signatureField instanceof PDFDict ? signatureField : undefined, "signature field")
+  for (const ref of widgetRefs) assertSignatureWidget(ref, "signature widget")
   for (const [key, field] of signedFields) assertSignatureField(field, `object ${key}`)
   newPages.forEach((page, i) => {
     const before = old.context.lookupMaybe(oldPages[i].node.get(PDFName.of("Annots")), PDFArray)
@@ -131,10 +164,7 @@ export async function assertSignatureOnlyUpdate(before: Uint8Array, after: Uint8
     if (!appendsTo(before, after)) refuse(`annotations of page ${i + 1}`)
     for (const ref of after?.asArray().slice(before?.size() ?? 0) ?? []) {
       const what = `an annotation that is not the signature on page ${i + 1}`
-      const annot = indirect(ref)
-      if (!annot || annot.get(PDFName.of("Subtype"))?.toString() !== "/Widget" || hasAction(annot)) refuse(what)
-      const widget = annot as PDFDict
-      assertSignatureField(widget.has(PDFName.of("FT")) ? widget : indirect(widget.get(PDFName.of("Parent"))), what)
+      assertSignatureWidget(ref, what)
     }
   })
 

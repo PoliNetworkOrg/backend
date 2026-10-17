@@ -1058,10 +1058,10 @@ export function createEsignService(options: ServiceOptions) {
       const last = check.signatures.at(-1)
       if (check.signatures.length !== before.signatures.length + 1 || !last)
         throw new EsignError("pdf_invalid", "The file must add exactly one signature")
-      if (!last.intact || !last.verified || !last.coversWholeDocument || !check.lastCertificate)
+      if (!last.intact || !last.verified || !last.coversWholeDocument || !check.lastCertificate || !check.lastSignature)
         throw new EsignError("signature_invalid", "The signature in the file is not valid")
       try {
-        await assertSignatureOnlyUpdate(current.content, bytes)
+        await assertSignatureOnlyUpdate(current.content, bytes, check.lastSignature)
       } catch (error) {
         if (error instanceof PdfError) throw new EsignError("pdf_invalid", error.message)
         throw error

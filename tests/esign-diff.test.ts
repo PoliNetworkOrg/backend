@@ -49,14 +49,29 @@ const firstField = (doc: PDFDocument) => {
 
 const original = await samplePdf(1)
 const signed = (await addSignaturePlaceholder(original, options)).pdf
-const refused = (after: Uint8Array, what: RegExp, before = signed) =>
-  expect(assertSignatureOnlyUpdate(before, after)).rejects.toThrow(what)
+
+async function assertUpdate(before: Uint8Array, after: Uint8Array) {
+  const doc = await PDFDocument.load(after, { updateMetadata: false })
+  const form = doc.context.lookup(doc.catalog.get(PDFName.of("AcroForm")), PDFDict)
+  const field = doc.context
+    .lookup(form.get(PDFName.of("Fields")), PDFArray)
+    .asArray()
+    .at(-1)
+  const value = doc.context.lookup(field, PDFDict).get(PDFName.of("V"))
+  if (!(field instanceof PDFRef && value instanceof PDFRef)) throw new Error("missing signature reference")
+  return assertSignatureOnlyUpdate(before, after, { field: field.toString(), value: value.toString() })
+}
+
+async function refused(after: Uint8Array, what: RegExp, before = signed) {
+  const added = await addSignaturePlaceholder(after, { ...options, fieldName: "NewSignature" })
+  await expect(assertUpdate(before, added.pdf)).rejects.toThrow(what)
+}
 
 describe("assertSignatureOnlyUpdate", () => {
   it("accepts a first and a second signature", async () => {
-    await expect(assertSignatureOnlyUpdate(original, signed)).resolves.toBeUndefined()
+    await expect(assertUpdate(original, signed)).resolves.toBeUndefined()
     const second = (await addSignaturePlaceholder(signed, { ...options, fieldName: "Signature2" })).pdf
-    await expect(assertSignatureOnlyUpdate(signed, second)).resolves.toBeUndefined()
+    await expect(assertUpdate(signed, second)).resolves.toBeUndefined()
   })
 
   it("accepts filling an existing empty signature field", async () => {
@@ -73,8 +88,74 @@ describe("assertSignatureOnlyUpdate", () => {
         field.set(PDFName.of("AP"), doc.context.obj({ N: PDFRef.of(n + 1) }))
         return { [ref.objectNumber]: field.toString(), [n]: value, [n + 1]: appearance }
       })
-    await expect(assertSignatureOnlyUpdate(empty, await fill(sig))).resolves.toBeUndefined()
+    await expect(assertUpdate(empty, await fill(sig))).resolves.toBeUndefined()
     await refused(await fill("<< /Foo /Bar >>"), /changes the document \(object/, empty)
+  })
+
+  it("refuses a dummy signature value beside the actual signature", async () => {
+    const edited = await revise(signed, (doc, n) => ({
+      [n]: `<< /Type /Annot /Subtype /Widget /FT /Sig /V ${n + 1} 0 R /Rect [0 0 150 50] >>`,
+      [n + 1]: "<< /ByteRange [0 0 0 0] >>",
+      ...onPage(doc, PDFRef.of(n)),
+    }))
+    await refused(edited, /annotation that is not the signature/)
+  })
+
+  for (const parent of [false, true]) {
+    it(`refuses an unrelated widget referencing the actual signature via ${parent ? "Parent" : "V"}`, async () => {
+      const second = (await addSignaturePlaceholder(signed, { ...options, fieldName: "Signature2" })).pdf
+      const edited = await revise(second, (doc, n) => {
+        const form = doc.context.lookup(doc.catalog.get(PDFName.of("AcroForm")), PDFDict)
+        const field = doc.context
+          .lookup(form.get(PDFName.of("Fields")), PDFArray)
+          .asArray()
+          .at(-1)
+        const value = doc.context.lookup(field, PDFDict).get(PDFName.of("V"))
+        return {
+          [n]: `<< /Type /Annot /Subtype /Widget ${parent ? `/Parent ${field}` : `/FT /Sig /V ${value}`} /Rect [0 0 150 50] >>`,
+          ...onPage(doc, PDFRef.of(n)),
+        }
+      })
+      await expect(assertUpdate(signed, edited)).rejects.toThrow(/annotation that is not the signature/)
+    })
+  }
+
+  it("accepts a separate widget belonging to the signature field", async () => {
+    const second = (await addSignaturePlaceholder(signed, { ...options, fieldName: "Signature2" })).pdf
+    const edited = await revise(second, (doc, n) => {
+      const form = doc.context.lookup(doc.catalog.get(PDFName.of("AcroForm")), PDFDict)
+      const ref = doc.context
+        .lookup(form.get(PDFName.of("Fields")), PDFArray)
+        .asArray()
+        .at(-1) as PDFRef
+      const field = doc.context.lookup(ref, PDFDict)
+      field.delete(PDFName.of("Subtype"))
+      field.set(PDFName.of("Kids"), doc.context.obj([PDFRef.of(n)]))
+      const page = doc.getPage(0)
+      const annots = doc.context.lookup(page.node.get(PDFName.of("Annots")), PDFArray)
+      annots.set(annots.size() - 1, PDFRef.of(n))
+      return {
+        [ref.objectNumber]: field.toString(),
+        [page.ref.objectNumber]: page.node.toString(),
+        [n]: `<< /Type /Annot /Subtype /Widget /Parent ${ref} /Rect [0 0 150 50] >>`,
+      }
+    })
+    await expect(assertUpdate(signed, edited)).resolves.toBeUndefined()
+  })
+
+  it("refuses non-widget children hidden under the signature field", async () => {
+    const second = (await addSignaturePlaceholder(signed, { ...options, fieldName: "Signature2" })).pdf
+    const edited = await revise(second, (doc, n) => {
+      const form = doc.context.lookup(doc.catalog.get(PDFName.of("AcroForm")), PDFDict)
+      const ref = doc.context
+        .lookup(form.get(PDFName.of("Fields")), PDFArray)
+        .asArray()
+        .at(-1) as PDFRef
+      const field = doc.context.lookup(ref, PDFDict)
+      field.set(PDFName.of("Kids"), doc.context.obj([PDFRef.of(n)]))
+      return { [ref.objectNumber]: field.toString(), [n]: "<< /FT /Tx /T (extra) >>" }
+    })
+    await expect(assertUpdate(signed, edited)).rejects.toThrow(/changes the document/)
   })
 
   it("refuses annotations other than the signature widget", async () => {
