@@ -11,7 +11,12 @@ const base64 = z
   .max(64 * 1024)
   .regex(/^[A-Za-z0-9+/]+={0,2}$/)
 
-const prepareBody = z.object({ certificate: base64, chain: z.array(base64).max(4).optional() })
+/** `protocol` 2: the agent signs a job's places one after another and several jobs with one PIN. */
+const prepareBody = z.object({
+  certificate: base64,
+  chain: z.array(base64).max(4).optional(),
+  protocol: z.number().int().optional(),
+})
 const completeBody = z.object({ signature: base64 })
 const failBody = z.object({ code: z.string().max(60), message: z.string().max(500).nullable().optional() })
 
@@ -45,7 +50,7 @@ export function agentRoutes(service: EsignService) {
   app.get("/jobs/:ticket", async (c) => c.json({ job: await service.agentJob(c.req.param("ticket")) }))
   app.post("/jobs/:ticket/prepare", async (c) => {
     const body = await parse(prepareBody, c.req.json())
-    return c.json(await service.agentPrepare(c.req.param("ticket"), body.certificate, body.chain))
+    return c.json(await service.agentPrepare(c.req.param("ticket"), body.certificate, body.chain, body.protocol ?? 1))
   })
   app.post("/jobs/:ticket/complete", async (c) => {
     const body = await parse(completeBody, c.req.json())

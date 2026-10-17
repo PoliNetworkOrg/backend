@@ -72,8 +72,8 @@ async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {
     documentId: document.id,
     ordered,
     signers: [
-      { sub: secretary.sub, role: "segretario", placement: placement(0) },
-      { sub: president.sub, role: "presidente", placement: placement(1) },
+      { sub: secretary.sub, role: "segretario", places: [{ ...placement(0), kind: "signature" as const }] },
+      { sub: president.sub, role: "presidente", places: [{ ...placement(1), kind: "signature" as const }] },
     ],
     output: { driveId: "dev", folderId: "mock-firmati", fileName: "Verbale CD firmato" },
     email: { to: ["archivio@example.org"], message: "In allegato il verbale." },
@@ -83,10 +83,28 @@ async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {
 async function sign(env: ReturnType<typeof setup>, caller: Caller, signer: TestSigner, requestId: string) {
   const { ticket } = await env.service.createJob(caller, requestId)
   const job = await env.service.agentJob(ticket)
-  const { toBeSigned } = await env.service.agentPrepare(ticket, Buffer.from(signer.cert).toString("base64"))
+  const { toBeSigned } = await env.service.agentPrepare(ticket, Buffer.from(signer.cert).toString("base64"), [], 2)
   const signature = await cardSign(signer, new Uint8Array(Buffer.from(toBeSigned, "base64")))
   const done = await env.service.agentComplete(ticket, Buffer.from(signature).toString("base64"))
   return { job, done, ticket }
+}
+
+/** Signs a job to the end as the agent does: one card session, a prepare and a complete per signature place. */
+async function signJob(env: ReturnType<typeof setup>, signer: TestSigner, ticket: string) {
+  const statuses: string[] = []
+  for (;;) {
+    const { toBeSigned } = await env.service.agentPrepare(ticket, Buffer.from(signer.cert).toString("base64"), [], 2)
+    const signature = await cardSign(signer, new Uint8Array(Buffer.from(toBeSigned, "base64")))
+    const done = await env.service.agentComplete(ticket, Buffer.from(signature).toString("base64"))
+    statuses.push(done.status)
+    if (done.status === "completed") return statuses
+  }
+}
+
+async function stampsOn(pdf: Uint8Array, page: number) {
+  const doc = await PDFDocument.load(pdf)
+  const annots = doc.getPage(page).node.Annots()
+  return (annots?.asArray() ?? []).filter((ref) => String(doc.context.lookup(ref)).includes("/Stamp")).length
 }
 
 describe("e-signing service", () => {
@@ -147,7 +165,7 @@ describe("e-signing service", () => {
     const other = await prepareRequest(env, false)
     const { ticket } = await env.service.createJob(secretary, other.id)
     await expect(
-      env.service.agentPrepare(ticket, Buffer.from(presidentSigner.cert).toString("base64"))
+      env.service.agentPrepare(ticket, Buffer.from(presidentSigner.cert).toString("base64"), [], 2)
     ).rejects.toMatchObject({ code: "signer_mismatch" })
   })
 
@@ -163,7 +181,7 @@ describe("e-signing service", () => {
   it("expires tickets and refuses a stale document", async () => {
     const request = await prepareRequest(env, false)
     const { ticket } = await env.service.createJob(secretary, request.id)
-    await env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+    await env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2)
     env.advance(11 * 60 * 1000)
     await expect(env.service.agentJob(ticket)).rejects.toMatchObject({ code: "job_expired" })
     await sign(env, president, presidentSigner, request.id)
@@ -177,7 +195,7 @@ describe("e-signing service", () => {
     const request = await prepareRequest(env)
     const { ticket } = await env.service.createJob(secretary, request.id)
     await expect(
-      env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+      env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2)
     ).rejects.toMatchObject({ code: "certificate_invalid" })
   })
 
@@ -186,22 +204,22 @@ describe("e-signing service", () => {
     const { ticket, jobId } = await env.service.createJob(secretary, request.id)
     await env.service.cancelRequest(manager, request.id)
     await expect(env.service.agentJob(ticket)).rejects.toMatchObject({ code: "job_cancelled" })
-    expect((await env.service.jobStatus(secretary, jobId)).status).toBe("cancelled")
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0].status).toBe("cancelled")
   })
 
   it("records agent failures without ending the job", async () => {
     const request = await prepareRequest(env)
     const { ticket, jobId } = await env.service.createJob(secretary, request.id)
-    expect((await env.service.jobStatus(secretary, jobId)).seen).toBe(false)
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0].seen).toBe(false)
     await env.service.agentJob(ticket)
     await env.service.agentFail(ticket, "pin_incorrect", "Wrong PIN.")
-    expect(await env.service.jobStatus(secretary, jobId)).toMatchObject({
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
       status: "pending",
       errorCode: "pin_incorrect",
       seen: true,
     })
     await env.service.agentFail(ticket, "cancelled", null)
-    expect((await env.service.jobStatus(secretary, jobId)).status).toBe("cancelled")
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0].status).toBe("cancelled")
   })
 
   it("accepts a PDF signed with the official CIE app as a fallback", async () => {
@@ -291,8 +309,8 @@ describe("e-signing service", () => {
     const second = await prepareRequest(env, false)
     const a = await env.service.createJob(secretary, first.id)
     const b = await env.service.createJob(secretary, second.id)
-    const prepA = await env.service.agentPrepare(a.ticket, Buffer.from(secretarySigner.cert).toString("base64"))
-    const prepB = await env.service.agentPrepare(b.ticket, Buffer.from(presidentSigner.cert).toString("base64"))
+    const prepA = await env.service.agentPrepare(a.ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2)
+    const prepB = await env.service.agentPrepare(b.ticket, Buffer.from(presidentSigner.cert).toString("base64"), [], 2)
     const sigA = await cardSign(secretarySigner, new Uint8Array(Buffer.from(prepA.toBeSigned, "base64")))
     const sigB = await cardSign(presidentSigner, new Uint8Array(Buffer.from(prepB.toBeSigned, "base64")))
     await env.service.agentComplete(a.ticket, Buffer.from(sigA).toString("base64"))
@@ -316,13 +334,13 @@ describe("e-signing service", () => {
     let request = await prepareRequest(env)
     let job = await env.service.createJob(secretary, request.id)
     await expect(
-      env.service.agentPrepare(job.ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+      env.service.agentPrepare(job.ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2)
     ).rejects.toThrow(/revoked/)
     env = setup({ revocation: "unknown", policy: "require" })
     request = await prepareRequest(env)
     job = await env.service.createJob(secretary, request.id)
     await expect(
-      env.service.agentPrepare(job.ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+      env.service.agentPrepare(job.ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2)
     ).rejects.toMatchObject({ code: "unavailable" })
     env = setup({ revocation: "unknown" })
     request = await prepareRequest(env)
@@ -393,8 +411,8 @@ describe("e-signing service", () => {
       documentId: document.id,
       ordered: true,
       signers: [
-        { sub: secretary.sub, role: null, placement: placement(0) },
-        { sub: president.sub, role: null, placement: placement(0) },
+        { sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" as const }] },
+        { sub: president.sub, role: null, places: [{ ...placement(0), kind: "signature" as const }] },
       ],
       email: { to: ["archivio@example.org"], message: null },
     }
@@ -423,7 +441,7 @@ describe("e-signing service", () => {
       title: "Verbale",
       documentId: document.id,
       ordered: true,
-      signers: [{ sub: secretary.sub, role: null, placement: placement(0) }],
+      signers: [{ sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" as const }] }],
       email: null,
     }
     await expect(
@@ -444,6 +462,149 @@ describe("e-signing service", () => {
     const names = async (drive: typeof env.drive) => (await drive.list("mock-firmati")).items.map((i) => i.name)
     expect(await names(env.archive)).toEqual(["Verbale firmato.pdf"])
     expect(await names(env.drive)).toEqual([])
+  })
+
+  it("signs one signer's several places with one PDF signature per full signature and marks drawn by the first", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+    const request = await env.service.createRequest(manager, {
+      title: "Contratto",
+      documentId: document.id,
+      ordered: true,
+      signers: [
+        {
+          sub: secretary.sub,
+          role: null,
+          places: [
+            { ...placement(0), kind: "signature" },
+            { ...placement(1), kind: "mark" },
+            { ...placement(1), y: 0.1, kind: "signature" },
+          ],
+        },
+      ],
+      output: null,
+      email: null,
+    })
+    const { ticket } = await env.service.createJob(secretary, request.id)
+    expect(await env.service.agentJob(ticket)).toMatchObject({ signatures: 2, marks: 1, pages: [0, 1] })
+    expect(await signJob(env, secretarySigner, ticket)).toEqual(["next", "completed"])
+
+    const { request: done, versions, events, currentDocumentId } = await env.service.getRequest(manager, request.id)
+    expect(done.status).toBe("completed")
+    expect(done.signers[0]).toMatchObject({ status: "signed", signaturesDone: 2 })
+    expect(versions.map((v) => v.version)).toEqual([0, 1, 2])
+    expect(events.filter((e) => e.type === "signed")).toHaveLength(1)
+    const { content } = await env.service.document(manager, currentDocumentId ?? "")
+    const pdf = await inspectPdf(content)
+    expect(pdf.signatures.map((s) => [s.signerName, s.intact && s.verified])).toEqual([
+      ["Mario Rossi", true],
+      ["Mario Rossi", true],
+    ])
+    expect(pdf.signatures.at(-1)?.coversWholeDocument).toBe(true)
+    expect(await stampsOn(content, 1)).toBe(1)
+    expect(await stampsOn(content, 0)).toBe(0)
+  })
+
+  it("resumes an interrupted signer at the place still to sign", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+    const places = [
+      { ...placement(0), kind: "signature" as const },
+      { ...placement(1), kind: "signature" as const },
+    ]
+    const request = await env.service.createRequest(manager, {
+      title: "Contratto",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: secretary.sub, role: null, places }],
+      output: null,
+      email: null,
+    })
+    const first = await env.service.createJob(secretary, request.id)
+    const { toBeSigned } = await env.service.agentPrepare(
+      first.ticket,
+      Buffer.from(secretarySigner.cert).toString("base64"),
+      [],
+      2
+    )
+    const signature = await cardSign(secretarySigner, new Uint8Array(Buffer.from(toBeSigned, "base64")))
+    expect((await env.service.agentComplete(first.ticket, Buffer.from(signature).toString("base64"))).status).toBe(
+      "next"
+    )
+    // The card left the reader: the dashboard starts again, and moved boxes no longer apply.
+    const moved = places.map((p) => ({ ...p, x: 0.5 }))
+    const again = await env.service.createJob(secretary, request.id, moved)
+    expect(await env.service.agentJob(again.ticket)).toMatchObject({ signatures: 1, marks: 0, placement: { page: 1 } })
+    expect(await signJob(env, secretarySigner, again.ticket)).toEqual(["completed"])
+    const { request: done } = await env.service.getRequest(manager, request.id)
+    expect(done.signers[0].places.map((p) => p.x)).toEqual([0.1, 0.1])
+  })
+
+  it("moves the boxes the signer dragged before signing, keeping their kinds", async () => {
+    const request = await prepareRequest(env)
+    await expect(env.service.createJob(secretary, request.id, [placement(0), placement(1)])).rejects.toMatchObject({
+      code: "bad_request",
+    })
+    await env.service.createJob(secretary, request.id, [{ ...placement(1), x: 0.4 }])
+    const { request: detail } = await env.service.getRequest(manager, request.id)
+    expect(detail.signers[0].places).toEqual([{ ...placement(1), x: 0.4, kind: "signature" }])
+  })
+
+  it("needs a full signature for each signer", async () => {
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+    await expect(
+      env.service.createRequest(manager, {
+        title: "Solo sigla",
+        documentId: document.id,
+        ordered: true,
+        signers: [{ sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "mark" }] }],
+        output: null,
+        email: null,
+      })
+    ).rejects.toMatchObject({ code: "bad_request" })
+  })
+
+  it("starts a batch whole or not at all, and signs each document of it", async () => {
+    const first = await prepareRequest(env)
+    const second = await prepareRequest(env)
+    const notYet = await prepareRequest(env)
+    await sign(env, secretary, secretarySigner, notYet.id)
+    await expect(
+      env.service.createJobs(president, [{ requestId: first.id }, { requestId: notYet.id }])
+    ).rejects.toMatchObject({ code: "forbidden" })
+    expect(await env.store.openJobs(notYet.id)).toHaveLength(0)
+
+    const jobs = await env.service.createJobs(secretary, [{ requestId: first.id }, { requestId: second.id }])
+    expect(jobs.map((j) => j.requestId)).toEqual([first.id, second.id])
+    for (const job of jobs) await signJob(env, secretarySigner, job.ticket)
+    const statuses = await env.service.jobStatuses(
+      secretary,
+      jobs.map((j) => j.jobId)
+    )
+    expect(statuses.map((s) => [s.status, s.signaturesLeft])).toEqual([
+      ["completed", 0],
+      ["completed", 0],
+    ])
+    await expect(
+      env.service.createJobs(secretary, [{ requestId: first.id }, { requestId: first.id }])
+    ).rejects.toMatchObject({
+      code: "bad_request",
+    })
+  })
+
+  it("asks an outdated agent to update before it signs", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    await expect(
+      env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+    ).rejects.toMatchObject({ code: "agent_outdated" })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "pending",
+      errorCode: "agent_outdated",
+    })
   })
 
   it("lets a signer decline", async () => {

@@ -162,6 +162,20 @@
       "when": 1792198284200,
       "tag": "0022_esign",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792231574103,
+      "tag": "0023_esign_places",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792231582549,
+      "tag": "0024_esign_drop_placement",
+      "breakpoints": true
     }
   ]
 }

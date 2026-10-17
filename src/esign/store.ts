@@ -2,12 +2,13 @@ import type {
   DeliveryJson,
   EmailJson,
   OutputJson,
+  PlaceJson,
   PlacementJson,
   PreparedJson,
   SourceJson,
 } from "@/db/schema/esign/esign"
 
-export type { DeliveryJson, EmailJson, OutputJson, PlacementJson, PreparedJson, SourceJson }
+export type { DeliveryJson, EmailJson, OutputJson, PlaceJson, PlacementJson, PreparedJson, SourceJson }
 
 export type Profile = {
   sub: string
@@ -44,7 +45,9 @@ export type Signer = {
   sub: string
   name: string
   role: string | null
-  placement: PlacementJson
+  places: PlaceJson[]
+  /** Signature places already signed. */
+  signaturesDone: number
   status: SignerStatus
   signedAt: Date | null
   version: number | null
@@ -77,7 +80,7 @@ export type NewRequest = {
   email: EmailJson | null
   createdBySub: string
   documentId: string
-  signers: { sub: string; name: string; role: string | null; placement: PlacementJson }[]
+  signers: { sub: string; name: string; role: string | null; places: PlaceJson[] }[]
 }
 
 export type JobStatus = "pending" | "prepared" | "completed" | "failed" | "cancelled" | "expired"
@@ -90,7 +93,9 @@ export type Job = {
   sub: string
   status: JobStatus
   baseVersion: number
-  placement: PlacementJson
+  places: PlaceJson[]
+  /** Index of the next signature place to sign, among the signature places. */
+  step: number
   expiresAt: Date
   prepared: PreparedJson | null
   errorCode: string | null
@@ -103,7 +108,7 @@ export type Job = {
 
 export type NewJob = Pick<
   Job,
-  "ticketHash" | "requestId" | "signerId" | "sub" | "baseVersion" | "placement" | "expiresAt"
+  "ticketHash" | "requestId" | "signerId" | "sub" | "baseVersion" | "places" | "step" | "expiresAt"
 >
 
 export type RequestEvent = {
@@ -131,8 +136,14 @@ export type SignatureCommit = {
   baseVersion: number
   document: NewDocument
   signer: { id: string; fiscalCode: string | null; certificateSubject: string; certificateIssuer: string }
+  /**
+   * Set when this is the signer's last signature place: the signer is signed and the job completed. Otherwise the
+   * signer's count of signed places grows and the job moves to its next place on the new version.
+   */
+  final: boolean
   /** Set when this signature completes the request. */
   complete: boolean
+  /** Recorded when `final`. */
   event: NewEvent
   /**
    * The signer's CIE identity: checked against the profile's bound fiscal code and bound on first use, in the same
@@ -173,7 +184,7 @@ export interface EsignStore {
   claimDelivery(id: string, at: Date, staleBefore: Date, retry: boolean): Promise<boolean>
   /** Completed requests whose delivery is pending and was not attempted after `staleBefore`. */
   pendingDeliveries(staleBefore: Date): Promise<string[]>
-  updateSigner(id: string, patch: Partial<Pick<Signer, "status" | "declineReason" | "placement">>): Promise<void>
+  updateSigner(id: string, patch: Partial<Pick<Signer, "status" | "declineReason" | "places">>): Promise<void>
 
   addEvent(event: NewEvent): Promise<void>
   listEvents(requestId: string): Promise<RequestEvent[]>

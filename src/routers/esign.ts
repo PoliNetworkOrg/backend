@@ -6,6 +6,7 @@ import { esign } from "@/esign"
 import { MAX_PDF_BYTES } from "@/esign/drive/types"
 import { EsignError, type EsignErrorCode } from "@/esign/errors"
 import type { PdfInfo } from "@/esign/pdf/inspect"
+import { MAX_PLACES } from "@/esign/placement"
 import type { Caller } from "@/esign/service"
 import { dashboard } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
@@ -32,6 +33,7 @@ const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {
   certificate_invalid: "BAD_REQUEST",
   signer_mismatch: "FORBIDDEN",
   signature_invalid: "BAD_REQUEST",
+  agent_outdated: "PRECONDITION_FAILED",
 }
 
 function callerOf(ctx: { actor: Actor | null; can: (permission: string) => boolean }): Caller {
@@ -149,7 +151,16 @@ export const esignRouter = createTRPCRouter({
           documentId: z.uuid(),
           ordered: z.boolean(),
           signers: z
-            .array(z.object({ sub: z.string().min(1), role: z.string().trim().max(80).nullable(), placement }))
+            .array(
+              z.object({
+                sub: z.string().min(1),
+                role: z.string().trim().max(80).nullable(),
+                places: z
+                  .array(placement.extend({ kind: z.enum(["signature", "mark"]) }))
+                  .min(1)
+                  .max(MAX_PLACES),
+              })
+            )
             .min(1)
             .max(10),
           output: z
@@ -199,15 +210,27 @@ export const esignRouter = createTRPCRouter({
   }),
 
   jobs: createTRPCRouter({
-    /** Starts a signature; the dashboard opens the agent's page with the returned ticket. */
+    /**
+     * Starts the caller's signatures of one or more requests; the dashboard opens the agent's page with every returned
+     * ticket, so one PIN signs them all. `places` moves the caller's boxes before signing, one per place, in order.
+     */
     create: user
-      .input(z.object({ requestId: z.uuid(), placement: placement.optional() }))
-      .mutation(({ ctx, input }) => run(() => esign.createJob(callerOf(ctx), input.requestId, input.placement))),
-    status: user
-      .input(z.object({ jobId: z.uuid() }))
-      .query(({ ctx, input }) => run(() => esign.jobStatus(callerOf(ctx), input.jobId))),
-    cancel: user
-      .input(z.object({ jobId: z.uuid() }))
-      .mutation(({ ctx, input }) => run(() => esign.cancelJob(callerOf(ctx), input.jobId))),
+      .input(
+        z.object({
+          items: z
+            .array(z.object({ requestId: z.uuid(), places: z.array(placement).max(MAX_PLACES).optional() }))
+            .min(1)
+            .max(10),
+        })
+      )
+      .mutation(({ ctx, input }) => run(() => esign.createJobs(callerOf(ctx), input.items))),
+    statuses: user
+      .input(z.object({ jobIds: z.array(z.uuid()).min(1).max(10) }))
+      .query(({ ctx, input }) => run(() => esign.jobStatuses(callerOf(ctx), input.jobIds))),
+    cancel: user.input(z.object({ jobIds: z.array(z.uuid()).min(1).max(10) })).mutation(({ ctx, input }) =>
+      run(async () => {
+        for (const jobId of input.jobIds) await esign.cancelJob(callerOf(ctx), jobId)
+      })
+    ),
   }),
 })

@@ -13,6 +13,7 @@ export type EsignErrorCode =
   | "certificate_invalid"
   | "signer_mismatch"
   | "signature_invalid"
+  | "agent_outdated"
 
 /** HTTP status of each code, for the agent's REST endpoints. */
 export const HTTP_STATUS: Record<EsignErrorCode, number> = {
@@ -30,6 +31,7 @@ export const HTTP_STATUS: Record<EsignErrorCode, number> = {
   certificate_invalid: 422,
   signer_mismatch: 403,
   signature_invalid: 422,
+  agent_outdated: 426,
 }
 
 /** An expected failure, with a message the dashboard or the agent can show as is. */

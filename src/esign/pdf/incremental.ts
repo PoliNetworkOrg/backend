@@ -6,6 +6,7 @@ import {
   PDFName,
   PDFNumber,
   type PDFObject,
+  type PDFPage,
   PDFRef,
   PDFString,
   StandardFontEmbedder,
@@ -33,6 +34,8 @@ export type SignatureAppearance = {
 
 export type PlaceholderOptions = {
   placement: Placement
+  /** More places showing the same mark, drawn in the same update so the signature covers them. */
+  marks?: Placement[]
   /** Field name, unique in the document. */
   fieldName: string
   /** Signer's name for the signature dictionary's /Name. */
@@ -256,6 +259,8 @@ export async function addSignaturePlaceholder(input: Uint8Array, options: Placeh
   const pages = doc.getPages()
   const page = pages[options.placement.page]
   if (!page) throw new PdfError("page_out_of_range", `The document has ${pages.length} pages`)
+  const markPages = (options.marks ?? []).map((m) => pages[m.page])
+  if (markPages.some((p) => !p)) throw new PdfError("page_out_of_range", `The document has ${pages.length} pages`)
 
   let next = Math.max(context.largestObjectNumber + 1, tail.size)
   const allocate = () => PDFRef.of(next++, 0)
@@ -270,41 +275,62 @@ export async function addSignaturePlaceholder(input: Uint8Array, options: Placeh
   const fontRef = allocate()
   const boldRef = allocate()
 
-  // Geometry: the widget rectangle in user space and the appearance turned upright on rotated pages.
-  const { rect, rotation, width, height } = rectOnPage(page, options.placement)
-  const content = ascii(appearanceContent(width, height, options.appearance))
   write(fontRef, ascii("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"))
   write(boldRef, ascii("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"))
-  write(
-    apRef,
-    concat([
-      ascii(
-        `<< /Type /XObject /Subtype /Form /BBox [0 0 ${width.toFixed(2)} ${height.toFixed(2)}] /Matrix [${ROTATION_MATRIX[rotation]}] ` +
-          `/Resources << /Font << /F1 ${fontRef} /F2 ${boldRef} >> >> /Length ${content.length} >>\nstream\n`
-      ),
-      content,
-      ascii("\nendstream"),
-    ])
-  )
+  /** Draws one box: returns its rectangle in user space; the drawing is turned upright on rotated pages. */
+  const drawBox = (target: PDFPage, placement: Placement, ref: PDFRef) => {
+    const { rect, rotation, width, height } = rectOnPage(target, placement)
+    const content = ascii(appearanceContent(width, height, options.appearance))
+    write(
+      ref,
+      concat([
+        ascii(
+          `<< /Type /XObject /Subtype /Form /BBox [0 0 ${width.toFixed(2)} ${height.toFixed(2)}] /Matrix [${ROTATION_MATRIX[rotation]}] ` +
+            `/Resources << /Font << /F1 ${fontRef} /F2 ${boldRef} >> >> /Length ${content.length} >>\nstream\n`
+        ),
+        content,
+        ascii("\nendstream"),
+      ])
+    )
+    return rect.map((n) => n.toFixed(2)).join(" ")
+  }
   write(
     widgetRef,
     ascii(
       `<< /Type /Annot /Subtype /Widget /FT /Sig /T ${pdfTextString(options.fieldName)} /V ${sigRef} /F 132 ` +
-        `/Rect [${rect.map((n) => n.toFixed(2)).join(" ")}] /P ${page.ref} /AP << /N ${apRef} >> >>`
+        `/Rect [${drawBox(page, options.placement, apRef)}] /P ${page.ref} /AP << /N ${apRef} >> >>`
     )
   )
+  /** The update's annotations by page, added to each page's /Annots once. */
+  const newAnnots = new Map<PDFPage, PDFRef[]>([[page, [widgetRef]]])
+  // Marks: read-only stamps with the same drawing. They are not fields, so viewers list one signature.
+  for (const [i, mark] of (options.marks ?? []).entries()) {
+    const target = markPages[i] as PDFPage
+    const markRef = allocate()
+    const markApRef = allocate()
+    write(
+      markRef,
+      ascii(
+        `<< /Type /Annot /Subtype /Stamp /F 196 /Rect [${drawBox(target, mark, markApRef)}] /P ${target.ref} ` +
+          `/Contents ${pdfTextString(`Firmato digitalmente da ${options.signerName}`)} /AP << /N ${markApRef} >> >>`
+      )
+    )
+    newAnnots.set(target, [...(newAnnots.get(target) ?? []), markRef])
+  }
 
-  // The page's /Annots: modify the array object when indirect, else the page itself.
-  const annots = page.node.get(PDFName.of("Annots"))
-  if (annots instanceof PDFRef) {
-    const array = context.lookup(annots, PDFArray)
-    array.push(widgetRef)
-    writeObject(annots, array)
-  } else {
-    const array = annots instanceof PDFArray ? annots : context.obj([])
-    array.push(widgetRef)
-    page.node.set(PDFName.of("Annots"), array)
-    writeObject(page.ref, page.node)
+  // Each page's /Annots: modify the array object when indirect, else the page itself.
+  for (const [target, refs] of newAnnots) {
+    const annots = target.node.get(PDFName.of("Annots"))
+    if (annots instanceof PDFRef) {
+      const array = context.lookup(annots, PDFArray)
+      for (const ref of refs) array.push(ref)
+      writeObject(annots, array)
+    } else {
+      const array = annots instanceof PDFArray ? annots : context.obj([])
+      for (const ref of refs) array.push(ref)
+      target.node.set(PDFName.of("Annots"), array)
+      writeObject(target.ref, target.node)
+    }
   }
 
   // The AcroForm: /Fields gets the new field and /SigFlags 3 (signatures exist, append only).

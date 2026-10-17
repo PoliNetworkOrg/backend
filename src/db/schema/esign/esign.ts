@@ -23,6 +23,11 @@ const tstz = (name: string) => timestamp(name, { precision: 3, withTimezone: tru
 
 /** Where a signature goes: fractions of the displayed page, origin top-left (see esign/pdf/geometry). */
 export type PlacementJson = { page: number; x: number; y: number; width: number; height: number }
+/**
+ * One of a signer's places: "signature" places each get their own cryptographic signature; "mark" places repeat the
+ * visible mark of the signer's first signature, which covers them.
+ */
+export type PlaceJson = PlacementJson & { kind: "signature" | "mark" }
 export type OutputJson = { driveId: string; folderId: string; folderPath: string; fileName: string }
 export type EmailJson = { to: string[]; message: string | null }
 export type DeliveryJson = {
@@ -104,7 +109,9 @@ export const signers = createTable.esign(
     /** The signer's name when the request was made. */
     name: text().notNull(),
     role: text(),
-    placement: jsonb().$type<PlacementJson>().notNull(),
+    places: jsonb().$type<PlaceJson[]>().notNull(),
+    /** Signature places already signed: a signature interrupted after some of them resumes from here. */
+    signaturesDone: integer("signatures_done").notNull().default(0),
     status: text({ enum: ["pending", "signed", "declined"] })
       .notNull()
       .default("pending"),
@@ -154,9 +161,12 @@ export const jobs = createTable.esign(
     status: text({ enum: ["pending", "prepared", "completed", "failed", "cancelled", "expired"] })
       .notNull()
       .default("pending"),
-    /** The document version the signature applies to. */
+    /** The document version the next signature applies to. */
     baseVersion: integer("base_version").notNull(),
-    placement: jsonb().$type<PlacementJson>().notNull(),
+    /** The signer's places when the job started. */
+    places: jsonb().$type<PlaceJson[]>().notNull(),
+    /** Index of the next signature place to sign, among the signature places. */
+    step: integer().notNull().default(0),
     expiresAt: tstz("expires_at").notNull(),
     prepared: jsonb().$type<PreparedJson>(),
     preparedPdf: bytea("prepared_pdf"),
