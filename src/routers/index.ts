@@ -1,6 +1,7 @@
 import { createTRPCRouter } from "@/trpc"
 import { authRouter } from "./auth"
 import { azureRouter } from "./azure"
+import { esignRouter } from "./esign"
 import { groupsRouter } from "./groups"
 import { meRouter } from "./me"
 import { testRouter } from "./test"
@@ -16,6 +17,7 @@ import { webRouter } from "./web"
 export const appRouter = createTRPCRouter({
   auth: authRouter,
   azure: azureRouter,
+  esign: esignRouter,
   groups: groupsRouter,
   me: meRouter,
   test: testRouter,

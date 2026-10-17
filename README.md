@@ -61,3 +61,30 @@ Actor fields such as `createdBy`, `adderId` or `performerId` are read only from 
 The bot's socket.io client authenticates with its service token in `auth.token` (scope `backend:tg:events`) and is disconnected when the token expires. Set `OAUTH_BOT_CLIENT_ID` on the backend to the same registered OAuth client ID used by the bot. This is the actual client ID, not its display name. Token sockets are rejected if this setting is absent, the client ID differs, the token is not a service token or the scope is missing. Without a token the socket is identified by its `type` query, while `LEGACY_ANONYMOUS=allow`.
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
+
+## E-signing with the CIE
+
+The `esign` router and `/esign/agent/*` endpoints let dashboard users sign PDFs with the Italian identity card
+(CIE). The backend prepares a PAdES baseline B-B signature (incremental update with a visible stamp), the user's
+[PoliNetwork Sign Agent](https://github.com/PoliNetworkOrg/sign-agent) signs the digest with the card, and the backend
+embeds the CMS, then saves the signed PDF to OneDrive and emails it. See the admin repository's
+`docs/esign/contracts.md` for the flow.
+
+| Variable                        | Meaning                                                                                                                      |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `ESIGN_DRIVE_ID`                | Graph drive ID of the association's OneDrive or SharePoint library. Without Azure credentials an in-memory drive is used.     |
+| `ESIGN_DRIVE_ROOT_ID`           | Item ID of the folder the dashboard may browse and write (default: the whole drive).                                        |
+| `ESIGN_DRIVE_LABEL`             | Name shown in the dashboard (default `OneDrive`).                                                                            |
+| `ESIGN_DASHBOARD_URL`           | Dashboard origin for links in emails (default `https://admin.polinetwork.org`).                                               |
+| `ESIGN_ALLOW_TEST_CERTIFICATES` | `true` accepts certificates not issued by the CIE CAs (the agent's development key). Defaults to `true` outside production. |
+
+Requirements:
+
+- IdP permissions `esign:sign` (sign and see one's requests) and `esign:requests:manage` (create and manage requests).
+- Graph application permission `Files.ReadWrite.All` (or `Sites.Selected` with write access to the site), with admin
+  consent, for the drive; emails use the existing `Mail.Send` sender.
+- The dashboard proxies `/api/esign/agent/*` to this backend's `/esign/agent/*`; the agent never calls the backend
+  directly. Those endpoints are authenticated only by the job's single-use ticket.
+
+Signatures are checked against the CIE certification authorities of the Ministero dell'Interno bundled in
+`src/esign/trust`. Tests: `bunx vitest run tests/esign-*.test.ts` (validated with poppler `pdfsig` when installed).
