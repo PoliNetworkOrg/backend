@@ -57,6 +57,7 @@ function catalog(): AccessCatalog {
 
 export const esign = createEsignService({
   store: createPgStore(DB),
+  directory: idp?.directory ?? undefined,
   drives: resolveDrives(),
   mailer: { signatureRequest: sendSignatureRequestEmail, signedDocument: sendSignedDocumentEmail },
   logger,

@@ -58,6 +58,8 @@ type Logger = {
 
 export type ServiceOptions = {
   store: EsignStore
+  /** Registered IdP users, including people who have not opened Signatures yet. */
+  directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
   /** The configured libraries, in the order the dashboard offers them; empty without OneDrive. */
   drives: Drive[]
   mailer: Mailer
@@ -604,10 +606,18 @@ export function createEsignService(options: ServiceOptions) {
     /** Everyone who can be picked as a signer, with the drives whose documents they may sign. */
     async listProfiles(): Promise<(Profile & { drives: string[] })[]> {
       const rules = await accessRules()
-      return (await store.listProfiles()).map((profile) => ({
-        ...profile,
-        drives: drives.filter((d) => maySign(rules, profile.sub, d.id)).map((d) => d.id),
-      }))
+      const profiles = await store.listProfiles()
+      const registered = options.directory ? await options.directory() : profiles
+      const bySub = new Map(profiles.map((profile) => [profile.sub, profile]))
+      return registered
+        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes("esign:sign"))
+        .map((person) => ({
+          ...bySub.get(person.sub),
+          ...person,
+          fiscalCode: bySub.get(person.sub)?.fiscalCode ?? null,
+          certificateSubject: bySub.get(person.sub)?.certificateSubject ?? null,
+          drives: drives.filter((d) => maySign(rules, person.sub, d.id)).map((d) => d.id),
+        }))
     },
 
     async resetIdentity(sub: string) {
@@ -668,13 +678,20 @@ export function createEsignService(options: ServiceOptions) {
         throw new EsignError("bad_request", `Choose between 1 and ${MAX_SIGNERS} signers`)
       if (new Set(input.signers.map((s) => s.sub)).size !== input.signers.length)
         throw new EsignError("bad_request", "Each person can sign once")
+      const registered = options.directory
+        ? new Map((await options.directory()).map((person) => [person.sub, person]))
+        : null
       const signers: { sub: string; name: string; role: string | null; places: PlaceJson[] }[] = []
+      const profilesToSync: { sub: string; name: string; email: string | null }[] = []
       for (const s of input.signers) {
-        const profile = await store.getProfile(s.sub)
-        if (!profile) throw new EsignError("bad_request", "A signer is not a dashboard user")
+        const person = registered ? registered.get(s.sub) : await store.getProfile(s.sub)
+        if (!person) throw new EsignError("bad_request", "A signer is not a registered user")
+        if (registered && !options.access?.(s.sub)?.permissions.includes("esign:sign"))
+          throw new EsignError("bad_request", `${person.name} is not allowed to sign`)
+        if (registered) profilesToSync.push(person)
         signers.push({
           sub: s.sub,
-          name: profile.name,
+          name: person.name,
           role: s.role?.trim() || null,
           places: validatePlaces(s.places, document.pages),
         })
@@ -724,6 +741,7 @@ export function createEsignService(options: ServiceOptions) {
               message: input.email.message?.trim() || null,
             }
           : null
+      for (const person of profilesToSync) await store.upsertProfile(person)
       const request = await store.createRequest({
         title: input.title.trim(),
         ordered: input.ordered,
