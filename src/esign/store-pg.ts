@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, exists, inArray, isNull, lt, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, exists, inArray, isNull, lt, notExists, or, sql } from "drizzle-orm"
+import { alias } from "drizzle-orm/pg-core"
 import type { DB as Database } from "@/db"
 import { schema } from "@/db/schema/esign"
 import type {
@@ -223,6 +224,40 @@ export function createPgStore(db: Db): EsignStore {
             )
           )
         )
+      if (filter.awaiting) {
+        // Mirrors `turnOf`: a pending signer, and in an ordered request the first pending one.
+        const earlier = alias(signers, "earlier")
+        conditions.push(
+          eq(requests.status, "in_progress"),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(signers)
+              .where(
+                and(
+                  eq(signers.requestId, requests.id),
+                  eq(signers.sub, filter.awaiting),
+                  eq(signers.status, "pending"),
+                  or(
+                    eq(requests.ordered, false),
+                    notExists(
+                      db
+                        .select({ one: sql`1` })
+                        .from(earlier)
+                        .where(
+                          and(
+                            eq(earlier.requestId, requests.id),
+                            eq(earlier.status, "pending"),
+                            lt(earlier.position, signers.position)
+                          )
+                        )
+                    )
+                  )
+                )
+              )
+          )
+        )
+      }
       if (filter.status) conditions.push(inArray(requests.status, filter.status))
       const rows = await db
         .select()

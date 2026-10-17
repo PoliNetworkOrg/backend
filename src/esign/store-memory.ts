@@ -36,6 +36,12 @@ export function createMemoryStore(): EsignStore {
     ...r,
     signers: [...signers.values()].filter((s) => s.requestId === r.id).sort((a, b) => a.position - b.position),
   })
+  /** Mirrors `turnOf`: a pending signer, and in an ordered request the first pending one. */
+  const awaits = (r: SigningRequest, sub: string) => {
+    if (r.status !== "in_progress") return false
+    const pending = r.signers.filter((s) => s.status === "pending")
+    return (r.ordered ? pending.slice(0, 1) : pending).some((s) => s.sub === sub)
+  }
   const insertDocument = (doc: NewDocument): DocumentRecord => {
     const record = { ...doc, id: randomUUID(), createdAt: new Date() }
     documents.set(record.id, record)
@@ -152,6 +158,7 @@ export function createMemoryStore(): EsignStore {
             r.createdBySub === filter.involving ||
             r.signers.some((s) => s.sub === filter.involving)
         )
+        .filter((r) => !filter.awaiting || awaits(r, filter.awaiting))
         .filter((r) => !filter.status || filter.status.includes(r.status))
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
         .slice(0, filter.limit ?? 200)

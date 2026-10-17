@@ -774,14 +774,13 @@ export function createEsignService(options: ServiceOptions) {
 
     async listRequests(caller: Caller, scope: "inbox" | "mine" | "all") {
       if (scope === "all" && !caller.canManage) throw new EsignError("forbidden", "You cannot see every request")
-      const requests = await store.listRequests({
-        involving: scope === "all" ? undefined : caller.sub,
-        status: scope === "inbox" ? ["in_progress"] : undefined,
-      })
+      // Filter by turn before the store's list limit, while preserving drive visibility checks.
+      const requests = await store.listRequests(
+        scope === "inbox" ? { awaiting: caller.sub } : { involving: scope === "all" ? undefined : caller.sub }
+      )
       const rules = await accessRules()
       const visible = requests.filter((r) => canView(rules, caller, r))
-      const views = await Promise.all(visible.map((r) => view(caller, r)))
-      return scope === "inbox" ? views.filter((r) => r.myTurn) : views
+      return Promise.all(visible.map((r) => view(caller, r)))
     },
 
     async getRequest(caller: Caller, id: string) {

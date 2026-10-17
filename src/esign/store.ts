@@ -128,6 +128,8 @@ export type NewEvent = Omit<RequestEvent, "id" | "at">
 export type RequestFilter = {
   /** Requests where this subject signs or that it created; all requests when absent. */
   involving?: string
+  /** In-progress requests where it is this subject's turn to sign (see `turnOf`), applied before `limit`. */
+  awaiting?: string
   status?: RequestStatus[]
   limit?: number
 }
