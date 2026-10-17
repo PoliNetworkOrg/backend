@@ -26,6 +26,7 @@ function setup(
     allowTestCertificates?: boolean
     revocation?: "good" | "revoked" | "unknown"
     policy?: "require" | "prefer" | "off"
+    directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
   } = {}
 ) {
   let clock = new Date("2026-10-17T10:00:00Z").getTime()
@@ -42,6 +43,7 @@ function setup(
     store,
     drives: [drive, archive],
     access: (sub) => people.get(sub) ?? null,
+    directory: opts.directory,
     mailer,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
     dashboardUrl: "https://admin.example.org",
@@ -114,6 +116,36 @@ describe("e-signing service", () => {
   let env: ReturnType<typeof setup>
   beforeEach(() => {
     env = setup()
+  })
+
+  it("lists and accepts registered eligible signers before their first visit", async () => {
+    const fresh = { sub: "sub-new", name: "New Signer", email: "new@example.org" }
+    env = setup({ directory: async () => [fresh, { sub: "sub-no-access", name: "No Access", email: null }] })
+    env.people.set(fresh.sub, { roles: [], permissions: ["esign:sign"] })
+    expect(await env.store.getProfile(fresh.sub)).toBeNull()
+    expect((await env.service.listProfiles()).map((person) => person.sub)).toEqual([fresh.sub])
+
+    const { document } = await env.service.stageUpload(manager, "request.pdf", await samplePdf())
+    await expect(
+      env.service.createRequest(manager, {
+        title: "Request",
+        documentId: document.id,
+        ordered: true,
+        signers: [{ sub: "sub-no-access", role: null, places: [{ ...placement(0), kind: "signature" }] }],
+        output: null,
+        email: null,
+      })
+    ).rejects.toThrow("No Access is not allowed to sign")
+    const request = await env.service.createRequest(manager, {
+      title: "Request",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: fresh.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+      output: null,
+      email: null,
+    })
+    expect(request.signers[0]).toMatchObject({ sub: fresh.sub, name: fresh.name })
+    expect(await env.store.getProfile(fresh.sub)).toMatchObject(fresh)
   })
 
   it("collects signatures in order, then uploads and emails the signed PDF", async () => {
@@ -290,7 +322,8 @@ describe("e-signing service", () => {
     const match = /\/ByteRange (\[[^\]]+\])/.exec(text)
     if (!match) throw new Error("no ByteRange")
     const range: [number, number, number, number] = [0, original.length, gap.placeholder.pdf.length, 0]
-    const entry = `[${range.join(" ")}`.padEnd(match[1].length - 1, " ") + "]"
+    const padded = `[${range.join(" ")}`.padEnd(match[1].length - 1, " ")
+    const entry = `${padded}]`
     gap.placeholder.pdf.set(Buffer.from(entry), match.index + "/ByteRange ".length)
     gap.placeholder.byteRange = range
     gap.signedAttrs = signedAttributes(sha256(signedBytes(gap.placeholder.pdf, range)), secretarySigner.cert)
