@@ -61,3 +61,44 @@ export async function samplePdf(pages = 2): Promise<Uint8Array> {
   for (let i = 0; i < pages; i++) doc.addPage([595, 842]).drawText(`Pagina ${i + 1}`, { x: 60, y: 780, size: 16, font })
   return doc.save({ useObjectStreams: true })
 }
+
+/**
+ * Appends an incremental revision with the given objects (body by object number) and a cross-reference stream, the
+ * way a PDF editor would. `size` is the first unused object number; the cross-reference stream takes it.
+ */
+export async function appendRevision(pdf: Uint8Array, objects: Record<number, string>, size: number) {
+  const doc = await PDFDocument.load(pdf, { updateMetadata: false })
+  const root = doc.context.trailerInfo.Root
+  const prev = /startxref\s+(\d+)\s+%%EOF\s*$/.exec(Buffer.from(pdf).toString("latin1"))?.[1]
+  if (!prev) throw new Error("no startxref")
+  const parts = ["\n"]
+  let offset = pdf.length + 1
+  const offsets = new Map<number, number>()
+  for (const [n, body] of Object.entries(objects)) {
+    const chunk = `${n} 0 obj\n${body}\nendobj\n`
+    offsets.set(Number(n), offset)
+    parts.push(chunk)
+    offset += Buffer.byteLength(chunk, "latin1")
+  }
+  const xref = size
+  offsets.set(xref, offset)
+  const numbers = [...offsets.keys()].sort((a, b) => a - b)
+  const data = Buffer.alloc(numbers.length * 7)
+  numbers.forEach((n, i) => {
+    data[i * 7] = 1
+    data.writeUInt32BE(offsets.get(n) ?? 0, i * 7 + 1)
+  })
+  const index = numbers.flatMap((n) => [n, 1]).join(" ")
+  parts.push(
+    `${xref} 0 obj\n<< /Type /XRef /Size ${xref + 1} /Index [${index}] /W [1 4 2] /Root ${root} /Prev ${prev} ` +
+      `/Length ${data.length} >>\nstream\n`
+  )
+  return new Uint8Array(
+    Buffer.concat([
+      Buffer.from(pdf),
+      Buffer.from(parts.join(""), "latin1"),
+      data,
+      Buffer.from(`\nendstream\nendobj\nstartxref\n${offset}\n%%EOF\n`, "latin1"),
+    ])
+  )
+}
