@@ -611,13 +611,18 @@ export function createEsignService(options: ServiceOptions) {
       const bySub = new Map(profiles.map((profile) => [profile.sub, profile]))
       return registered
         .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes("esign:sign"))
-        .map((person) => ({
-          ...bySub.get(person.sub),
-          ...person,
-          fiscalCode: bySub.get(person.sub)?.fiscalCode ?? null,
-          certificateSubject: bySub.get(person.sub)?.certificateSubject ?? null,
-          drives: drives.filter((d) => maySign(rules, person.sub, d.id)).map((d) => d.id),
-        }))
+        .map((person) => {
+          const profile = bySub.get(person.sub)
+          return {
+            sub: person.sub,
+            name: person.name,
+            // The IdP may not know an address the person's own sign-in already gave Signatures.
+            email: person.email ?? profile?.email ?? null,
+            fiscalCode: profile?.fiscalCode ?? null,
+            certificateSubject: profile?.certificateSubject ?? null,
+            drives: drives.filter((d) => maySign(rules, person.sub, d.id)).map((d) => d.id),
+          }
+        })
     },
 
     async resetIdentity(sub: string) {
@@ -688,7 +693,12 @@ export function createEsignService(options: ServiceOptions) {
         if (!person) throw new EsignError("bad_request", "A signer is not a registered user")
         if (registered && !options.access?.(s.sub)?.permissions.includes("esign:sign"))
           throw new EsignError("bad_request", `${person.name} is not allowed to sign`)
-        if (registered) profilesToSync.push(person)
+        if (registered)
+          profilesToSync.push({
+            ...person,
+            // Signature requests are emailed there: keep a known address the IdP doesn't have.
+            email: person.email ?? (await store.getProfile(s.sub))?.email ?? null,
+          })
         signers.push({
           sub: s.sub,
           name: person.name,

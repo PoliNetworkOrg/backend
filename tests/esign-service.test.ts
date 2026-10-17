@@ -148,6 +148,27 @@ describe("e-signing service", () => {
     expect(await env.store.getProfile(fresh.sub)).toMatchObject(fresh)
   })
 
+  it("keeps a signer's known email when the IdP directory has none", async () => {
+    const known = { sub: "sub-known", name: "Known Signer", email: "known@polinetwork.org" }
+    env = setup({ directory: async () => [{ ...known, name: "Known Signer (IdP)", email: null }] })
+    env.people.set(known.sub, { roles: [], permissions: ["esign:sign"] })
+    await env.store.upsertProfile(known)
+    expect(await env.service.listProfiles()).toEqual([
+      expect.objectContaining({ sub: known.sub, name: "Known Signer (IdP)", email: known.email }),
+    ])
+
+    const { document } = await env.service.stageUpload(manager, "request.pdf", await samplePdf())
+    await env.service.createRequest(manager, {
+      title: "Request",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: known.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+      output: null,
+      email: null,
+    })
+    expect(await env.store.getProfile(known.sub)).toMatchObject({ name: "Known Signer (IdP)", email: known.email })
+  })
+
   it("collects signatures in order, then uploads and emails the signed PDF", async () => {
     const request = await prepareRequest(env)
     expect(request.turn).toEqual([secretary.sub])
