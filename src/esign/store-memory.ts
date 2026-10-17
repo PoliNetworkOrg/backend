@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import type {
   DocumentMeta,
   DocumentRecord,
+  DriveAccess,
   EsignStore,
   Job,
   NewDocument,
@@ -29,6 +30,7 @@ export function createMemoryStore(): EsignStore {
   const jobs = new Map<string, Job>()
   const preparedPdfs = new Map<string, Uint8Array>()
   const events: RequestEvent[] = []
+  const access = new Map<string, DriveAccess>()
 
   const withSigners = (r: StoredRequest): SigningRequest => ({
     ...r,
@@ -111,6 +113,7 @@ export function createMemoryStore(): EsignStore {
         status: "in_progress",
         ordered: input.ordered,
         output: input.output,
+        drives: input.drives,
         email: input.email,
         delivery: null,
         createdBySub: input.createdBySub,
@@ -167,6 +170,13 @@ export function createMemoryStore(): EsignStore {
     async updateSigner(id, patch) {
       const s = signers.get(id)
       if (s) signers.set(id, { ...s, ...patch })
+    },
+
+    async listDriveAccess() {
+      return [...access.values()].sort((a, b) => a.driveId.localeCompare(b.driveId))
+    },
+    async setDriveAccess(rule) {
+      access.set(rule.driveId, { ...rule, updatedAt: new Date() })
     },
 
     async addEvent(event: NewEvent) {

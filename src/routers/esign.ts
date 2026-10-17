@@ -14,6 +14,8 @@ import { createTRPCRouter, policy } from "@/trpc"
 /** Using e-signing at all; managing requests is checked on top where needed. */
 const SIGN = "esign:sign"
 const MANAGE = "esign:requests:manage"
+/** Who may use each drive. */
+const MANAGE_DRIVES = "esign:drives:manage"
 
 /** The dashboard's agent-mode user, on the legacy anonymous path in development only. */
 const DEV_SUB = "agent-preview-user"
@@ -37,8 +39,10 @@ const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {
 }
 
 function callerOf(ctx: { actor: Actor | null; can: (permission: string) => boolean }): Caller {
-  if (ctx.actor?.kind === "user") return { sub: ctx.actor.sub, canManage: ctx.can(MANAGE) }
-  if (ctx.actor === null && env.NODE_ENV === "development") return { sub: DEV_SUB, canManage: true }
+  if (ctx.actor?.kind === "user")
+    return { sub: ctx.actor.sub, canManage: ctx.can(MANAGE), canManageDrives: ctx.can(MANAGE_DRIVES) }
+  if (ctx.actor === null && env.NODE_ENV === "development")
+    return { sub: DEV_SUB, canManage: true, canManageDrives: true }
   throw new TRPCError({ code: "FORBIDDEN", message: "Only dashboard users can sign" })
 }
 
@@ -68,15 +72,18 @@ function publicPdf(pdf: PdfInfo) {
   return { pages: pdf.pages, signatures: pdf.signatures, fieldNames: pdf.fieldNames }
 }
 
+const accessKey = z.string().regex(/^[A-Za-z0-9:._-]{1,100}$/)
+const driveRule = z.object({ roles: z.array(accessKey).max(50), permissions: z.array(accessKey).max(50) })
+
 function requireManage(caller: Caller) {
   if (!caller.canManage) throw new TRPCError({ code: "FORBIDDEN", message: "You cannot manage signature requests" })
 }
 
 export const esignRouter = createTRPCRouter({
   /** What the dashboard can offer: the configured drives (none without OneDrive) and whether the caller manages requests. */
-  config: user.query(({ ctx }) => {
+  config: user.query(async ({ ctx }) => {
     const caller = callerOf(ctx)
-    return { drives: esign.drives, canManage: caller.canManage, maxPdfBytes: MAX_PDF_BYTES }
+    return { drives: await esign.drivesFor(caller), canManage: caller.canManage, maxPdfBytes: MAX_PDF_BYTES }
   }),
 
   profile: createTRPCRouter({
@@ -103,8 +110,15 @@ export const esignRouter = createTRPCRouter({
       .input(z.object({ driveId: z.string().min(1), folderId: z.string().min(1).optional() }))
       .query(({ ctx, input }) => {
         requireManage(callerOf(ctx))
-        return run(() => esign.listDrive(input.driveId, input.folderId))
+        return run(() => esign.listDrive(callerOf(ctx), input.driveId, input.folderId))
       }),
+    /** Every drive's access rules and the roles and permissions they can name. */
+    access: user.query(({ ctx }) => run(() => esign.driveAccess(callerOf(ctx)))),
+    setAccess: user
+      .input(z.object({ driveId: z.string().min(1), request: driveRule, sign: driveRule }))
+      .mutation(({ ctx, input }) =>
+        run(() => esign.setDriveAccess(callerOf(ctx), input.driveId, { request: input.request, sign: input.sign }))
+      ),
   }),
 
   documents: createTRPCRouter({

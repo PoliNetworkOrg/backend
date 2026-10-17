@@ -10,6 +10,8 @@ import { type PlaceInput, type PlacementInput, validatePlacement, validatePlaces
 import type {
   DocumentMeta,
   DocumentRecord,
+  DriveAccess,
+  DriveRule,
   EmailJson,
   EsignStore,
   Job,
@@ -23,7 +25,13 @@ import { cieChain } from "./trust"
 import { checkRevocation, type RevocationResult } from "./trust/ocsp"
 
 /** Who is calling, and what the IdP lets them do. */
-export type Caller = { sub: string; canManage: boolean }
+export type Caller = { sub: string; canManage: boolean; canManageDrives?: boolean }
+
+/** A dashboard user's roles and permissions, as the IdP reports them. */
+export type Access = { roles: string[]; permissions: string[] }
+
+/** What a drive access rule can name, for the dashboard's picker. */
+export type AccessCatalog = { roles: { key: string; name: string }[]; permissions: { key: string; name: string }[] }
 
 export type Mailer = {
   signatureRequest(
@@ -50,6 +58,8 @@ type Logger = {
 
 export type ServiceOptions = {
   store: EsignStore
+  /** Registered IdP users, including people who have not opened Signatures yet. */
+  directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
   /** The configured libraries, in the order the dashboard offers them; empty without OneDrive. */
   drives: Drive[]
   mailer: Mailer
@@ -63,6 +73,10 @@ export type ServiceOptions = {
    * certificates and records an unknown status, "off" skips it.
    */
   revocation?: "require" | "prefer" | "off"
+  /** A dashboard user's roles and permissions; null when the IdP doesn't know them (they match no rule). */
+  access?: (sub: string) => Access | null
+  /** The roles and permissions the IdP knows. */
+  catalog?: () => AccessCatalog
   /** Replaces the OCSP check in tests. */
   checkRevocation?: typeof checkRevocation
   /** Replaces the CIE CA check in tests. */
@@ -178,13 +192,52 @@ export function createEsignService(options: ServiceOptions) {
     return result
   }
 
-  function canView(caller: Caller, request: SigningRequest) {
-    return caller.canManage || request.createdBySub === caller.sub || request.signers.some((s) => s.sub === caller.sub)
+  // ── Drive access ────────────────────────────────────────────────────────────────────────────────────────────
+
+  type Rules = Map<string, DriveAccess>
+
+  /** Read on every use: another replica may have changed them. */
+  async function accessRules(): Promise<Rules> {
+    return new Map((await store.listDriveAccess()).map((rule) => [rule.driveId, rule]))
+  }
+
+  /** An empty rule keeps the default; otherwise any listed role or permission grants it. */
+  function satisfies(rule: DriveRule | undefined, sub: string) {
+    if (!rule || (rule.roles.length === 0 && rule.permissions.length === 0)) return true
+    const held = options.access?.(sub)
+    if (!held) return false
+    return rule.roles.some((r) => held.roles.includes(r)) || rule.permissions.some((p) => held.permissions.includes(p))
+  }
+
+  /** Browse the drive, use it in requests and see its requests: managers allowed by the drive's rule. */
+  function mayRequest(rules: Rules, caller: Caller, driveId: string) {
+    return caller.canManage && satisfies(rules.get(driveId)?.request, caller.sub)
+  }
+
+  /** Be asked to sign the drive's documents. */
+  function maySign(rules: Rules, sub: string, driveId: string) {
+    return satisfies(rules.get(driveId)?.sign, sub)
+  }
+
+  function driveLabel(id: string) {
+    return drives.find((d) => d.id === id)?.label ?? "this drive"
+  }
+
+  async function requireRequest(caller: Caller, driveId: string) {
+    if (!mayRequest(await accessRules(), caller, driveId))
+      throw new EsignError("forbidden", `You don't have access to ${driveLabel(driveId)}`)
+  }
+
+  /** Its creator and signers, and managers allowed on every drive it uses. */
+  function canView(rules: Rules, caller: Caller, request: SigningRequest) {
+    if (request.createdBySub === caller.sub || request.signers.some((s) => s.sub === caller.sub)) return true
+    return caller.canManage && request.drives.every((d) => mayRequest(rules, caller, d))
   }
 
   async function requestFor(caller: Caller, id: string): Promise<SigningRequest> {
     const request = await store.getRequest(id)
-    if (!request || !canView(caller, request)) throw new EsignError("not_found", "Request not found")
+    if (!request || !canView(await accessRules(), caller, request))
+      throw new EsignError("not_found", "Request not found")
     return request
   }
 
@@ -263,12 +316,19 @@ export function createEsignService(options: ServiceOptions) {
       throw new EsignError("bad_request", `Sign between 1 and ${MAX_BATCH} documents at once`)
     if (new Set(items.map((i) => i.requestId)).size !== items.length)
       throw new EsignError("bad_request", "Each document can be signed once")
+    const rules = await accessRules()
     // Check every request before starting any, so a batch starts whole or not at all.
     const planned: { request: SigningRequest; signer: Signer; current: DocumentRecord; places: PlaceJson[] }[] = []
     for (const item of items) {
       const request = await requestFor(caller, item.requestId)
       const signer = turnOf(request).find((s) => s.sub === caller.sub)
       if (!signer) throw new EsignError("forbidden", `It is not your turn to sign “${request.title}”`)
+      const denied = request.drives.find((d) => !maySign(rules, caller.sub, d))
+      if (denied)
+        throw new EsignError(
+          "forbidden",
+          `You can no longer sign documents of ${driveLabel(denied)}. Ask ${await profileName(request.createdBySub)} about “${request.title}”.`
+        )
       for (const job of await store.openJobs(request.id)) {
         if (job.sub === caller.sub || job.expiresAt < now()) continue
         throw new EsignError(
@@ -496,24 +556,82 @@ export function createEsignService(options: ServiceOptions) {
   }
 
   return {
-    get drives() {
-      return drives.map((d) => ({ id: d.id, label: d.label }))
+    /** The drives the caller may request signatures with. */
+    async drivesFor(caller: Caller) {
+      const rules = await accessRules()
+      return drives.filter((d) => mayRequest(rules, caller, d.id)).map((d) => ({ id: d.id, label: d.label }))
+    },
+
+    /** Every drive with its access rules, and what a rule can name: for the drive settings page. */
+    async driveAccess(caller: Caller) {
+      if (!caller.canManageDrives) throw new EsignError("forbidden", "You cannot manage drive access")
+      const rules = await accessRules()
+      const empty = { roles: [], permissions: [] }
+      return {
+        drives: drives.map((d) => {
+          const rule = rules.get(d.id)
+          return {
+            id: d.id,
+            label: d.label,
+            request: rule?.request ?? empty,
+            sign: rule?.sign ?? empty,
+            updatedBySub: rule?.updatedBySub ?? null,
+            updatedAt: rule?.updatedAt ?? null,
+          }
+        }),
+        catalog: options.catalog?.() ?? { roles: [], permissions: [] },
+      }
+    },
+
+    async setDriveAccess(caller: Caller, driveId: string, rule: { request: DriveRule; sign: DriveRule }) {
+      if (!caller.canManageDrives) throw new EsignError("forbidden", "You cannot manage drive access")
+      driveFor(driveId)
+      const clean = (r: DriveRule) => ({
+        roles: [...new Set(r.roles.map((k) => k.trim()).filter(Boolean))].sort(),
+        permissions: [...new Set(r.permissions.map((k) => k.trim()).filter(Boolean))].sort(),
+      })
+      await store.setDriveAccess({
+        driveId,
+        request: clean(rule.request),
+        sign: clean(rule.sign),
+        updatedBySub: caller.sub,
+      })
+      logger.info({ driveId, by: caller.sub }, "[ESIGN] drive access changed")
     },
 
     async syncProfile(caller: Caller, profile: { name: string; email: string | null }): Promise<Profile> {
       return store.upsertProfile({ sub: caller.sub, name: profile.name.trim().slice(0, 120), email: profile.email })
     },
 
-    async listProfiles(): Promise<Profile[]> {
-      return store.listProfiles()
+    /** Everyone who can be picked as a signer, with the drives whose documents they may sign. */
+    async listProfiles(): Promise<(Profile & { drives: string[] })[]> {
+      const rules = await accessRules()
+      const profiles = await store.listProfiles()
+      const registered = options.directory ? await options.directory() : profiles
+      const bySub = new Map(profiles.map((profile) => [profile.sub, profile]))
+      return registered
+        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes("esign:sign"))
+        .map((person) => {
+          const profile = bySub.get(person.sub)
+          return {
+            sub: person.sub,
+            name: person.name,
+            // The IdP may not know an address the person's own sign-in already gave Signatures.
+            email: person.email ?? profile?.email ?? null,
+            fiscalCode: profile?.fiscalCode ?? null,
+            certificateSubject: profile?.certificateSubject ?? null,
+            drives: drives.filter((d) => maySign(rules, person.sub, d.id)).map((d) => d.id),
+          }
+        })
     },
 
     async resetIdentity(sub: string) {
       await store.setProfileIdentity(sub, null)
     },
 
-    async listDrive(driveId: string, folderId?: string) {
+    async listDrive(caller: Caller, driveId: string, folderId?: string) {
       const drive = driveFor(driveId)
+      await requireRequest(caller, driveId)
       try {
         return await drive.list(folderId)
       } catch (error) {
@@ -528,6 +646,7 @@ export function createEsignService(options: ServiceOptions) {
 
     async stageDriveItem(caller: Caller, driveId: string, itemId: string) {
       const drive = driveFor(driveId)
+      await requireRequest(caller, driveId)
       try {
         const { item, bytes } = await drive.download(itemId)
         return await stage(caller, item.name, bytes, {
@@ -564,16 +683,43 @@ export function createEsignService(options: ServiceOptions) {
         throw new EsignError("bad_request", `Choose between 1 and ${MAX_SIGNERS} signers`)
       if (new Set(input.signers.map((s) => s.sub)).size !== input.signers.length)
         throw new EsignError("bad_request", "Each person can sign once")
+      const registered = options.directory
+        ? new Map((await options.directory()).map((person) => [person.sub, person]))
+        : null
       const signers: { sub: string; name: string; role: string | null; places: PlaceJson[] }[] = []
+      const profilesToSync: { sub: string; name: string; email: string | null }[] = []
       for (const s of input.signers) {
-        const profile = await store.getProfile(s.sub)
-        if (!profile) throw new EsignError("bad_request", "A signer is not a dashboard user")
+        const person = registered ? registered.get(s.sub) : await store.getProfile(s.sub)
+        if (!person) throw new EsignError("bad_request", "A signer is not a registered user")
+        if (registered && !options.access?.(s.sub)?.permissions.includes("esign:sign"))
+          throw new EsignError("bad_request", `${person.name} is not allowed to sign`)
+        if (registered)
+          profilesToSync.push({
+            ...person,
+            // Signature requests are emailed there: keep a known address the IdP doesn't have.
+            email: person.email ?? (await store.getProfile(s.sub))?.email ?? null,
+          })
         signers.push({
           sub: s.sub,
-          name: profile.name,
+          name: person.name,
           role: s.role?.trim() || null,
           places: validatePlaces(s.places, document.pages),
         })
+      }
+      // The drives the request uses: where its PDF came from and where it is saved.
+      const used = [
+        ...new Set(
+          [document.source.kind === "drive" ? document.source.driveId : null, input.output?.driveId ?? null].filter(
+            (d): d is string => d !== null
+          )
+        ),
+      ]
+      const rules = await accessRules()
+      for (const d of used) {
+        if (!mayRequest(rules, caller, d))
+          throw new EsignError("forbidden", `You don't have access to ${driveLabel(d)}`)
+        const outsider = signers.find((s) => !maySign(rules, s.sub, d))
+        if (outsider) throw new EsignError("bad_request", `${outsider.name} can't sign documents of ${driveLabel(d)}`)
       }
       let output: OutputJson | null = null
       if (input.output) {
@@ -605,9 +751,11 @@ export function createEsignService(options: ServiceOptions) {
               message: input.email.message?.trim() || null,
             }
           : null
+      for (const person of profilesToSync) await store.upsertProfile(person)
       const request = await store.createRequest({
         title: input.title.trim(),
         ordered: input.ordered,
+        drives: used,
         output,
         email,
         createdBySub: caller.sub,
@@ -626,11 +774,13 @@ export function createEsignService(options: ServiceOptions) {
 
     async listRequests(caller: Caller, scope: "inbox" | "mine" | "all") {
       if (scope === "all" && !caller.canManage) throw new EsignError("forbidden", "You cannot see every request")
-      // The inbox filters by turn in the store, so the limit cannot hide them behind requests awaiting others.
+      // Filter by turn before the store's list limit, while preserving drive visibility checks.
       const requests = await store.listRequests(
         scope === "inbox" ? { awaiting: caller.sub } : { involving: scope === "all" ? undefined : caller.sub }
       )
-      return Promise.all(requests.map((r) => view(caller, r)))
+      const rules = await accessRules()
+      const visible = requests.filter((r) => canView(rules, caller, r))
+      return Promise.all(visible.map((r) => view(caller, r)))
     },
 
     async getRequest(caller: Caller, id: string) {
@@ -880,6 +1030,9 @@ export function createEsignService(options: ServiceOptions) {
       const request = await requestFor(caller, requestId)
       const signer = turnOf(request).find((s) => s.sub === caller.sub)
       if (!signer) throw new EsignError("forbidden", "It is not your turn to sign")
+      const rules = await accessRules()
+      const denied = request.drives.find((d) => !maySign(rules, caller.sub, d))
+      if (denied) throw new EsignError("forbidden", `You can no longer sign documents of ${driveLabel(denied)}`)
       for (const job of await store.openJobs(requestId))
         if (job.sub !== caller.sub && job.expiresAt > now())
           throw new EsignError("conflict", "Someone is signing right now. Try again in a few minutes.")

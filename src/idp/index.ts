@@ -9,6 +9,7 @@ import {
   serviceTokenSource,
   verifyAccessToken,
 } from "@polinetwork/auth-kit"
+import { z } from "zod"
 import { env } from "@/env"
 import { logger } from "@/logger"
 import { authenticate, type RequestAuth } from "./auth"
@@ -16,6 +17,7 @@ import { dbPersistence } from "./persistence"
 
 /** The projection this backend reads from the IdP (RFC v3 §5.2). */
 const PROJECTION = "backend"
+const signerDirectory = z.array(z.object({ sub: z.string(), name: z.string(), email: z.string().nullable() }))
 
 function report(component: string) {
   return (error: unknown) => {
@@ -51,6 +53,7 @@ function configure() {
 
   let snapshot = null
   let events = null
+  let directory: (() => Promise<z.infer<typeof signerDirectory>>) | null = null
   if (env.OAUTH_INTERNAL_RESOURCE_URI && env.OAUTH_BACKEND_CLIENT_ID && env.OAUTH_BACKEND_PRIVATE_JWK) {
     const tokens = serviceTokenSource({
       clientId: env.OAUTH_BACKEND_CLIENT_ID,
@@ -69,6 +72,17 @@ function configure() {
       pollIntervalMs: env.IDP_SNAPSHOT_POLL_INTERVAL_MS,
       onError: report("access snapshot"),
     })
+    directory = async () => {
+      const url = new URL("/api/internal/esign-users", endpoints.snapshotUrl)
+      const token = await tokens.getToken()
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (response.status === 401) tokens.invalidate()
+      if (!response.ok) throw new Error(`IdP signer directory returned ${response.status}`)
+      return signerDirectory.parse(await response.json())
+    }
     events = createAccessEventHandler({
       keyStore,
       issuer: endpoints.issuer,
@@ -84,6 +98,7 @@ function configure() {
   return {
     keyStore,
     snapshot,
+    directory,
     /** Fetch API handler for `POST /internal/events`, or null without a snapshot. */
     events,
     verify: (token: string) => verifyAccessToken(token, { issuer: endpoints.issuer, audience, keyStore }),
