@@ -18,7 +18,7 @@ export const SIGNATURE_RESERVED_BYTES = 16_384
 
 export class PdfError extends Error {
   constructor(
-    readonly code: "encrypted" | "malformed" | "page_out_of_range",
+    readonly code: "encrypted" | "malformed" | "page_out_of_range" | "locked",
     message: string
   ) {
     super(message)
@@ -149,12 +149,52 @@ function standardFont(name: StandardFonts) {
   return StandardFontEmbedder.for(name as unknown as Parameters<typeof StandardFontEmbedder.for>[0])
 }
 
+/**
+ * Text the standard fonts can draw (WinAnsi): letters outside it lose their accents ("ł" → "l"), anything else
+ * becomes "?". Italian names are entirely within WinAnsi.
+ */
+const STROKED: Record<string, string> = { Ł: "L", ł: "l", Đ: "D", đ: "d", Ħ: "H", ħ: "h", ı: "i", Ŀ: "L", ŀ: "l" }
+
+export function winAnsi(text: string): string {
+  const font = standardFont(StandardFonts.Helvetica)
+  let out = ""
+  for (const ch of text.normalize("NFC")) {
+    const candidates = [ch, STROKED[ch] ?? ch.normalize("NFD").replace(/\p{M}/gu, ""), "?"]
+    out += candidates.find((c) => c.length > 0 && canEncode(font, c)) ?? "?"
+  }
+  return out
+}
+
+function canEncode(font: ReturnType<typeof standardFont>, text: string) {
+  try {
+    font.encodeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Throws when an existing certification signature forbids any change (DocMDP permission 1). */
+function assertChangesAllowed(doc: PDFDocument) {
+  const { context } = doc
+  const perms = context.lookupMaybe(doc.catalog.get(PDFName.of("Perms")), PDFDict)
+  const docMdp = perms ? context.lookupMaybe(perms.get(PDFName.of("DocMDP")), PDFDict) : undefined
+  const references = docMdp ? context.lookupMaybe(docMdp.get(PDFName.of("Reference")), PDFArray) : undefined
+  for (let i = 0; i < (references?.size() ?? 0); i++) {
+    const ref = context.lookupMaybe(references?.get(i), PDFDict)
+    const params = ref ? context.lookupMaybe(ref.get(PDFName.of("TransformParams")), PDFDict) : undefined
+    const p = params?.get(PDFName.of("P"))
+    if (p instanceof PDFNumber && p.asNumber() === 1)
+      throw new PdfError("locked", "The document is certified and does not allow further signatures")
+  }
+}
+
 /** The appearance stream drawing the signature box: a hairline frame and the text lines fitted to the box. */
 function appearanceContent(width: number, height: number, appearance: SignatureAppearance) {
   const regular = standardFont(StandardFonts.Helvetica)
   const bold = standardFont(StandardFonts.HelveticaBold)
   const padding = Math.min(6, width * 0.05, height * 0.08)
-  const lines = appearance.lines.filter((l) => l.text.trim() !== "")
+  const lines = appearance.lines.map((l) => ({ ...l, text: winAnsi(l.text) })).filter((l) => l.text.trim() !== "")
   const innerW = width - 2 * padding
   const innerH = height - 2 * padding
   const lineGap = 1.25
@@ -209,6 +249,7 @@ export async function addSignaturePlaceholder(input: Uint8Array, options: Placeh
     throw new PdfError("malformed", `Cannot read the PDF: ${error instanceof Error ? error.message : error}`)
   }
   if (doc.isEncrypted) throw new PdfError("encrypted", "Encrypted PDFs cannot be signed")
+  assertChangesAllowed(doc)
   const tail = readTail(input)
   const { context } = doc
   const pages = doc.getPages()
