@@ -1,3 +1,4 @@
+import { X509Certificate } from "node:crypto"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createMockDrive } from "@/esign/drive/mock"
 import { EsignError } from "@/esign/errors"
@@ -17,7 +18,13 @@ const president: Caller = { sub: "sub-president", canManage: false }
 
 const placement = (page: number) => ({ page, x: 0.1, y: 0.8, width: 0.35, height: 0.1 })
 
-function setup(opts: { allowTestCertificates?: boolean } = {}) {
+function setup(
+  opts: {
+    allowTestCertificates?: boolean
+    revocation?: "good" | "revoked" | "unknown"
+    policy?: "require" | "prefer" | "off"
+  } = {}
+) {
   let clock = new Date("2026-10-17T10:00:00Z").getTime()
   const store = createMemoryStore()
   const drive = createMockDrive()
@@ -32,6 +39,16 @@ function setup(opts: { allowTestCertificates?: boolean } = {}) {
     logger: { info: () => {}, warn: () => {}, error: () => {} },
     dashboardUrl: "https://admin.example.org",
     allowTestCertificates: opts.allowTestCertificates ?? true,
+    revocation: opts.policy ?? "prefer",
+    // The test CA plays the CIE CA when a revocation outcome is set, so the OCSP policy applies.
+    trust: opts.revocation
+      ? () => ({ trusted: true, chain: [], issuer: new X509Certificate(Buffer.from(ca.cert.rawData)) })
+      : undefined,
+    checkRevocation: async () => ({
+      status: opts.revocation ?? "good",
+      detail: null,
+      checkedAt: new Date().toISOString(),
+    }),
     now: () => new Date(clock),
   })
   const advance = (ms: number) => {
@@ -218,6 +235,74 @@ describe("e-signing service", () => {
     const { request: after, events } = await env.service.getRequest(manager, request.id)
     expect(after.signers[0]).toMatchObject({ status: "signed", fiscalCode: "RSSMRA80A01F205X" })
     expect(events.find((e) => e.type === "signed")?.data).toMatchObject({ method: "upload" })
+  })
+
+  it("binds the CIE atomically when two prepared signatures use different cards", async () => {
+    const first = await prepareRequest(env, false)
+    const second = await prepareRequest(env, false)
+    const a = await env.service.createJob(secretary, first.id)
+    const b = await env.service.createJob(secretary, second.id)
+    const prepA = await env.service.agentPrepare(a.ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+    const prepB = await env.service.agentPrepare(b.ticket, Buffer.from(presidentSigner.cert).toString("base64"))
+    const sigA = await cardSign(secretarySigner, new Uint8Array(Buffer.from(prepA.toBeSigned, "base64")))
+    const sigB = await cardSign(presidentSigner, new Uint8Array(Buffer.from(prepB.toBeSigned, "base64")))
+    await env.service.agentComplete(a.ticket, Buffer.from(sigA).toString("base64"))
+    await expect(env.service.agentComplete(b.ticket, Buffer.from(sigB).toString("base64"))).rejects.toMatchObject({
+      code: "signer_mismatch",
+    })
+  })
+
+  it("can't cancel a request that just completed, and only managers cancel", async () => {
+    const request = await prepareRequest(env, false)
+    await expect(env.service.cancelRequest({ ...manager, canManage: false }, request.id)).rejects.toMatchObject({
+      code: "forbidden",
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    await sign(env, president, presidentSigner, request.id)
+    await expect(env.service.cancelRequest(manager, request.id)).rejects.toMatchObject({ code: "conflict" })
+  })
+
+  it("refuses a revoked CIE and, when required, an unknown status", async () => {
+    env = setup({ revocation: "revoked" })
+    let request = await prepareRequest(env)
+    let job = await env.service.createJob(secretary, request.id)
+    await expect(
+      env.service.agentPrepare(job.ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+    ).rejects.toThrow(/revoked/)
+    env = setup({ revocation: "unknown", policy: "require" })
+    request = await prepareRequest(env)
+    job = await env.service.createJob(secretary, request.id)
+    await expect(
+      env.service.agentPrepare(job.ticket, Buffer.from(secretarySigner.cert).toString("base64"))
+    ).rejects.toMatchObject({ code: "unavailable" })
+    env = setup({ revocation: "unknown" })
+    request = await prepareRequest(env)
+    const { done } = await sign(env, secretary, secretarySigner, request.id)
+    expect(done.status).toBe("completed")
+    const { events } = await env.service.getRequest(manager, request.id)
+    expect(events.find((e) => e.type === "signed")?.data).toMatchObject({ revocation: "unknown" })
+  })
+
+  it("resumes a delivery that a crash left pending", async () => {
+    const request = await prepareRequest(env)
+    env.mailer.signedDocument.mockRejectedValueOnce(new Error("process died"))
+    await sign(env, secretary, secretarySigner, request.id)
+    await sign(env, president, presidentSigner, request.id)
+    await vi.waitFor(async () =>
+      expect((await env.service.getRequest(manager, request.id)).request.delivery?.status).toBe("failed")
+    )
+    // A failed delivery waits for a manager's retry; a pending one left by a crash is resumed by the sweep.
+    await env.store.updateRequest(request.id, {
+      delivery: {
+        status: "pending",
+        driveItem: null,
+        emailedTo: [],
+        error: null,
+        attemptedAt: new Date(0).toISOString(),
+      },
+    })
+    await env.service.sweep()
+    expect((await env.service.getRequest(manager, request.id)).request.delivery?.status).toBe("delivered")
   })
 
   it("lets a signer decline", async () => {

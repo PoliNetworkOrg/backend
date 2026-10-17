@@ -19,6 +19,7 @@ import type {
   SigningRequest,
 } from "./store"
 import { cieChain } from "./trust"
+import { checkRevocation, type RevocationResult } from "./trust/ocsp"
 
 /** Who is calling, and what the IdP lets them do. */
 export type Caller = { sub: string; canManage: boolean }
@@ -55,12 +56,26 @@ export type ServiceOptions = {
   dashboardUrl: string
   /** Accept certificates that are not issued by the CIE CAs (development keys). */
   allowTestCertificates: boolean
+  /**
+   * OCSP for CIE certificates: "require" refuses when the status can't be established, "prefer" refuses only revoked
+   * certificates and records an unknown status, "off" skips it.
+   */
+  revocation?: "require" | "prefer" | "off"
+  /** Replaces the OCSP check in tests. */
+  checkRevocation?: typeof checkRevocation
+  /** Replaces the CIE CA check in tests. */
+  trust?: typeof cieChain
   now?: () => Date
   jobTtlMs?: number
 }
 
-/** Emails attach PDFs up to this size; larger ones are linked from OneDrive. */
-const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
+/**
+ * Emails attach PDFs up to this size; larger ones are linked from OneDrive. Graph's sendMail takes the MIME message
+ * base64-encoded, holding the attachment base64-encoded: about 1.8× the PDF, under Graph's 4 MB request limit.
+ */
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
+/** A delivery attempt older than this is presumed dead and may be resumed. */
+const DELIVERY_CLAIM_MS = 5 * 60 * 1000
 const STAGED_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_SIGNERS = 10
 
@@ -120,6 +135,24 @@ export function createEsignService(options: ServiceOptions) {
   const now = options.now ?? (() => new Date())
   const jobTtlMs = options.jobTtlMs ?? 10 * 60 * 1000
   const infoCache = new Map<string, PdfInfo>()
+  const revocationPolicy = options.revocation ?? "prefer"
+
+  /** Applies the revocation policy to a trusted CIE certificate; null when not checked. */
+  async function revocationOf(cert: X509Certificate, issuer: X509Certificate | null): Promise<RevocationResult | null> {
+    if (!issuer || revocationPolicy === "off") return null
+    const result = await (options.checkRevocation ?? checkRevocation)(cert, issuer, { now: now() })
+    if (result.status === "revoked")
+      throw new EsignError("certificate_invalid", "This CIE certificate has been revoked")
+    if (result.status === "unknown") {
+      logger.warn({ detail: result.detail }, "[ESIGN] revocation status unknown")
+      if (revocationPolicy === "require")
+        throw new EsignError(
+          "unavailable",
+          "Couldn't check whether the CIE is still valid. Try again in a few minutes."
+        )
+    }
+    return result
+  }
 
   async function info(sha256: string, content: Uint8Array): Promise<PdfInfo> {
     const cached = infoCache.get(sha256)
@@ -236,7 +269,13 @@ export function createEsignService(options: ServiceOptions) {
     return { request, signer, current }
   }
 
-  async function deliver(requestId: string) {
+  /**
+   * Uploads and emails a completed request's PDF. A claim makes one worker do it at a time; a crash leaves it pending,
+   * and the sweep resumes it once the claim is stale.
+   */
+  async function deliver(requestId: string, retry = false) {
+    const at = now()
+    if (!(await store.claimDelivery(requestId, at, new Date(at.getTime() - DELIVERY_CLAIM_MS), retry))) return
     const request = await store.getRequest(requestId)
     if (!request || request.status !== "completed") return
     const document = await store.latestDocument(requestId)
@@ -261,7 +300,9 @@ export function createEsignService(options: ServiceOptions) {
         })
       }
       if (request.email && request.email.to.length > 0 && delivery.emailedTo.length === 0) {
-        const attach = document.size <= MAX_ATTACHMENT_BYTES || !delivery.driveItem?.webUrl
+        const attach = document.size <= MAX_ATTACHMENT_BYTES
+        if (!attach && !delivery.driveItem?.webUrl)
+          throw new Error("The PDF is too large to email and there is no OneDrive link to send instead")
         const sent = await mailer.signedDocument(
           request.email.to,
           {
@@ -295,6 +336,7 @@ export function createEsignService(options: ServiceOptions) {
     sha256: string
     identity: ReturnType<typeof identityOf>
     method: "agent" | "upload"
+    revocation: RevocationResult | null
   }) {
     const { request, signer, current, job, signed, sha256, identity } = input
     const remaining = request.signers.filter((s) => s.status === "pending" && s.id !== signer.id).length
@@ -320,6 +362,7 @@ export function createEsignService(options: ServiceOptions) {
         certificateIssuer: identity.issuer,
       },
       complete: remaining === 0,
+      identity: { sub: signer.sub, fiscalCode: identity.fiscalCode, certificateSubject: identity.subject },
       event: {
         requestId: request.id,
         actorSub: job.sub,
@@ -330,21 +373,16 @@ export function createEsignService(options: ServiceOptions) {
           version: job.baseVersion + 1,
           issuer: identity.issuer,
           method: input.method,
+          revocation: input.revocation?.status ?? "not_checked",
         },
       },
     })
+    if (result === "mismatch") throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
     if (result === "conflict")
       throw new EsignError("document_changed", "Someone else signed in the meantime. Start again from the dashboard.")
-    const profile = await store.getProfile(signer.sub)
-    if (profile && !profile.fiscalCode && identity.fiscalCode)
-      await store.setProfileIdentity(signer.sub, {
-        fiscalCode: identity.fiscalCode,
-        certificateSubject: identity.subject,
-      })
 
     const updated = await store.getRequest(request.id)
     if (updated?.status === "completed") {
-      await store.addEvent({ requestId: request.id, actorSub: null, type: "completed", data: null })
       void deliver(request.id).catch((error) => logger.error({ error }, "[ESIGN] delivery crashed"))
     } else if (updated) {
       void notifyTurn(updated, null).catch((error) => logger.error({ error }, "[ESIGN] notification crashed"))
@@ -442,6 +480,11 @@ export function createEsignService(options: ServiceOptions) {
         if (!folder) throw new EsignError("bad_request", "Choose a folder in the shared drive")
         output = { folderId: folder.id, folderPath: folder.path, fileName: safeFileName(input.output.fileName) }
       }
+      if (input.email?.to.length && !output && document.size > MAX_ATTACHMENT_BYTES * 0.9)
+        throw new EsignError(
+          "bad_request",
+          "The PDF is too large to email as an attachment: also save it to OneDrive so the email can link it"
+        )
       const email: EmailJson | null =
         input.email && input.email.to.length > 0
           ? {
@@ -499,39 +542,37 @@ export function createEsignService(options: ServiceOptions) {
     },
 
     async cancelRequest(caller: Caller, id: string) {
-      const request = await requestFor(caller, id)
-      if (!caller.canManage && request.createdBySub !== caller.sub)
-        throw new EsignError("forbidden", "Only the creator or a manager can cancel")
-      if (request.status !== "in_progress") throw new EsignError("conflict", "The request is not in progress")
-      for (const job of await store.openJobs(id))
-        await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
-      await store.updateRequest(id, { status: "cancelled", cancelledAt: now() })
-      await store.addEvent({ requestId: id, actorSub: caller.sub, type: "cancelled", data: null })
+      await requestFor(caller, id)
+      if (!caller.canManage) throw new EsignError("forbidden", "Only managers can cancel requests")
+      const result = await store.cancelRequest(id, {
+        requestId: id,
+        actorSub: caller.sub,
+        type: "cancelled",
+        data: null,
+      })
+      if (result === "conflict") throw new EsignError("conflict", "The request is not in progress")
     },
 
     async declineRequest(caller: Caller, id: string, reason: string | null) {
       const request = await requestFor(caller, id)
       const signer = request.signers.find((s) => s.sub === caller.sub && s.status === "pending")
       if (request.status !== "in_progress" || !signer) throw new EsignError("conflict", "There is nothing to decline")
-      for (const job of await store.openJobs(id))
-        await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
-      await store.updateSigner(signer.id, { status: "declined", declineReason: reason?.trim() || null })
-      await store.updateRequest(id, { status: "declined" })
-      await store.addEvent({
+      const why = reason?.trim() || null
+      const result = await store.declineRequest(id, signer.id, why, {
         requestId: id,
         actorSub: caller.sub,
         type: "declined",
-        data: { reason: reason?.trim() || null },
+        data: { reason: why },
       })
+      if (result === "conflict") throw new EsignError("conflict", "The request changed; reload it")
     },
 
     async retryDelivery(caller: Caller, id: string) {
       const request = await requestFor(caller, id)
-      if (!caller.canManage && request.createdBySub !== caller.sub)
-        throw new EsignError("forbidden", "Only the creator or a manager can retry")
+      if (!caller.canManage) throw new EsignError("forbidden", "Only managers can retry the delivery")
       if (request.status !== "completed" || request.delivery?.status !== "failed")
         throw new EsignError("conflict", "Nothing to retry")
-      await deliver(id)
+      await deliver(id, true)
       return (await store.getRequest(id))?.delivery ?? null
     },
 
@@ -620,10 +661,13 @@ export function createEsignService(options: ServiceOptions) {
       const at = now()
       if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
         throw new EsignError("certificate_invalid", "The CIE certificate is expired")
-      const trust = cieChain(cert, at)
+      const trust = (options.trust ?? cieChain)(cert, at)
       if (!trust.trusted && !options.allowTestCertificates)
         throw new EsignError("certificate_invalid", "This certificate was not issued for a CIE")
       const identity = identityOf(cert)
+      if (!identity.fiscalCode && !options.allowTestCertificates)
+        throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
+      const revocation = await revocationOf(cert, trust.issuer)
       const profile = await store.getProfile(signer.sub)
       if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
         throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
@@ -669,6 +713,7 @@ export function createEsignService(options: ServiceOptions) {
           certificate: b64(prepared.certificate),
           chain: chain.map(b64),
           signingTime: at.toISOString(),
+          revocation,
         },
       })
       if (!ok) throw new EsignError("conflict", "The signature changed state; start again")
@@ -712,7 +757,17 @@ export function createEsignService(options: ServiceOptions) {
         throw new EsignError("signature_invalid", "The signed document failed verification")
 
       const identity = identityOf(new X509Certificate(Buffer.from(prepared.certificate)))
-      return commitSigned({ request, signer, current, job, signed, sha256, identity, method: "agent" })
+      return commitSigned({
+        request,
+        signer,
+        current,
+        job,
+        signed,
+        sha256,
+        identity,
+        method: "agent",
+        revocation: state.revocation ?? null,
+      })
     },
 
     /**
@@ -755,9 +810,13 @@ export function createEsignService(options: ServiceOptions) {
       const at = now()
       if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
         throw new EsignError("certificate_invalid", "The CIE certificate is expired")
-      if (!cieChain(cert, at).trusted && !options.allowTestCertificates)
+      const uploadTrust = (options.trust ?? cieChain)(cert, at)
+      if (!uploadTrust.trusted && !options.allowTestCertificates)
         throw new EsignError("certificate_invalid", "The file was not signed with a CIE")
       const identity = identityOf(cert)
+      if (!identity.fiscalCode && !options.allowTestCertificates)
+        throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
+      const uploadRevocation = await revocationOf(cert, uploadTrust.issuer)
       const profile = await store.getProfile(signer.sub)
       if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
         throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
@@ -775,7 +834,17 @@ export function createEsignService(options: ServiceOptions) {
         expiresAt: new Date(at.getTime() + 60_000),
       })
       await store.transitionJob(job.id, ["pending"], { status: "prepared" })
-      return commitSigned({ request, signer, current, job, signed: bytes, sha256, identity, method: "upload" })
+      return commitSigned({
+        request,
+        signer,
+        current,
+        job,
+        signed: bytes,
+        sha256,
+        identity,
+        method: "upload",
+        revocation: uploadRevocation,
+      })
     },
 
     async agentFail(ticket: string, code: string, message: string | null) {
@@ -793,6 +862,8 @@ export function createEsignService(options: ServiceOptions) {
     /** Periodic cleanup: expired jobs, their prepared PDFs and abandoned uploads. */
     async sweep() {
       await store.sweepJobs(now())
+      for (const id of await store.pendingDeliveries(new Date(now().getTime() - DELIVERY_CLAIM_MS)))
+        await deliver(id).catch((error) => logger.error({ error, requestId: id }, "[ESIGN] resumed delivery failed"))
       const removed = await store.deleteStaleStaged(new Date(now().getTime() - STAGED_TTL_MS))
       if (removed) logger.info({ removed }, "[ESIGN] removed abandoned uploads")
     },

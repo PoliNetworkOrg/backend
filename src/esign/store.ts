@@ -134,6 +134,11 @@ export type SignatureCommit = {
   /** Set when this signature completes the request. */
   complete: boolean
   event: NewEvent
+  /**
+   * The signer's CIE identity: checked against the profile's bound fiscal code and bound on first use, in the same
+   * transaction, so two prepared signatures with different cards cannot both pass.
+   */
+  identity: { sub: string; fiscalCode: string | null; certificateSubject: string }
 }
 
 /** Persistence for e-signing. Implemented over Postgres, and in memory for tests. */
@@ -156,10 +161,18 @@ export interface EsignStore {
   createRequest(input: NewRequest): Promise<SigningRequest>
   getRequest(id: string): Promise<SigningRequest | null>
   listRequests(filter: RequestFilter): Promise<SigningRequest[]>
-  updateRequest(
-    id: string,
-    patch: Partial<Pick<SigningRequest, "status" | "delivery" | "completedAt" | "cancelledAt">>
-  ): Promise<void>
+  updateRequest(id: string, patch: Partial<Pick<SigningRequest, "delivery">>): Promise<void>
+  /** Cancels an in-progress request and its open jobs, atomically with signature commits. */
+  cancelRequest(id: string, event: NewEvent): Promise<"ok" | "conflict">
+  /** Records a pending signer's refusal, which ends the request, atomically with signature commits. */
+  declineRequest(id: string, signerId: string, reason: string | null, event: NewEvent): Promise<"ok" | "conflict">
+  /**
+   * Claims a completed request's delivery for one worker: succeeds when it is pending (or failed with `retry`) and no
+   * other attempt started after `staleBefore`.
+   */
+  claimDelivery(id: string, at: Date, staleBefore: Date, retry: boolean): Promise<boolean>
+  /** Completed requests whose delivery is pending and was not attempted after `staleBefore`. */
+  pendingDeliveries(staleBefore: Date): Promise<string[]>
   updateSigner(id: string, patch: Partial<Pick<Signer, "status" | "declineReason" | "placement">>): Promise<void>
 
   addEvent(event: NewEvent): Promise<void>
@@ -180,7 +193,7 @@ export interface EsignStore {
     }
   ): Promise<boolean>
   /** Applies a signature if the request is still at `baseVersion` and the job is prepared. */
-  commitSignature(commit: SignatureCommit): Promise<"ok" | "conflict">
+  commitSignature(commit: SignatureCommit): Promise<"ok" | "conflict" | "mismatch">
   /** Marks old open jobs expired and drops prepared PDFs of finished jobs. */
   sweepJobs(now: Date): Promise<void>
 }

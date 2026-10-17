@@ -56,8 +56,17 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
   const acroForm = context.lookupMaybe(doc.catalog.get(PDFName.of("AcroForm")), PDFDict)
   const fields = acroForm ? context.lookupMaybe(acroForm.get(PDFName.of("Fields")), PDFArray) : undefined
 
+  // Field trees come from untrusted files: visit each object once, within a fixed budget, so cycles and wide or
+  // repeated /Kids cannot make the walk explode.
+  const seen = new Set<string>()
+  let budget = 20_000
   const visit = (ref: unknown, parentName: string, depth: number) => {
-    if (depth > 32) return
+    if (depth > 32 || --budget < 0) return
+    if (ref instanceof PDFRef) {
+      const key = ref.toString()
+      if (seen.has(key)) return
+      seen.add(key)
+    }
     const field = context.lookupMaybe(ref as PDFRef, PDFDict)
     if (!field) return
     const partial = text(field.get(PDFName.of("T")))

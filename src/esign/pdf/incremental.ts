@@ -124,9 +124,10 @@ function readTail(bytes: Uint8Array): Tail {
   let dict: string
   if (section.startsWith("xref")) {
     kind = "table"
-    const trailerAt = section.indexOf("trailer")
+    // A classic table has 20 bytes per object, so its trailer can be far past the start of the section.
+    const trailerAt = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).indexOf("trailer", startxref, "latin1")
     if (trailerAt < 0) throw new PdfError("malformed", "trailer not found")
-    dict = section.slice(trailerAt)
+    dict = latin1.decode(bytes.subarray(trailerAt, Math.min(bytes.length, trailerAt + 4096)))
   } else if (/^\d+\s+\d+\s+obj/.test(section)) {
     kind = "stream"
     dict = section.slice(0, section.indexOf("stream"))
@@ -183,8 +184,8 @@ function assertChangesAllowed(doc: PDFDocument) {
   for (let i = 0; i < (references?.size() ?? 0); i++) {
     const ref = context.lookupMaybe(references?.get(i), PDFDict)
     const params = ref ? context.lookupMaybe(ref.get(PDFName.of("TransformParams")), PDFDict) : undefined
-    const p = params?.get(PDFName.of("P"))
-    if (p instanceof PDFNumber && p.asNumber() === 1)
+    const p = params ? context.lookupMaybe(params.get(PDFName.of("P")), PDFNumber) : undefined
+    if (p?.asNumber() === 1)
       throw new PdfError("locked", "The document is certified and does not allow further signatures")
   }
 }

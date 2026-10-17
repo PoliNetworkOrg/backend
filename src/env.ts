@@ -63,6 +63,9 @@ export const env = createEnv({
       .optional()
       .transform((v) => (v === undefined ? nodeEnv !== "production" : v === "true")),
 
+    /** OCSP for CIE certificates: require (refuse when unknown), prefer (refuse only revoked), off. */
+    ESIGN_REVOCATION: z.enum(["require", "prefer", "off"]).default("prefer"),
+
     // PoliNetwork IdP (RFC v3 §6, §12). Token authentication is enabled when IDP_PUBLIC_URL and
     // OAUTH_BACKEND_RESOURCE_URI are set; snapshot pulls also need the internal resource and the
     // backend client's credentials. Without them every permission check denies.

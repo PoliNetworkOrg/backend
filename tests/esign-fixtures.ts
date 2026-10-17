@@ -41,7 +41,7 @@ export async function createTestCa() {
     })
     return { cert: new Uint8Array(leaf.rawData), key: own.privateKey, name, fiscalCode }
   }
-  return { cert, issue }
+  return { cert, keys, issue }
 }
 
 /** Signs a SHA-256 digest like the agent with CKM_RSA_PKCS: DigestInfo, PKCS#1 v1.5 padding, raw RSA. */

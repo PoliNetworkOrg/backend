@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as x509 from "@peculiar/x509"
-import { degrees, PDFDocument, StandardFonts } from "pdf-lib"
+import { degrees, PDFDocument, PDFName, PDFNumber, PDFString, StandardFonts } from "pdf-lib"
 import { beforeAll, describe, expect, it } from "vitest"
 import { addSignaturePlaceholder } from "@/esign/pdf/incremental"
 import { inspectPdf } from "@/esign/pdf/inspect"
@@ -170,6 +170,38 @@ it("rejects a signature by another key", async () => {
   })
   const wrong = await cardSign(president, prepared.toBeSigned)
   expect(() => finalizeSignature(prepared, wrong)).toThrow(SignatureError)
+})
+
+it("inspects a PDF whose fields reference themselves without looping", async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([200, 200])
+  const ref = doc.context.nextRef()
+  const field = doc.context.obj({ FT: "Sig", T: PDFString.of("loop") })
+  field.set(PDFName.of("Kids"), doc.context.obj([ref, ref, ref]))
+  doc.context.assign(ref, field)
+  doc.catalog.set(PDFName.of("AcroForm"), doc.context.obj({ Fields: [ref] }))
+  const started = Date.now()
+  const info = await inspectPdf(await doc.save())
+  expect(Date.now() - started).toBeLessThan(2000)
+  expect(info.fieldNames).toEqual(["loop"])
+})
+
+it("signs a classic PDF whose cross-reference table is longer than 64 KB", async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([595, 842])
+  for (let i = 0; i < 4000; i++) doc.context.register(doc.context.obj({ Filler: i }))
+  const pdf = await doc.save({ useObjectStreams: false })
+  const signed = await sign(pdf, secretary, 0, "Firma")
+  expect((await inspectPdf(signed)).signatures[0]).toMatchObject({ intact: true, verified: true })
+})
+
+it("refuses documents certified against changes, also with an indirect permission", async () => {
+  const doc = await PDFDocument.create()
+  doc.addPage([595, 842])
+  const p = doc.context.register(PDFNumber.of(1))
+  const sig = doc.context.obj({ Reference: [{ TransformMethod: "DocMDP", TransformParams: { P: p } }] })
+  doc.catalog.set(PDFName.of("Perms"), doc.context.obj({ DocMDP: doc.context.register(sig) }))
+  await expect(sign(await doc.save(), secretary, 0, "Firma")).rejects.toThrow(/certified/)
 })
 
 it("refuses a page that does not exist", async () => {

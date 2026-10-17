@@ -14,6 +14,12 @@ import type {
 
 const { profiles, requests, documents, signers, jobs, events } = schema
 
+/**
+ * `delivery` as a JSON object. drizzle's bun-sql driver stores jsonb values as a JSON string scalar; `#>> '{}'` then
+ * `::jsonb` reads both that and a plain object, so the operators below work either way.
+ */
+const delivery = sql`((${requests.delivery} #>> '{}')::jsonb)`
+
 type Db = typeof Database
 
 const documentMeta = {
@@ -270,11 +276,77 @@ export function createPgStore(db: Db): EsignStore {
         .returning({ id: jobs.id })
       return rows.length === 1
     },
+    async cancelRequest(id, event) {
+      return db.transaction(async (tx) => {
+        const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for("update")
+        if (!request || request.status !== "in_progress") return "conflict" as const
+        await tx
+          .update(jobs)
+          .set({ status: "cancelled", preparedPdf: null })
+          .where(and(eq(jobs.requestId, id), inArray(jobs.status, ["pending", "prepared"])))
+        await tx.update(requests).set({ status: "cancelled", cancelledAt: new Date() }).where(eq(requests.id, id))
+        await tx.insert(events).values(event)
+        return "ok" as const
+      })
+    },
+    async declineRequest(id, signerId, reason, event) {
+      return db.transaction(async (tx) => {
+        const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for("update")
+        if (!request || request.status !== "in_progress") return "conflict" as const
+        const declined = await tx
+          .update(signers)
+          .set({ status: "declined", declineReason: reason })
+          .where(and(eq(signers.id, signerId), eq(signers.requestId, id), eq(signers.status, "pending")))
+          .returning({ id: signers.id })
+        if (declined.length !== 1) return "conflict" as const
+        await tx
+          .update(jobs)
+          .set({ status: "cancelled", preparedPdf: null })
+          .where(and(eq(jobs.requestId, id), inArray(jobs.status, ["pending", "prepared"])))
+        await tx.update(requests).set({ status: "declined" }).where(eq(requests.id, id))
+        await tx.insert(events).values(event)
+        return "ok" as const
+      })
+    },
+    async claimDelivery(id, at, staleBefore, retry) {
+      const statuses = retry ? sql`('pending', 'failed')` : sql`('pending')`
+      const rows = await db
+        .update(requests)
+        .set({ delivery: sql`jsonb_set(${delivery}, '{attemptedAt}', to_jsonb(${at.toISOString()}::text))` })
+        .where(
+          and(
+            eq(requests.id, id),
+            eq(requests.status, "completed"),
+            sql`${delivery}->>'status' in ${statuses}`,
+            sql`(${delivery}->>'attemptedAt' is null or (${delivery}->>'attemptedAt')::timestamptz < ${staleBefore.toISOString()}::timestamptz or ${retry})`
+          )
+        )
+        .returning({ id: requests.id })
+      return rows.length === 1
+    },
+    async pendingDeliveries(staleBefore) {
+      const rows = await db
+        .select({ id: requests.id })
+        .from(requests)
+        .where(
+          and(
+            eq(requests.status, "completed"),
+            sql`${delivery}->>'status' = 'pending'`,
+            sql`(${delivery}->>'attemptedAt' is null or (${delivery}->>'attemptedAt')::timestamptz < ${staleBefore.toISOString()}::timestamptz)`
+          )
+        )
+        .limit(20)
+      return rows.map((r) => r.id)
+    },
     async commitSignature(commit) {
       return db.transaction(async (tx) => {
         // Serializes signatures on one request.
         const [request] = await tx.select().from(requests).where(eq(requests.id, commit.requestId)).for("update")
         if (!request || request.status !== "in_progress") return "conflict" as const
+        // The signer's bound CIE: locked, compared and bound on first use within this transaction.
+        const [profile] = await tx.select().from(profiles).where(eq(profiles.sub, commit.identity.sub)).for("update")
+        const { fiscalCode, certificateSubject } = commit.identity
+        if (profile?.fiscalCode && fiscalCode !== profile.fiscalCode) return "mismatch" as const
         const [current] = await tx
           .select({ version: documents.version })
           .from(documents)
@@ -310,6 +382,10 @@ export function createPgStore(db: Db): EsignStore {
             })
             .where(eq(requests.id, commit.requestId))
         await tx.insert(events).values(commit.event)
+        if (commit.complete)
+          await tx.insert(events).values({ requestId: commit.requestId, actorSub: null, type: "completed" })
+        if (profile && !profile.fiscalCode && fiscalCode)
+          await tx.update(profiles).set({ fiscalCode, certificateSubject }).where(eq(profiles.sub, commit.identity.sub))
         return "ok" as const
       })
     },

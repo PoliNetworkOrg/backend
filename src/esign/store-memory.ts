@@ -207,7 +207,57 @@ export function createMemoryStore(): EsignStore {
       }
       return true
     },
+    async cancelRequest(id, event) {
+      const request = requests.get(id)
+      if (!request || request.status !== "in_progress") return "conflict"
+      for (const [jobId, job] of jobs)
+        if (job.requestId === id && (job.status === "pending" || job.status === "prepared"))
+          jobs.set(jobId, { ...job, status: "cancelled" })
+      requests.set(id, { ...request, status: "cancelled", cancelledAt: new Date() })
+      events.push({ ...event, id: events.length + 1, at: new Date() })
+      return "ok"
+    },
+    async declineRequest(id, signerId, reason, event) {
+      const request = requests.get(id)
+      const signer = signers.get(signerId)
+      if (
+        !request ||
+        request.status !== "in_progress" ||
+        !signer ||
+        signer.requestId !== id ||
+        signer.status !== "pending"
+      )
+        return "conflict"
+      signers.set(signerId, { ...signer, status: "declined", declineReason: reason })
+      for (const [jobId, job] of jobs)
+        if (job.requestId === id && (job.status === "pending" || job.status === "prepared"))
+          jobs.set(jobId, { ...job, status: "cancelled" })
+      requests.set(id, { ...request, status: "declined" })
+      events.push({ ...event, id: events.length + 1, at: new Date() })
+      return "ok"
+    },
+    async claimDelivery(id, at, staleBefore, retry) {
+      const request = requests.get(id)
+      const delivery = request?.delivery
+      if (!request || request.status !== "completed" || !delivery) return false
+      if (!(delivery.status === "pending" || (retry && delivery.status === "failed"))) return false
+      if (!retry && delivery.attemptedAt && new Date(delivery.attemptedAt) >= staleBefore) return false
+      requests.set(id, { ...request, delivery: { ...delivery, attemptedAt: at.toISOString() } })
+      return true
+    },
+    async pendingDeliveries(staleBefore) {
+      return [...requests.values()]
+        .filter(
+          (r) =>
+            r.status === "completed" &&
+            r.delivery?.status === "pending" &&
+            (!r.delivery.attemptedAt || new Date(r.delivery.attemptedAt) < staleBefore)
+        )
+        .map((r) => r.id)
+    },
     async commitSignature(commit: SignatureCommit) {
+      const profile = profiles.get(commit.identity.sub)
+      if (profile?.fiscalCode && commit.identity.fiscalCode !== profile.fiscalCode) return "mismatch"
       const job = jobs.get(commit.jobId)
       const current = latest(commit.requestId)
       const request = requests.get(commit.requestId)
@@ -236,6 +286,21 @@ export function createMemoryStore(): EsignStore {
           delivery: { status: "pending", driveItem: null, emailedTo: [], error: null, attemptedAt: null },
         })
       events.push({ ...commit.event, id: events.length + 1, at: new Date() })
+      if (commit.complete)
+        events.push({
+          requestId: commit.requestId,
+          actorSub: null,
+          type: "completed",
+          data: null,
+          id: events.length + 1,
+          at: new Date(),
+        })
+      if (profile && !profile.fiscalCode && commit.identity.fiscalCode)
+        profiles.set(profile.sub, {
+          ...profile,
+          fiscalCode: commit.identity.fiscalCode,
+          certificateSubject: commit.identity.certificateSubject,
+        })
       return "ok"
     },
     async sweepJobs(now) {

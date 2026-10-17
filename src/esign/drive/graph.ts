@@ -40,7 +40,6 @@ export function createGraphDrive(options: {
   label: string
 }): Drive {
   const base = `/drives/${encodeURIComponent(options.driveId)}`
-  let rootPath: Promise<string> | null = null
 
   const getItem = async (id: string): Promise<GraphDriveItem> => {
     try {
@@ -54,15 +53,8 @@ export function createGraphDrive(options: {
       throw error
     }
   }
-  const root = () => {
-    rootPath ??= getItem(options.rootId)
-      .then(fullPath)
-      .catch((error) => {
-        rootPath = null
-        throw error
-      })
-    return rootPath
-  }
+  /** The root's current path, read on every check: a cached path would outlive a rename or move of the root. */
+  const root = async () => fullPath(await getItem(options.rootId))
   /** The item's path below the root, or null when it is elsewhere in the drive. */
   const relative = async (item: GraphDriveItem): Promise<string | null> => {
     const rp = await root()

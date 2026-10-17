@@ -131,6 +131,8 @@ export type PreparedJson = {
   certificate: string
   chain: string[]
   signingTime: string
+  /** OCSP result at prepare time, for the audit trail. */
+  revocation?: { status: "good" | "revoked" | "unknown"; detail: string | null; checkedAt: string } | null
 }
 
 /** One attempt at a signature, reached by the agent through a single-use ticket. */

@@ -12,6 +12,11 @@ import { createPgStore } from "./store-pg"
 
 function resolveDrive(): Drive | null {
   if (!azureCredentials) {
+    // The in-memory drive forgets uploads on restart: never let production report deliveries to it.
+    if (env.NODE_ENV === "production") {
+      logger.warn("[ESIGN] Azure credentials are not set: signed documents stay in the dashboard only")
+      return null
+    }
     logger.warn("[ESIGN] Azure credentials are not set, using the in-memory development drive")
     return createMockDrive()
   }
@@ -34,6 +39,7 @@ export const esign = createEsignService({
   logger,
   dashboardUrl: env.ESIGN_DASHBOARD_URL.replace(/\/$/, ""),
   allowTestCertificates: env.ESIGN_ALLOW_TEST_CERTIFICATES,
+  revocation: env.ESIGN_REVOCATION,
 })
 
 if (env.ESIGN_ALLOW_TEST_CERTIFICATES) logger.warn("[ESIGN] certificates not issued by the CIE CAs are accepted")
