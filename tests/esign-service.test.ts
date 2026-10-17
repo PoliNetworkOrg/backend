@@ -31,13 +31,14 @@ function setup(
   let clock = new Date("2026-10-17T10:00:00Z").getTime()
   const store = createMemoryStore()
   const drive = createMockDrive()
+  const archive = createMockDrive({ id: "archive", label: "Archive" })
   const mailer = {
     signatureRequest: vi.fn<Mailer["signatureRequest"]>().mockResolvedValue(true),
     signedDocument: vi.fn<Mailer["signedDocument"]>().mockResolvedValue(true),
   }
   const service = createEsignService({
     store,
-    drive,
+    drives: [drive, archive],
     mailer,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
     dashboardUrl: "https://admin.example.org",
@@ -57,7 +58,7 @@ function setup(
   const advance = (ms: number) => {
     clock += ms
   }
-  return { service, store, drive, mailer, advance }
+  return { service, store, drive, archive, mailer, advance }
 }
 
 async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {
@@ -74,7 +75,7 @@ async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {
       { sub: secretary.sub, role: "segretario", placement: placement(0) },
       { sub: president.sub, role: "presidente", placement: placement(1) },
     ],
-    output: { folderId: "mock-firmati", fileName: "Verbale CD firmato" },
+    output: { driveId: "dev", folderId: "mock-firmati", fileName: "Verbale CD firmato" },
     email: { to: ["archivio@example.org"], message: "In allegato il verbale." },
   })
 }
@@ -401,8 +402,48 @@ describe("e-signing service", () => {
       code: "bad_request",
     })
     await expect(
-      env.service.createRequest(manager, { ...input, output: { folderId: "mock-firmati", fileName: "big" } })
+      env.service.createRequest(manager, {
+        ...input,
+        output: { driveId: "dev", folderId: "mock-firmati", fileName: "big" },
+      })
     ).resolves.toMatchObject({ title: "Big" })
+  })
+
+  it("reads from and saves to the drive each request names", async () => {
+    expect(env.service.drives).toEqual([
+      { id: "dev", label: "OneDrive (development copy)" },
+      { id: "archive", label: "Archive" },
+    ])
+    await expect(env.service.listDrive("missing")).rejects.toMatchObject({ code: "not_found" })
+    const { document } = await env.service.stageDriveItem(manager, "archive", "mock-verbale-cd")
+    expect(document.source).toMatchObject({ kind: "drive", driveId: "archive", itemId: "mock-verbale-cd" })
+
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const base = {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: secretary.sub, role: null, placement: placement(0) }],
+      email: null,
+    }
+    await expect(
+      env.service.createRequest(manager, {
+        ...base,
+        output: { driveId: "missing", folderId: "mock-firmati", fileName: "x" },
+      })
+    ).rejects.toMatchObject({ code: "not_found" })
+    const request = await env.service.createRequest(manager, {
+      ...base,
+      output: { driveId: "archive", folderId: "mock-firmati", fileName: "Verbale firmato" },
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    await vi.waitFor(async () => {
+      const { request: done } = await env.service.getRequest(manager, request.id)
+      expect(done.delivery?.status).toBe("delivered")
+    })
+    const names = async (drive: typeof env.drive) => (await drive.list("mock-firmati")).items.map((i) => i.name)
+    expect(await names(env.archive)).toEqual(["Verbale firmato.pdf"])
+    expect(await names(env.drive)).toEqual([])
   })
 
   it("lets a signer decline", async () => {

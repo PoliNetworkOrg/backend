@@ -71,10 +71,10 @@ function requireManage(caller: Caller) {
 }
 
 export const esignRouter = createTRPCRouter({
-  /** What the dashboard can offer: whether a drive is configured and the caller can manage requests. */
+  /** What the dashboard can offer: the configured drives (none without OneDrive) and whether the caller manages requests. */
   config: user.query(({ ctx }) => {
     const caller = callerOf(ctx)
-    return { drive: esign.driveLabel, canManage: caller.canManage, maxPdfBytes: MAX_PDF_BYTES }
+    return { drives: esign.drives, canManage: caller.canManage, maxPdfBytes: MAX_PDF_BYTES }
   }),
 
   profile: createTRPCRouter({
@@ -97,10 +97,12 @@ export const esignRouter = createTRPCRouter({
   }),
 
   drive: createTRPCRouter({
-    list: user.input(z.object({ folderId: z.string().min(1).optional() })).query(({ ctx, input }) => {
-      requireManage(callerOf(ctx))
-      return run(() => esign.listDrive(input.folderId))
-    }),
+    list: user
+      .input(z.object({ driveId: z.string().min(1), folderId: z.string().min(1).optional() }))
+      .query(({ ctx, input }) => {
+        requireManage(callerOf(ctx))
+        return run(() => esign.listDrive(input.driveId, input.folderId))
+      }),
   }),
 
   documents: createTRPCRouter({
@@ -119,12 +121,14 @@ export const esignRouter = createTRPCRouter({
         )
         return { document, pdf: publicPdf(pdf) }
       }),
-    fromDrive: user.input(z.object({ itemId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
-      const caller = callerOf(ctx)
-      requireManage(caller)
-      const { document, pdf } = await run(() => esign.stageDriveItem(caller, input.itemId))
-      return { document, pdf: publicPdf(pdf) }
-    }),
+    fromDrive: user
+      .input(z.object({ driveId: z.string().min(1), itemId: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        const caller = callerOf(ctx)
+        requireManage(caller)
+        const { document, pdf } = await run(() => esign.stageDriveItem(caller, input.driveId, input.itemId))
+        return { document, pdf: publicPdf(pdf) }
+      }),
     /** The document's metadata, pages and existing signatures. */
     get: user.input(z.object({ documentId: z.uuid() })).query(async ({ ctx, input }) => {
       const { meta, pdf } = await run(() => esign.document(callerOf(ctx), input.documentId))
@@ -148,7 +152,13 @@ export const esignRouter = createTRPCRouter({
             .array(z.object({ sub: z.string().min(1), role: z.string().trim().max(80).nullable(), placement }))
             .min(1)
             .max(10),
-          output: z.object({ folderId: z.string().min(1), fileName: z.string().trim().min(1).max(200) }).nullable(),
+          output: z
+            .object({
+              driveId: z.string().min(1),
+              folderId: z.string().min(1),
+              fileName: z.string().trim().min(1).max(200),
+            })
+            .nullable(),
           email: z.object({ to: z.array(z.email()).max(20), message: z.string().max(2000).nullable() }).nullable(),
         })
       )

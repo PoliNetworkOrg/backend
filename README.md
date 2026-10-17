@@ -72,11 +72,17 @@ embeds the CMS, then saves the signed PDF to OneDrive and emails it. See the adm
 
 | Variable                        | Meaning                                                                                                                      |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `ESIGN_DRIVE_ID`                | Graph drive ID of the association's OneDrive or SharePoint library. Without Azure credentials an in-memory drive is used.     |
-| `ESIGN_DRIVE_ROOT_ID`           | Item ID of the folder the dashboard may browse and write (default: the whole drive).                                        |
-| `ESIGN_DRIVE_LABEL`             | Name shown in the dashboard (default `OneDrive`).                                                                            |
+| `ESIGN_DRIVES`                  | JSON array of the OneDrive/SharePoint libraries the dashboard offers, see below. Without Azure credentials in-memory drives are used. |
 | `ESIGN_DASHBOARD_URL`           | Dashboard origin for links in emails (default `https://admin.polinetwork.org`).                                               |
 | `ESIGN_ALLOW_TEST_CERTIFICATES` | `true` accepts certificates not issued by the CIE CAs (the agent's development key). Defaults to `true` outside production. |
+
+`ESIGN_DRIVES` lists one entry per library; `id` is a stable key stored with each request (lowercase letters, digits
+and dashes, keep it when changing the rest), `label` is shown in the dashboard, `driveId` is the Graph drive ID and
+`rootId` the item ID of the folder the dashboard may browse and write (default `root`, the whole drive):
+
+```sh
+ESIGN_DRIVES='[{"id":"segreteria","label":"Segreteria","driveId":"b!…"},{"id":"tesoreria","label":"Tesoreria","driveId":"b!…","rootId":"01…"}]'
+```
 
 Requirements:
 

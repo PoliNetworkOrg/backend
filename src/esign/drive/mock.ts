@@ -26,7 +26,7 @@ async function samplePdf(title: string, lines: string[]): Promise<Uint8Array> {
  * A seeded in-memory drive for development without Microsoft 365 credentials. Its contents last until the backend
  * restarts.
  */
-export function createMockDrive(): Drive {
+export function createMockDrive(options = { id: "dev", label: "OneDrive (development copy)" }): Drive {
   const nodes = new Map<string, Node>()
   const now = () => new Date().toISOString()
   const add = (name: string, parentId: string | null, bytes: Uint8Array | null = null, id: string = randomUUID()) => {
@@ -80,7 +80,8 @@ export function createMockDrive(): Drive {
   }
 
   return {
-    label: "OneDrive (development copy)",
+    id: options.id,
+    label: options.label,
     async list(folderId = root.id) {
       await seeded
       const folder = folderNode(folderId)
