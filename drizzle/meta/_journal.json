@@ -176,6 +176,13 @@
       "when": 1792231582549,
       "tag": "0024_esign_drop_placement",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792237528329,
+      "tag": "0025_esign_drive_access",
+      "breakpoints": true
     }
   ]
 }
