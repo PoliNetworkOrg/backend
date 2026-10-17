@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createMockDrive } from "@/esign/drive/mock"
 import { EsignError } from "@/esign/errors"
 import { inspectPdf } from "@/esign/pdf/inspect"
+import { finalizeSignature, prepareSignature } from "@/esign/pdf/pades"
 import { type Caller, createEsignService, type Mailer } from "@/esign/service"
 import { createMemoryStore } from "@/esign/store-memory"
 import { cardSign, createTestCa, samplePdf, type TestSigner } from "./esign-fixtures"
@@ -180,6 +181,43 @@ describe("e-signing service", () => {
     })
     await env.service.agentFail(ticket, "cancelled", null)
     expect((await env.service.jobStatus(secretary, jobId)).status).toBe("cancelled")
+  })
+
+  it("accepts a PDF signed with the official CIE app as a fallback", async () => {
+    const request = await prepareRequest(env)
+    const { request: detail, currentDocumentId } = await env.service.getRequest(manager, request.id)
+    const original = (await env.service.document(secretary, currentDocumentId ?? "")).content
+    // What Software CIE would produce: the same bytes plus one incremental signature.
+    async function externallySigned(signer: TestSigner) {
+      const prepared = await prepareSignature(original, signer.cert, {
+        placement: { page: 0, x: 0.1, y: 0.1, width: 0.3, height: 0.1 },
+        fieldName: "Signature1",
+        signerName: signer.name,
+        signingTime: new Date(),
+        appearance: { lines: [{ text: signer.name }] },
+      })
+      return finalizeSignature(prepared, await cardSign(signer, prepared.toBeSigned))
+    }
+    expect(detail.turn).toEqual([secretary.sub])
+    await expect(
+      env.service.uploadSigned(president, request.id, await externallySigned(presidentSigner))
+    ).rejects.toMatchObject({
+      code: "forbidden",
+    })
+    const tampered = await externallySigned(secretarySigner)
+    tampered[20] ^= 1
+    await expect(env.service.uploadSigned(secretary, request.id, tampered)).rejects.toMatchObject({
+      code: "pdf_invalid",
+    })
+    await expect(env.service.uploadSigned(secretary, request.id, original)).rejects.toMatchObject({
+      code: "pdf_invalid",
+    })
+
+    const done = await env.service.uploadSigned(secretary, request.id, await externallySigned(secretarySigner))
+    expect(done.request).toEqual({ status: "in_progress", remaining: 1 })
+    const { request: after, events } = await env.service.getRequest(manager, request.id)
+    expect(after.signers[0]).toMatchObject({ status: "signed", fiscalCode: "RSSMRA80A01F205X" })
+    expect(events.find((e) => e.type === "signed")?.data).toMatchObject({ method: "upload" })
   })
 
   it("lets a signer decline", async () => {

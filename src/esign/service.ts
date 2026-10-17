@@ -8,6 +8,7 @@ import { finalizeSignature, type PreparedSignature, prepareSignature, SignatureE
 import { type PlacementInput, validatePlacement } from "./placement"
 import type {
   DocumentMeta,
+  DocumentRecord,
   EmailJson,
   EsignStore,
   Job,
@@ -282,6 +283,77 @@ export function createEsignService(options: ServiceOptions) {
       await store.addEvent({ requestId, actorSub: null, type: "delivery_failed", data: { error: delivery.error } })
     }
     await store.updateRequest(requestId, { delivery })
+  }
+
+  /** Stores a signed version, binds the signer's CIE, then delivers or asks the next signer. */
+  async function commitSigned(input: {
+    request: SigningRequest
+    signer: Signer
+    current: DocumentRecord
+    job: Job
+    signed: Uint8Array
+    sha256: string
+    identity: ReturnType<typeof identityOf>
+    method: "agent" | "upload"
+  }) {
+    const { request, signer, current, job, signed, sha256, identity } = input
+    const remaining = request.signers.filter((s) => s.status === "pending" && s.id !== signer.id).length
+    const result = await store.commitSignature({
+      jobId: job.id,
+      requestId: request.id,
+      baseVersion: job.baseVersion,
+      document: {
+        requestId: request.id,
+        version: job.baseVersion + 1,
+        fileName: current.fileName,
+        content: signed,
+        sha256,
+        size: signed.length,
+        pages: current.pages,
+        source: current.source,
+        createdBySub: job.sub,
+      },
+      signer: {
+        id: signer.id,
+        fiscalCode: identity.fiscalCode,
+        certificateSubject: identity.subject,
+        certificateIssuer: identity.issuer,
+      },
+      complete: remaining === 0,
+      event: {
+        requestId: request.id,
+        actorSub: job.sub,
+        type: "signed",
+        data: {
+          name: identity.name,
+          fiscalCode: identity.fiscalCode,
+          version: job.baseVersion + 1,
+          issuer: identity.issuer,
+          method: input.method,
+        },
+      },
+    })
+    if (result === "conflict")
+      throw new EsignError("document_changed", "Someone else signed in the meantime. Start again from the dashboard.")
+    const profile = await store.getProfile(signer.sub)
+    if (profile && !profile.fiscalCode && identity.fiscalCode)
+      await store.setProfileIdentity(signer.sub, {
+        fiscalCode: identity.fiscalCode,
+        certificateSubject: identity.subject,
+      })
+
+    const updated = await store.getRequest(request.id)
+    if (updated?.status === "completed") {
+      await store.addEvent({ requestId: request.id, actorSub: null, type: "completed", data: null })
+      void deliver(request.id).catch((error) => logger.error({ error }, "[ESIGN] delivery crashed"))
+    } else if (updated) {
+      void notifyTurn(updated, null).catch((error) => logger.error({ error }, "[ESIGN] notification crashed"))
+    }
+    logger.info(
+      { requestId: request.id, version: job.baseVersion + 1, remaining, method: input.method },
+      "[ESIGN] signature added"
+    )
+    return { status: "completed" as const, request: { status: updated?.status ?? request.status, remaining } }
   }
 
   return {
@@ -640,59 +712,70 @@ export function createEsignService(options: ServiceOptions) {
         throw new EsignError("signature_invalid", "The signed document failed verification")
 
       const identity = identityOf(new X509Certificate(Buffer.from(prepared.certificate)))
-      const remaining = request.signers.filter((s) => s.status === "pending" && s.id !== signer.id).length
-      const result = await store.commitSignature({
-        jobId: job.id,
-        requestId: request.id,
-        baseVersion: job.baseVersion,
-        document: {
-          requestId: request.id,
-          version: job.baseVersion + 1,
-          fileName: current.fileName,
-          content: signed,
-          sha256,
-          size: signed.length,
-          pages: current.pages,
-          source: current.source,
-          createdBySub: job.sub,
-        },
-        signer: {
-          id: signer.id,
-          fiscalCode: identity.fiscalCode,
-          certificateSubject: identity.subject,
-          certificateIssuer: identity.issuer,
-        },
-        complete: remaining === 0,
-        event: {
-          requestId: request.id,
-          actorSub: job.sub,
-          type: "signed",
-          data: {
-            name: identity.name,
-            fiscalCode: identity.fiscalCode,
-            version: job.baseVersion + 1,
-            issuer: identity.issuer,
-          },
-        },
-      })
-      if (result === "conflict")
-        throw new EsignError("document_changed", "Someone else signed in the meantime. Start again from the dashboard.")
-      const profile = await store.getProfile(signer.sub)
-      if (profile && !profile.fiscalCode && identity.fiscalCode)
-        await store.setProfileIdentity(signer.sub, {
-          fiscalCode: identity.fiscalCode,
-          certificateSubject: identity.subject,
-        })
+      return commitSigned({ request, signer, current, job, signed, sha256, identity, method: "agent" })
+    },
 
-      const updated = await store.getRequest(request.id)
-      if (updated?.status === "completed") {
-        await store.addEvent({ requestId: request.id, actorSub: null, type: "completed", data: null })
-        void deliver(request.id).catch((error) => logger.error({ error }, "[ESIGN] delivery crashed"))
-      } else if (updated) {
-        void notifyTurn(updated, null).catch((error) => logger.error({ error }, "[ESIGN] notification crashed"))
+    /**
+     * The fallback when the agent can't run: the signer signs the current version with the official CIE app
+     * (Software CIE, CieSign) and uploads the result. It must be the current version byte for byte plus exactly one
+     * new signature covering the whole file, made with a CIE belonging to the signer.
+     */
+    async uploadSigned(caller: Caller, requestId: string, bytes: Uint8Array) {
+      const request = await requestFor(caller, requestId)
+      const signer = turnOf(request).find((s) => s.sub === caller.sub)
+      if (!signer) throw new EsignError("forbidden", "It is not your turn to sign")
+      for (const job of await store.openJobs(requestId))
+        if (job.sub !== caller.sub && job.expiresAt > now())
+          throw new EsignError("conflict", "Someone is signing right now. Try again in a few minutes.")
+      const current = await store.latestDocument(requestId)
+      if (!current) throw new EsignError("not_found", "Document not found")
+      if (bytes.length > MAX_PDF_BYTES) throw new EsignError("pdf_invalid", "The PDF is larger than 30 MB")
+      const mismatch =
+        "This file isn't the current version with your signature added. Download the PDF again, sign it, then upload it."
+      if (
+        bytes.length <= current.size ||
+        !Buffer.from(bytes.subarray(0, current.size)).equals(Buffer.from(current.content))
+      )
+        throw new EsignError("pdf_invalid", mismatch)
+      const sha256 = sha256Hex(bytes)
+      let check: PdfInfo
+      let before: PdfInfo
+      try {
+        ;[check, before] = await Promise.all([info(sha256, bytes), info(current.sha256, current.content)])
+      } catch (error) {
+        if (error instanceof PdfError) throw new EsignError("pdf_invalid", error.message)
+        throw error
       }
-      logger.info({ requestId: request.id, version: job.baseVersion + 1, remaining }, "[ESIGN] signature added")
-      return { status: "completed" as const, request: { status: updated?.status ?? request.status, remaining } }
+      const last = check.signatures.at(-1)
+      if (check.signatures.length !== before.signatures.length + 1 || !last)
+        throw new EsignError("pdf_invalid", "The file must add exactly one signature")
+      if (!last.intact || !last.verified || !last.coversWholeDocument || !check.lastCertificate)
+        throw new EsignError("signature_invalid", "The signature in the file is not valid")
+      const cert = check.lastCertificate
+      const at = now()
+      if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
+        throw new EsignError("certificate_invalid", "The CIE certificate is expired")
+      if (!cieChain(cert, at).trusted && !options.allowTestCertificates)
+        throw new EsignError("certificate_invalid", "The file was not signed with a CIE")
+      const identity = identityOf(cert)
+      const profile = await store.getProfile(signer.sub)
+      if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
+        throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
+
+      // A one-off job carries the upload through the same atomic commit as the agent's signatures.
+      for (const job of await store.openJobs(requestId))
+        await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
+      const job = await store.createJob({
+        ticketHash: sha256Hex(randomBytes(32)),
+        requestId,
+        signerId: signer.id,
+        sub: caller.sub,
+        baseVersion: current.version,
+        placement: signer.placement,
+        expiresAt: new Date(at.getTime() + 60_000),
+      })
+      await store.transitionJob(job.id, ["pending"], { status: "prepared" })
+      return commitSigned({ request, signer, current, job, signed: bytes, sha256, identity, method: "upload" })
     },
 
     async agentFail(ticket: string, code: string, message: string | null) {

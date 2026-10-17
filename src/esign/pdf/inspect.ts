@@ -1,3 +1,4 @@
+import type { X509Certificate } from "node:crypto"
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRef, PDFString } from "pdf-lib"
 import { displayedSize } from "./geometry"
 import { PdfError } from "./incremental"
@@ -21,6 +22,8 @@ export type PdfSignatureInfo = {
 }
 
 export type PdfInfo = {
+  /** The signer's certificate of the newest signature; server-side only, never sent to clients. */
+  lastCertificate?: X509Certificate | null
   pages: { width: number; height: number }[]
   signatures: PdfSignatureInfo[]
   /** Field names in use, so a new field can get a unique one. */
@@ -47,7 +50,7 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
   const pages = doc.getPages()
   const pageIndex = new Map(pages.map((p, i) => [p.ref.toString(), i]))
   const { context } = doc
-  const signatures: (PdfSignatureInfo & { revisionEnd: number })[] = []
+  const signatures: (PdfSignatureInfo & { revisionEnd: number; certificate: X509Certificate | null })[] = []
   const fieldNames: string[] = []
 
   const acroForm = context.lookupMaybe(doc.catalog.get(PDFName.of("AcroForm")), PDFDict)
@@ -89,6 +92,7 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
       coversWholeDocument: check.coversWholeDocument,
       page: widgetPage instanceof PDFRef ? (pageIndex.get(widgetPage.toString()) ?? null) : null,
       revisionEnd: (byteRange[2] ?? 0) + (byteRange[3] ?? 0),
+      certificate: cert,
     })
   }
   if (fields) for (let i = 0; i < fields.size(); i++) visit(fields.get(i), "", 0)
@@ -97,7 +101,8 @@ export async function inspectPdf(bytes: Uint8Array): Promise<PdfInfo> {
   signatures.sort((a, b) => a.revisionEnd - b.revisionEnd)
   return {
     pages: pages.map((p) => displayedSize(p)),
-    signatures: signatures.map(({ revisionEnd: _, ...info }) => info),
+    signatures: signatures.map(({ revisionEnd: _, certificate: __, ...info }) => info),
     fieldNames,
+    lastCertificate: signatures.at(-1)?.certificate ?? null,
   }
 }

@@ -5,6 +5,7 @@ import { env } from "@/env"
 import { esign } from "@/esign"
 import { MAX_PDF_BYTES } from "@/esign/drive/types"
 import { EsignError, type EsignErrorCode } from "@/esign/errors"
+import type { PdfInfo } from "@/esign/pdf/inspect"
 import type { Caller } from "@/esign/service"
 import { dashboard } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
@@ -60,6 +61,11 @@ const placement = z.object({
   height: z.number().gt(0).max(1),
 })
 
+/** What clients see of a PDF: pages, signatures and field names, never the certificate objects. */
+function publicPdf(pdf: PdfInfo) {
+  return { pages: pdf.pages, signatures: pdf.signatures, fieldNames: pdf.fieldNames }
+}
+
 function requireManage(caller: Caller) {
   if (!caller.canManage) throw new TRPCError({ code: "FORBIDDEN", message: "You cannot manage signature requests" })
 }
@@ -111,17 +117,18 @@ export const esignRouter = createTRPCRouter({
         const { document, pdf } = await run(async () =>
           esign.stageUpload(caller, input.name, new Uint8Array(await input.arrayBuffer()))
         )
-        return { document, pdf }
+        return { document, pdf: publicPdf(pdf) }
       }),
-    fromDrive: user.input(z.object({ itemId: z.string().min(1) })).mutation(({ ctx, input }) => {
+    fromDrive: user.input(z.object({ itemId: z.string().min(1) })).mutation(async ({ ctx, input }) => {
       const caller = callerOf(ctx)
       requireManage(caller)
-      return run(() => esign.stageDriveItem(caller, input.itemId))
+      const { document, pdf } = await run(() => esign.stageDriveItem(caller, input.itemId))
+      return { document, pdf: publicPdf(pdf) }
     }),
     /** The document's metadata, pages and existing signatures. */
     get: user.input(z.object({ documentId: z.uuid() })).query(async ({ ctx, input }) => {
       const { meta, pdf } = await run(() => esign.document(callerOf(ctx), input.documentId))
-      return { document: meta, pdf }
+      return { document: meta, pdf: publicPdf(pdf) }
     }),
     /** The PDF itself, base64-encoded. */
     content: user.input(z.object({ documentId: z.uuid() })).query(async ({ ctx, input }) => {
@@ -158,6 +165,24 @@ export const esignRouter = createTRPCRouter({
     decline: user
       .input(z.object({ id: z.uuid(), reason: z.string().max(500).nullable() }))
       .mutation(({ ctx, input }) => run(() => esign.declineRequest(callerOf(ctx), input.id, input.reason))),
+    /** The fallback: a PDF signed with the official CIE app, uploaded by its signer. */
+    uploadSigned: user
+      .input(
+        z
+          .instanceof(FormData)
+          .transform((fd) => ({ requestId: fd.get("requestId"), file: fd.get("file") }))
+          .pipe(
+            z.object({
+              requestId: z.uuid(),
+              file: z.instanceof(File).refine((f) => f.size <= MAX_PDF_BYTES, "The PDF is larger than 30 MB"),
+            })
+          )
+      )
+      .mutation(({ ctx, input }) =>
+        run(async () =>
+          esign.uploadSigned(callerOf(ctx), input.requestId, new Uint8Array(await input.file.arrayBuffer()))
+        )
+      ),
     retryDelivery: user
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => run(() => esign.retryDelivery(callerOf(ctx), input.id))),
