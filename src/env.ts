@@ -49,12 +49,32 @@ export const env = createEnv({
     AZURE_BLOB_STORAGE_ACCOUNT: z.string().default("polinetworksa"),
     AZURE_BLOB_STORAGE_CONTAINER: z.string().default("file-blobs"),
 
-    // E-signing (CIE). The drive is the OneDrive/SharePoint library whose folders the dashboard browses; without Azure
-    // credentials an in-memory development drive is used. Graph needs Files.ReadWrite.All (or Sites.Selected).
-    ESIGN_DRIVE_ID: z.string().min(1).optional(),
-    /** Item ID of the folder the dashboard may browse and write; the whole drive by default. */
-    ESIGN_DRIVE_ROOT_ID: z.string().min(1).default("root"),
-    ESIGN_DRIVE_LABEL: z.string().min(1).default("OneDrive"),
+    // E-signing (CIE). The drives are the OneDrive/SharePoint libraries whose folders the dashboard browses; without
+    // Azure credentials in-memory development drives are used. Graph needs Files.ReadWrite.All (or Sites.Selected).
+    /** JSON array of `{ id, label, driveId, rootId? }`; `rootId` is the folder the dashboard may use (whole drive). */
+    ESIGN_DRIVES: z
+      .string()
+      .default("[]")
+      .transform((value, ctx) => {
+        try {
+          return JSON.parse(value)
+        } catch {
+          ctx.addIssue({ code: "custom", message: "ESIGN_DRIVES must be a JSON array" })
+          return z.NEVER
+        }
+      })
+      .pipe(
+        z
+          .array(
+            z.object({
+              id: z.string().regex(/^[a-z0-9-]{1,40}$/, "lowercase letters, digits and dashes"),
+              label: z.string().min(1).max(80),
+              driveId: z.string().min(1),
+              rootId: z.string().min(1).default("root"),
+            })
+          )
+          .refine((drives) => new Set(drives.map((d) => d.id)).size === drives.length, "Each drive needs its own id")
+      ),
     /** Dashboard origin, for links in signature emails. */
     ESIGN_DASHBOARD_URL: z.url().default("https://admin.polinetwork.org"),
     /** Accept signing certificates not issued by the CIE CAs, e.g. the agent's development key. */

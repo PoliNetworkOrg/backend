@@ -6,35 +6,27 @@ import { env } from "@/env"
 import { logger } from "@/logger"
 import { createGraphDrive } from "./drive/graph"
 import { createMockDrive } from "./drive/mock"
-import type { Drive } from "./drive/types"
 import { createEsignService } from "./service"
 import { createPgStore } from "./store-pg"
 
-function resolveDrive(): Drive | null {
+function resolveDrives() {
   if (!azureCredentials) {
-    // The in-memory drive forgets uploads on restart: never let production report deliveries to it.
+    // The in-memory drives forget uploads on restart: never let production report deliveries to them.
     if (env.NODE_ENV === "production") {
       logger.warn("[ESIGN] Azure credentials are not set: signed documents stay in the dashboard only")
-      return null
+      return []
     }
-    logger.warn("[ESIGN] Azure credentials are not set, using the in-memory development drive")
-    return createMockDrive()
+    logger.warn("[ESIGN] Azure credentials are not set, using in-memory development drives")
+    return [createMockDrive(), createMockDrive({ id: "dev-archive", label: "Archive (development copy)" })]
   }
-  if (!env.ESIGN_DRIVE_ID) {
-    logger.warn("[ESIGN] ESIGN_DRIVE_ID is not set: signed documents stay in the dashboard only")
-    return null
-  }
-  return createGraphDrive({
-    client: getAzureClient,
-    driveId: env.ESIGN_DRIVE_ID,
-    rootId: env.ESIGN_DRIVE_ROOT_ID,
-    label: env.ESIGN_DRIVE_LABEL,
-  })
+  if (env.ESIGN_DRIVES.length === 0)
+    logger.warn("[ESIGN] ESIGN_DRIVES is empty: signed documents stay in the dashboard only")
+  return env.ESIGN_DRIVES.map((drive) => createGraphDrive({ client: getAzureClient, ...drive }))
 }
 
 export const esign = createEsignService({
   store: createPgStore(DB),
-  drive: resolveDrive(),
+  drives: resolveDrives(),
   mailer: { signatureRequest: sendSignatureRequestEmail, signedDocument: sendSignedDocumentEmail },
   logger,
   dashboardUrl: env.ESIGN_DASHBOARD_URL.replace(/\/$/, ""),

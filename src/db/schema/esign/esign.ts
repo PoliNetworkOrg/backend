@@ -23,7 +23,7 @@ const tstz = (name: string) => timestamp(name, { precision: 3, withTimezone: tru
 
 /** Where a signature goes: fractions of the displayed page, origin top-left (see esign/pdf/geometry). */
 export type PlacementJson = { page: number; x: number; y: number; width: number; height: number }
-export type OutputJson = { folderId: string; folderPath: string; fileName: string }
+export type OutputJson = { driveId: string; folderId: string; folderPath: string; fileName: string }
 export type EmailJson = { to: string[]; message: string | null }
 export type DeliveryJson = {
   status: "pending" | "delivered" | "failed"
@@ -32,7 +32,9 @@ export type DeliveryJson = {
   error: string | null
   attemptedAt: string | null
 }
-export type SourceJson = { kind: "upload" } | { kind: "drive"; itemId: string; name: string; webUrl: string | null }
+export type SourceJson =
+  | { kind: "upload" }
+  | { kind: "drive"; driveId: string; itemId: string; name: string; webUrl: string | null }
 
 /** Dashboard users who sign: display data from the IdP, and the CIE identity bound on their first signature. */
 export const profiles = createTable.esign("profiles", {

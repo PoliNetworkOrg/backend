@@ -14,8 +14,10 @@ export type DriveListing = {
   items: DriveItem[]
 }
 
-/** The association's document library (a OneDrive or SharePoint drive), restricted to one root folder. */
+/** One of the association's document libraries (a OneDrive or SharePoint drive), restricted to one root folder. */
 export interface Drive {
+  /** Stable key from the configuration, stored with requests and documents; item IDs are only unique per drive. */
+  readonly id: string
   /** Shown in the dashboard, e.g. "OneDrive · Segreteria". */
   readonly label: string
   list(folderId?: string): Promise<DriveListing>

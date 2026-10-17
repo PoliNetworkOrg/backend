@@ -50,7 +50,8 @@ type Logger = {
 
 export type ServiceOptions = {
   store: EsignStore
-  drive: Drive | null
+  /** The configured libraries, in the order the dashboard offers them; empty without OneDrive. */
+  drives: Drive[]
   mailer: Mailer
   logger: Logger
   /** Dashboard origin, for links in emails. */
@@ -87,7 +88,7 @@ export type CreateRequestInput = {
   documentId: string
   signers: { sub: string; role: string | null; placement: PlacementInput }[]
   ordered: boolean
-  output: { folderId: string; fileName: string } | null
+  output: { driveId: string; folderId: string; fileName: string } | null
   email: { to: string[]; message: string | null } | null
 }
 
@@ -134,7 +135,14 @@ export function turnOf(request: SigningRequest): Signer[] {
 }
 
 export function createEsignService(options: ServiceOptions) {
-  const { store, drive, mailer, logger } = options
+  const { store, drives, mailer, logger } = options
+
+  function driveFor(id: string) {
+    if (drives.length === 0) throw new EsignError("unavailable", "OneDrive is not configured")
+    const drive = drives.find((d) => d.id === id)
+    if (!drive) throw new EsignError("not_found", "This drive is no longer available")
+    return drive
+  }
   const now = options.now ?? (() => new Date())
   const jobTtlMs = options.jobTtlMs ?? 10 * 60 * 1000
   const infoCache = new Map<string, PdfInfo>()
@@ -292,14 +300,14 @@ export function createEsignService(options: ServiceOptions) {
     }
     try {
       if (request.output && !delivery.driveItem) {
-        if (!drive) throw new Error("OneDrive is not configured")
+        const drive = driveFor(request.output.driveId)
         const item = await drive.upload(request.output.folderId, request.output.fileName, document.content)
         delivery.driveItem = { id: item.id, name: item.name, webUrl: item.webUrl }
         await store.addEvent({
           requestId,
           actorSub: null,
           type: "uploaded",
-          data: { name: item.name, path: request.output.folderPath },
+          data: { name: item.name, path: request.output.folderPath, drive: drive.label },
         })
       }
       if (request.email && request.email.to.length > 0 && delivery.emailedTo.length === 0) {
@@ -398,8 +406,8 @@ export function createEsignService(options: ServiceOptions) {
   }
 
   return {
-    get driveLabel() {
-      return drive?.label ?? null
+    get drives() {
+      return drives.map((d) => ({ id: d.id, label: d.label }))
     },
 
     async syncProfile(caller: Caller, profile: { name: string; email: string | null }): Promise<Profile> {
@@ -414,8 +422,8 @@ export function createEsignService(options: ServiceOptions) {
       await store.setProfileIdentity(sub, null)
     },
 
-    async listDrive(folderId?: string) {
-      if (!drive) throw new EsignError("unavailable", "OneDrive is not configured")
+    async listDrive(driveId: string, folderId?: string) {
+      const drive = driveFor(driveId)
       try {
         return await drive.list(folderId)
       } catch (error) {
@@ -428,12 +436,13 @@ export function createEsignService(options: ServiceOptions) {
       return stage(caller, fileName, bytes, { kind: "upload" })
     },
 
-    async stageDriveItem(caller: Caller, itemId: string) {
-      if (!drive) throw new EsignError("unavailable", "OneDrive is not configured")
+    async stageDriveItem(caller: Caller, driveId: string, itemId: string) {
+      const drive = driveFor(driveId)
       try {
         const { item, bytes } = await drive.download(itemId)
         return await stage(caller, item.name, bytes, {
           kind: "drive",
+          driveId: drive.id,
           itemId: item.id,
           name: item.name,
           webUrl: item.webUrl,
@@ -478,10 +487,15 @@ export function createEsignService(options: ServiceOptions) {
       }
       let output: OutputJson | null = null
       if (input.output) {
-        if (!drive) throw new EsignError("unavailable", "OneDrive is not configured")
+        const drive = driveFor(input.output.driveId)
         const folder = await drive.folder(input.output.folderId)
         if (!folder) throw new EsignError("bad_request", "Choose a folder in the shared drive")
-        output = { folderId: folder.id, folderPath: folder.path, fileName: safeFileName(input.output.fileName) }
+        output = {
+          driveId: drive.id,
+          folderId: folder.id,
+          folderPath: folder.path,
+          fileName: safeFileName(input.output.fileName),
+        }
       }
       // Each signature adds an incremental update of about 34 KB (16 KB of CMS written as hex, plus the appearance).
       const expectedSize = document.size + input.signers.length * SIGNATURE_GROWTH_BYTES

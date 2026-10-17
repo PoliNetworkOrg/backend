@@ -35,6 +35,7 @@ function isNotFound(error: unknown) {
  */
 export function createGraphDrive(options: {
   client: () => Client
+  id: string
   driveId: string
   rootId: string
   label: string
@@ -70,6 +71,7 @@ export function createGraphDrive(options: {
   }
 
   return {
+    id: options.id,
     label: options.label,
     async list(folderId = options.rootId) {
       const { item: folder, path } = await inside(folderId)
