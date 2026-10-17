@@ -192,6 +192,11 @@ export interface EsignStore {
   updateRequest(id: string, patch: Partial<Pick<SigningRequest, "delivery">>): Promise<void>
   /** Cancels an in-progress request and its open jobs, atomically with signature commits. */
   cancelRequest(id: string, event: NewEvent): Promise<"ok" | "conflict">
+  /**
+   * Deletes a request with its documents, signers, jobs and events, unless it is in progress or its delivery is
+   * pending, atomically with signature commits and delivery claims.
+   */
+  deleteRequest(id: string): Promise<"ok" | "conflict">
   /** Records a pending signer's refusal, which ends the request, atomically with signature commits. */
   declineRequest(id: string, signerId: string, reason: string | null, event: NewEvent): Promise<"ok" | "conflict">
   /**

@@ -352,6 +352,15 @@ export function createPgStore(db: Db): EsignStore {
         return "ok" as const
       })
     },
+    async deleteRequest(id) {
+      return db.transaction(async (tx) => {
+        const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for("update")
+        if (!request || request.status === "in_progress" || request.delivery?.status === "pending")
+          return "conflict" as const
+        await tx.delete(requests).where(eq(requests.id, id))
+        return "ok" as const
+      })
+    },
     async declineRequest(id, signerId, reason, event) {
       return db.transaction(async (tx) => {
         const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for("update")

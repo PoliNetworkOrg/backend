@@ -235,6 +235,20 @@ export function createMemoryStore(): EsignStore {
       events.push({ ...event, id: events.length + 1, at: new Date() })
       return "ok"
     },
+    async deleteRequest(id) {
+      const request = requests.get(id)
+      if (!request || request.status === "in_progress" || request.delivery?.status === "pending") return "conflict"
+      requests.delete(id)
+      for (const [signerId, signer] of signers) if (signer.requestId === id) signers.delete(signerId)
+      for (const [jobId, job] of jobs)
+        if (job.requestId === id) {
+          jobs.delete(jobId)
+          preparedPdfs.delete(jobId)
+        }
+      for (const [docId, doc] of documents) if (doc.requestId === id) documents.delete(docId)
+      for (let i = events.length - 1; i >= 0; i--) if (events[i].requestId === id) events.splice(i, 1)
+      return "ok"
+    },
     async declineRequest(id, signerId, reason, event) {
       const request = requests.get(id)
       const signer = signers.get(signerId)
