@@ -122,7 +122,8 @@ export function createMemoryStore(): EsignStore {
           sub: s.sub,
           name: s.name,
           role: s.role,
-          placement: s.placement,
+          places: s.places,
+          signaturesDone: 0,
           status: "pending",
           signedAt: null,
           version: null,
@@ -269,16 +270,27 @@ export function createMemoryStore(): EsignStore {
       const doc = insertDocument(commit.document)
       const signer = signers.get(commit.signer.id)
       if (signer)
-        signers.set(signer.id, {
-          ...signer,
-          status: "signed",
-          signedAt: new Date(),
-          version: doc.version,
-          fiscalCode: commit.signer.fiscalCode,
-          certificateSubject: commit.signer.certificateSubject,
-          certificateIssuer: commit.signer.certificateIssuer,
-        })
-      jobs.set(job.id, { ...job, status: "completed", completedAt: new Date() })
+        signers.set(
+          signer.id,
+          commit.final
+            ? {
+                ...signer,
+                status: "signed",
+                signedAt: new Date(),
+                version: doc.version,
+                signaturesDone: signer.signaturesDone + 1,
+                fiscalCode: commit.signer.fiscalCode,
+                certificateSubject: commit.signer.certificateSubject,
+                certificateIssuer: commit.signer.certificateIssuer,
+              }
+            : { ...signer, signaturesDone: signer.signaturesDone + 1 }
+        )
+      jobs.set(
+        job.id,
+        commit.final
+          ? { ...job, status: "completed", completedAt: new Date() }
+          : { ...job, status: "pending", step: job.step + 1, baseVersion: doc.version, prepared: null }
+      )
       preparedPdfs.delete(job.id)
       if (commit.complete)
         requests.set(request.id, {
@@ -287,7 +299,7 @@ export function createMemoryStore(): EsignStore {
           completedAt: new Date(),
           delivery: { status: "pending", driveItem: null, emailedTo: [], error: null, attemptedAt: null },
         })
-      events.push({ ...commit.event, id: events.length + 1, at: new Date() })
+      if (commit.final) events.push({ ...commit.event, id: events.length + 1, at: new Date() })
       if (commit.complete)
         events.push({
           requestId: commit.requestId,

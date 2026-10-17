@@ -43,7 +43,8 @@ const jobColumns = {
   sub: jobs.sub,
   status: jobs.status,
   baseVersion: jobs.baseVersion,
-  placement: jobs.placement,
+  places: jobs.places,
+  step: jobs.step,
   expiresAt: jobs.expiresAt,
   prepared: jobs.prepared,
   errorCode: jobs.errorCode,
@@ -68,7 +69,8 @@ const toSigner = (row: typeof signers.$inferSelect): Signer => ({
   sub: row.sub,
   name: row.name,
   role: row.role,
-  placement: row.placement,
+  places: row.places,
+  signaturesDone: row.signaturesDone,
   status: row.status,
   signedAt: row.signedAt,
   version: row.version,
@@ -193,7 +195,7 @@ export function createPgStore(db: Db): EsignStore {
             sub: s.sub,
             name: s.name,
             role: s.role,
-            placement: s.placement,
+            places: s.places,
           }))
         )
         return request.id
@@ -355,21 +357,36 @@ export function createPgStore(db: Db): EsignStore {
         if (!current || current.version !== commit.baseVersion) return "conflict" as const
         const done = await tx
           .update(jobs)
-          .set({ status: "completed", completedAt: new Date(), preparedPdf: null })
+          .set(
+            commit.final
+              ? { status: "completed", completedAt: new Date(), preparedPdf: null }
+              : {
+                  status: "pending",
+                  step: sql`${jobs.step} + 1`,
+                  baseVersion: commit.document.version,
+                  prepared: null,
+                  preparedPdf: null,
+                }
+          )
           .where(and(eq(jobs.id, commit.jobId), eq(jobs.status, "prepared")))
           .returning({ id: jobs.id })
         if (done.length !== 1) return "conflict" as const
         await tx.insert(documents).values(commit.document)
         await tx
           .update(signers)
-          .set({
-            status: "signed",
-            signedAt: new Date(),
-            version: commit.document.version,
-            fiscalCode: commit.signer.fiscalCode,
-            certificateSubject: commit.signer.certificateSubject,
-            certificateIssuer: commit.signer.certificateIssuer,
-          })
+          .set(
+            commit.final
+              ? {
+                  status: "signed",
+                  signedAt: new Date(),
+                  version: commit.document.version,
+                  signaturesDone: sql`${signers.signaturesDone} + 1`,
+                  fiscalCode: commit.signer.fiscalCode,
+                  certificateSubject: commit.signer.certificateSubject,
+                  certificateIssuer: commit.signer.certificateIssuer,
+                }
+              : { signaturesDone: sql`${signers.signaturesDone} + 1` }
+          )
           .where(eq(signers.id, commit.signer.id))
         if (commit.complete)
           await tx
@@ -380,7 +397,7 @@ export function createPgStore(db: Db): EsignStore {
               delivery: { status: "pending", driveItem: null, emailedTo: [], error: null, attemptedAt: null },
             })
             .where(eq(requests.id, commit.requestId))
-        await tx.insert(events).values(commit.event)
+        if (commit.final) await tx.insert(events).values(commit.event)
         if (commit.complete)
           await tx.insert(events).values({ requestId: commit.requestId, actorSub: null, type: "completed" })
         if (profile && !profile.fiscalCode && fiscalCode)

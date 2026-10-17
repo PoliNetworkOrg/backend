@@ -35,7 +35,7 @@ const create = async () =>
     email: null,
     createdBySub: sub,
     documentId: (await stage()).id,
-    signers: [{ sub, name: "Smoke Test", role: null, placement }],
+    signers: [{ sub, name: "Smoke Test", role: null, places: [{ ...placement, kind: "signature" }] }],
   })
 
 const a = await create()
@@ -45,18 +45,26 @@ const job = await store.createJob({
   signerId: a.signers[0].id,
   sub,
   baseVersion: 0,
-  placement,
+  places: [{ ...placement, kind: "signature" }],
+  step: 0,
   expiresAt: new Date(Date.now() + 60_000),
 })
 await store.transitionJob(job.id, ["pending"], { status: "prepared" })
-const commit = (fiscalCode: string, jobId: string, requestId: string, signerId: string) =>
+const commit = (
+  fiscalCode: string,
+  jobId: string,
+  requestId: string,
+  signerId: string,
+  final = true,
+  baseVersion = 0
+) =>
   store.commitSignature({
     jobId,
     requestId,
-    baseVersion: 0,
+    baseVersion,
     document: {
       requestId,
-      version: 1,
+      version: baseVersion + 1,
       fileName: "smoke.pdf",
       content: new Uint8Array([1]),
       sha256: "y",
@@ -66,7 +74,8 @@ const commit = (fiscalCode: string, jobId: string, requestId: string, signerId: 
       createdBySub: sub,
     },
     signer: { id: signerId, fiscalCode, certificateSubject: "CN=x", certificateIssuer: "CA" },
-    complete: true,
+    final,
+    complete: final,
     identity: { sub, fiscalCode, certificateSubject: "CN=x" },
     event: { requestId, actorSub: sub, type: "signed", data: null },
   })
@@ -88,7 +97,8 @@ const job2 = await store.createJob({
   signerId: b.signers[0].id,
   sub,
   baseVersion: 0,
-  placement,
+  places: [{ ...placement, kind: "signature" }],
+  step: 0,
   expiresAt: new Date(Date.now() + 60_000),
 })
 await store.transitionJob(job2.id, ["pending"], { status: "prepared" })
@@ -108,6 +118,49 @@ check(
   "cancel in progress",
   (await store.cancelRequest(c.id, { requestId: c.id, actorSub: sub, type: "cancelled", data: null })) === "ok"
 )
+
+// A signer with two places: the first commit moves the job on, the second finishes.
+const d = await store.createRequest({
+  title: "smoke",
+  ordered: true,
+  output: null,
+  email: null,
+  createdBySub: sub,
+  documentId: (await stage()).id,
+  signers: [
+    {
+      sub,
+      name: "Smoke Test",
+      role: null,
+      places: [
+        { ...placement, kind: "signature" },
+        { ...placement, kind: "signature" },
+      ],
+    },
+  ],
+})
+const job3 = await store.createJob({
+  ticketHash: randomUUID(),
+  requestId: d.id,
+  signerId: d.signers[0].id,
+  sub,
+  baseVersion: 0,
+  places: d.signers[0].places,
+  step: 0,
+  expiresAt: new Date(Date.now() + 60_000),
+})
+await store.transitionJob(job3.id, ["pending"], { status: "prepared" })
+check("first place commits", (await commit("AAA", job3.id, d.id, d.signers[0].id, false)) === "ok")
+const afterFirst = await store.getJob(job3.id)
+check(
+  "job moves to the next place",
+  afterFirst?.status === "pending" && afterFirst.step === 1 && afterFirst.baseVersion === 1
+)
+const signerAfterFirst = (await store.getRequest(d.id))?.signers[0]
+check("signer still pending", signerAfterFirst?.status === "pending" && signerAfterFirst.signaturesDone === 1)
+await store.transitionJob(job3.id, ["pending"], { status: "prepared" })
+check("last place commits", (await commit("AAA", job3.id, d.id, d.signers[0].id, true, 1)) === "ok")
+check("request completed", (await store.getRequest(d.id))?.status === "completed")
 
 const { sql } = await import("drizzle-orm")
 await DB.execute(sql`delete from esign_requests where created_by_sub = ${sub}`)

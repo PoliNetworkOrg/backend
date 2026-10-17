@@ -6,7 +6,7 @@ import { assertSignatureOnlyUpdate } from "./pdf/diff"
 import { PdfError } from "./pdf/incremental"
 import { inspectPdf, type PdfInfo } from "./pdf/inspect"
 import { finalizeSignature, type PreparedSignature, prepareSignature, SignatureError } from "./pdf/pades"
-import { type PlacementInput, validatePlacement } from "./placement"
+import { type PlaceInput, type PlacementInput, validatePlacement, validatePlaces } from "./placement"
 import type {
   DocumentMeta,
   DocumentRecord,
@@ -14,7 +14,7 @@ import type {
   EsignStore,
   Job,
   OutputJson,
-  PlacementJson,
+  PlaceJson,
   Profile,
   Signer,
   SigningRequest,
@@ -78,15 +78,19 @@ export type ServiceOptions = {
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024
 /** A conservative bound on the size one signature adds to the PDF. */
 const SIGNATURE_GROWTH_BYTES = 48 * 1024
+/** A mark adds a stamp and its drawing to the signature's update. */
+const MARK_GROWTH_BYTES = 4 * 1024
 /** A delivery attempt older than this is presumed dead and may be resumed. */
 const DELIVERY_CLAIM_MS = 5 * 60 * 1000
 const STAGED_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_SIGNERS = 10
+/** Documents signed with one PIN. */
+const MAX_BATCH = 10
 
 export type CreateRequestInput = {
   title: string
   documentId: string
-  signers: { sub: string; role: string | null; placement: PlacementInput }[]
+  signers: { sub: string; role: string | null; places: PlaceInput[] }[]
   ordered: boolean
   output: { driveId: string; folderId: string; fileName: string } | null
   email: { to: string[]; message: string | null } | null
@@ -249,6 +253,87 @@ export function createEsignService(options: ServiceOptions) {
     }
   }
 
+  const signaturePlaces = (places: PlaceJson[]) => places.filter((p) => p.kind === "signature")
+  const signaturesLeft = (job: Job) => signaturePlaces(job.places).length - job.step
+
+  // ── Signature jobs ────────────────────────────────────────────────────────────────────────────────────────
+
+  async function createJobs(caller: Caller, items: { requestId: string; places?: PlacementInput[] }[]) {
+    if (items.length === 0 || items.length > MAX_BATCH)
+      throw new EsignError("bad_request", `Sign between 1 and ${MAX_BATCH} documents at once`)
+    if (new Set(items.map((i) => i.requestId)).size !== items.length)
+      throw new EsignError("bad_request", "Each document can be signed once")
+    // Check every request before starting any, so a batch starts whole or not at all.
+    const planned: { request: SigningRequest; signer: Signer; current: DocumentRecord; places: PlaceJson[] }[] = []
+    for (const item of items) {
+      const request = await requestFor(caller, item.requestId)
+      const signer = turnOf(request).find((s) => s.sub === caller.sub)
+      if (!signer) throw new EsignError("forbidden", `It is not your turn to sign “${request.title}”`)
+      for (const job of await store.openJobs(request.id)) {
+        if (job.sub === caller.sub || job.expiresAt < now()) continue
+        throw new EsignError(
+          "conflict",
+          `${request.signers.find((s) => s.id === job.signerId)?.name ?? "Someone"} is signing “${request.title}” right now`
+        )
+      }
+      const current = await store.latestDocument(request.id)
+      if (!current) throw new EsignError("not_found", "Document not found")
+      planned.push({ request, signer, current, places: movedPlaces(signer, item.places, current.pages) })
+    }
+    const started: { requestId: string; jobId: string; ticket: string; expiresAt: Date }[] = []
+    for (const { request, signer, current, places } of planned) {
+      for (const job of await store.openJobs(request.id)) {
+        const status = job.expiresAt < now() ? "expired" : "cancelled"
+        await store.transitionJob(job.id, ["pending", "prepared"], { status })
+      }
+      if (places !== signer.places) await store.updateSigner(signer.id, { places })
+      const ticket = randomBytes(32).toString("base64url")
+      const expiresAt = new Date(now().getTime() + jobTtlMs)
+      const job = await store.createJob({
+        ticketHash: sha256Hex(ticket),
+        requestId: request.id,
+        signerId: signer.id,
+        sub: caller.sub,
+        baseVersion: current.version,
+        places,
+        step: signer.signaturesDone,
+        expiresAt,
+      })
+      started.push({ requestId: request.id, jobId: job.id, ticket, expiresAt })
+    }
+    return started
+  }
+
+  /** The signer's places with the positions the signer chose, kinds unchanged; as they are once signing started. */
+  function movedPlaces(signer: Signer, moved: PlacementInput[] | undefined, pages: number): PlaceJson[] {
+    if (!moved || signer.signaturesDone > 0) return signer.places
+    if (moved.length !== signer.places.length)
+      throw new EsignError("bad_request", "The signature boxes changed. Reload the page.")
+    return signer.places.map((place, i) => ({ ...validatePlacement(moved[i], pages), kind: place.kind }))
+  }
+
+  async function jobStatuses(caller: Caller, jobIds: string[]) {
+    return Promise.all(
+      jobIds.map(async (jobId) => {
+        const job = await store.getJob(jobId)
+        if (!job || job.sub !== caller.sub) throw new EsignError("not_found", "Signature not found")
+        const expired = (job.status === "pending" || job.status === "prepared") && job.expiresAt < now()
+        return {
+          jobId: job.id,
+          requestId: job.requestId,
+          status: expired ? ("expired" as const) : job.status,
+          errorCode: job.errorCode,
+          errorMessage: job.errorMessage,
+          expiresAt: job.expiresAt,
+          /** The agent opened the job: the popup reached it. */
+          seen: job.seenAt !== null,
+          /** Signature places still to sign. */
+          signaturesLeft: job.status === "completed" ? 0 : signaturesLeft(job),
+        }
+      })
+    )
+  }
+
   // ── Ticket resolution for the agent ──────────────────────────────────────────────────────────────────────────
 
   async function resolveTicket(ticket: string, allowed: Job["status"][]): Promise<Job> {
@@ -348,9 +433,11 @@ export function createEsignService(options: ServiceOptions) {
     identity: ReturnType<typeof identityOf>
     method: "agent" | "upload"
     revocation: RevocationResult | null
+    /** The signer's last place: the signer is done. Otherwise the job moves on to the next place. */
+    final: boolean
   }) {
-    const { request, signer, current, job, signed, sha256, identity } = input
-    const remaining = request.signers.filter((s) => s.status === "pending" && s.id !== signer.id).length
+    const { request, signer, current, job, signed, sha256, identity, final } = input
+    const remaining = request.signers.filter((s) => s.status === "pending" && (s.id !== signer.id || !final)).length
     const result = await store.commitSignature({
       jobId: job.id,
       requestId: request.id,
@@ -372,7 +459,8 @@ export function createEsignService(options: ServiceOptions) {
         certificateSubject: identity.subject,
         certificateIssuer: identity.issuer,
       },
-      complete: remaining === 0,
+      final,
+      complete: final && remaining === 0,
       identity: { sub: signer.sub, fiscalCode: identity.fiscalCode, certificateSubject: identity.subject },
       event: {
         requestId: request.id,
@@ -384,6 +472,7 @@ export function createEsignService(options: ServiceOptions) {
           version: job.baseVersion + 1,
           issuer: identity.issuer,
           method: input.method,
+          signatures: signaturePlaces(job.places).length,
           revocation: input.revocation?.status ?? "not_checked",
         },
       },
@@ -392,6 +481,7 @@ export function createEsignService(options: ServiceOptions) {
     if (result === "conflict")
       throw new EsignError("document_changed", "Someone else signed in the meantime. Start again from the dashboard.")
 
+    if (!final) return { status: "next" as const, request: { status: request.status, remaining } }
     const updated = await store.getRequest(request.id)
     if (updated?.status === "completed") {
       void deliver(request.id).catch((error) => logger.error({ error }, "[ESIGN] delivery crashed"))
@@ -474,7 +564,7 @@ export function createEsignService(options: ServiceOptions) {
         throw new EsignError("bad_request", `Choose between 1 and ${MAX_SIGNERS} signers`)
       if (new Set(input.signers.map((s) => s.sub)).size !== input.signers.length)
         throw new EsignError("bad_request", "Each person can sign once")
-      const signers: { sub: string; name: string; role: string | null; placement: PlacementJson }[] = []
+      const signers: { sub: string; name: string; role: string | null; places: PlaceJson[] }[] = []
       for (const s of input.signers) {
         const profile = await store.getProfile(s.sub)
         if (!profile) throw new EsignError("bad_request", "A signer is not a dashboard user")
@@ -482,7 +572,7 @@ export function createEsignService(options: ServiceOptions) {
           sub: s.sub,
           name: profile.name,
           role: s.role?.trim() || null,
-          placement: validatePlacement(s.placement, document.pages),
+          places: validatePlaces(s.places, document.pages),
         })
       }
       let output: OutputJson | null = null
@@ -498,7 +588,11 @@ export function createEsignService(options: ServiceOptions) {
         }
       }
       // Each signature adds an incremental update of about 34 KB (16 KB of CMS written as hex, plus the appearance).
-      const expectedSize = document.size + input.signers.length * SIGNATURE_GROWTH_BYTES
+      const places = signers.flatMap((s) => s.places)
+      const expectedSize =
+        document.size +
+        places.filter((p) => p.kind === "signature").length * SIGNATURE_GROWTH_BYTES +
+        places.filter((p) => p.kind === "mark").length * MARK_GROWTH_BYTES
       if (input.email?.to.length && !output && expectedSize > MAX_ATTACHMENT_BYTES)
         throw new EsignError(
           "bad_request",
@@ -596,54 +690,19 @@ export function createEsignService(options: ServiceOptions) {
     },
 
     /** Starts a signature: a job and its single-use ticket for the agent. */
-    async createJob(caller: Caller, requestId: string, placement?: PlacementInput) {
-      const request = await requestFor(caller, requestId)
-      const signer = turnOf(request).find((s) => s.sub === caller.sub)
-      if (!signer) throw new EsignError("forbidden", "It is not your turn to sign")
-      for (const job of await store.openJobs(requestId)) {
-        if (job.expiresAt < now()) await store.transitionJob(job.id, ["pending", "prepared"], { status: "expired" })
-        else if (job.sub === caller.sub)
-          await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
-        else
-          throw new EsignError(
-            "conflict",
-            `${request.signers.find((s) => s.id === job.signerId)?.name ?? "Someone"} is signing right now`
-          )
-      }
-      const current = await store.latestDocument(requestId)
-      if (!current) throw new EsignError("not_found", "Document not found")
-      let where = signer.placement
-      if (placement) {
-        where = validatePlacement(placement, current.pages)
-        await store.updateSigner(signer.id, { placement: where })
-      }
-      const ticket = randomBytes(32).toString("base64url")
-      const expiresAt = new Date(now().getTime() + jobTtlMs)
-      const job = await store.createJob({
-        ticketHash: sha256Hex(ticket),
-        requestId,
-        signerId: signer.id,
-        sub: caller.sub,
-        baseVersion: current.version,
-        placement: where,
-        expiresAt,
-      })
-      return { jobId: job.id, ticket, expiresAt }
+    /** Starts a signature of one request; see `createJobs`. */
+    async createJob(caller: Caller, requestId: string, places?: PlacementInput[]) {
+      const [job] = await createJobs(caller, [{ requestId, places }])
+      return job
     },
 
-    async jobStatus(caller: Caller, jobId: string) {
-      const job = await store.getJob(jobId)
-      if (!job || job.sub !== caller.sub) throw new EsignError("not_found", "Signature not found")
-      const expired = (job.status === "pending" || job.status === "prepared") && job.expiresAt < now()
-      return {
-        status: expired ? ("expired" as const) : job.status,
-        errorCode: job.errorCode,
-        errorMessage: job.errorMessage,
-        expiresAt: job.expiresAt,
-        /** The agent opened the job: the popup reached it. */
-        seen: job.seenAt !== null,
-      }
-    },
+    /**
+     * Starts the caller's signatures of several requests, signed in one agent window with one PIN. `places` moves the
+     * caller's boxes: one position per place, in order, before any of them is signed.
+     */
+    createJobs,
+
+    jobStatuses,
 
     async cancelJob(caller: Caller, jobId: string) {
       const job = await store.getJob(jobId)
@@ -663,14 +722,30 @@ export function createEsignService(options: ServiceOptions) {
         expiresAt: job.expiresAt,
         document: { title: request.title, fileName: current.fileName, pages: current.pages },
         signer: { name: signer.name, role: signer.role },
-        placement: { page: job.placement.page },
+        placement: { page: signaturePlaces(job.places)[job.step]?.page ?? 0 },
         requestedBy: await profileName(request.createdBySub),
+        /** Signatures still to make, one after another with the same card session. */
+        signatures: signaturesLeft(job),
+        /** Extra marks the next signature draws. */
+        marks: job.step === 0 ? job.places.length - signaturePlaces(job.places).length : 0,
+        /** Pages with this signer's boxes, 0-based. */
+        pages: [...new Set(job.places.map((p) => p.page))].sort((a, b) => a - b),
       }
     },
 
-    async agentPrepare(ticket: string, certificateB64: string, chainB64: string[] = []) {
+    async agentPrepare(ticket: string, certificateB64: string, chainB64: string[] = [], protocol = 1) {
       const job = await resolveTicket(ticket, ["pending", "prepared"])
+      if (protocol < 2) {
+        const message = "Update the PoliNetwork Sign Agent from the setup guide, then sign again."
+        await store.transitionJob(job.id, ["pending", "prepared"], {
+          errorCode: "agent_outdated",
+          errorMessage: message,
+        })
+        throw new EsignError("agent_outdated", message)
+      }
       const { request, signer, current } = await jobContext(job)
+      const place = signaturePlaces(job.places)[job.step]
+      if (!place) throw new EsignError("conflict", "The signature changed state; start again")
       let cert: X509Certificate
       try {
         cert = new X509Certificate(Buffer.from(certificateB64, "base64"))
@@ -699,7 +774,9 @@ export function createEsignService(options: ServiceOptions) {
       let prepared: PreparedSignature
       try {
         prepared = await prepareSignature(current.content, new Uint8Array(cert.raw), {
-          placement: job.placement,
+          placement: place,
+          // The first signature draws the marks, so it covers them.
+          marks: job.step === 0 ? job.places.filter((p) => p.kind === "mark") : [],
           fieldName,
           signerName: identity.name,
           reason: signer.role ? `${titleCase(signer.role)} - ${request.title}` : request.title,
@@ -736,7 +813,12 @@ export function createEsignService(options: ServiceOptions) {
         },
       })
       if (!ok) throw new EsignError("conflict", "The signature changed state; start again")
-      return { toBeSigned: b64(prepared.toBeSigned), algorithm: "RSASSA-PKCS1-v1_5-SHA256" as const }
+      return {
+        toBeSigned: b64(prepared.toBeSigned),
+        algorithm: "RSASSA-PKCS1-v1_5-SHA256" as const,
+        step: job.step,
+        steps: signaturePlaces(job.places).length,
+      }
     },
 
     async agentComplete(ticket: string, signatureB64: string) {
@@ -786,6 +868,7 @@ export function createEsignService(options: ServiceOptions) {
         identity,
         method: "agent",
         revocation: state.revocation ?? null,
+        final: signaturesLeft(job) === 1,
       })
     },
 
@@ -855,7 +938,8 @@ export function createEsignService(options: ServiceOptions) {
         signerId: signer.id,
         sub: caller.sub,
         baseVersion: current.version,
-        placement: signer.placement,
+        places: signer.places,
+        step: signaturePlaces(signer.places).length - 1,
         expiresAt: new Date(at.getTime() + 60_000),
       })
       await store.transitionJob(job.id, ["pending"], { status: "prepared" })
@@ -869,6 +953,7 @@ export function createEsignService(options: ServiceOptions) {
         identity,
         method: "upload",
         revocation: uploadRevocation,
+        final: true,
       })
     },
 
