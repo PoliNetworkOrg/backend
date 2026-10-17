@@ -49,6 +49,20 @@ export const env = createEnv({
     AZURE_BLOB_STORAGE_ACCOUNT: z.string().default("polinetworksa"),
     AZURE_BLOB_STORAGE_CONTAINER: z.string().default("file-blobs"),
 
+    // E-signing (CIE). The drive is the OneDrive/SharePoint library whose folders the dashboard browses; without Azure
+    // credentials an in-memory development drive is used. Graph needs Files.ReadWrite.All (or Sites.Selected).
+    ESIGN_DRIVE_ID: z.string().min(1).optional(),
+    /** Item ID of the folder the dashboard may browse and write; the whole drive by default. */
+    ESIGN_DRIVE_ROOT_ID: z.string().min(1).default("root"),
+    ESIGN_DRIVE_LABEL: z.string().min(1).default("OneDrive"),
+    /** Dashboard origin, for links in signature emails. */
+    ESIGN_DASHBOARD_URL: z.url().default("https://admin.polinetwork.org"),
+    /** Accept signing certificates not issued by the CIE CAs, e.g. the agent's development key. */
+    ESIGN_ALLOW_TEST_CERTIFICATES: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((v) => (v === undefined ? nodeEnv !== "production" : v === "true")),
+
     // PoliNetwork IdP (RFC v3 §6, §12). Token authentication is enabled when IDP_PUBLIC_URL and
     // OAUTH_BACKEND_RESOURCE_URI are set; snapshot pulls also need the internal resource and the
     // backend client's credentials. Without them every permission check denies.
