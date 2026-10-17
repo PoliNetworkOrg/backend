@@ -76,7 +76,7 @@ describe("OCSP", () => {
       defaultUrl: "https://ocsp.example",
       fetch: (async (_url: string, init: RequestInit) => {
         posted = new Uint8Array(init.body as Buffer)
-        return new Response(response())
+        return new Response(Buffer.from(response()))
       }) as unknown as typeof fetch,
     })
     expect(ok.status).toBe("good")
