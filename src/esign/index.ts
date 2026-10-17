@@ -29,16 +29,30 @@ function resolveDrives() {
 const DEV_SUB = "agent-preview-user"
 const ESIGN_PERMISSIONS = ["esign:sign", "esign:requests:manage", "esign:drives:manage"]
 
+/** Roles and permissions shown in development without an IdP, so the drive settings can be tried. */
+const DEV_CATALOG: AccessCatalog = {
+  roles: [
+    { key: "direttivo", name: "Direttivo" },
+    { key: "socio", name: "Socio" },
+  ],
+  permissions: ESIGN_PERMISSIONS.map((key) => ({ key, name: key })),
+}
+
 function accessOf(sub: string): Access | null {
   const index = idp?.snapshot?.current()
   if (!index)
-    return env.NODE_ENV === "development" && sub === DEV_SUB ? { roles: [], permissions: ESIGN_PERMISSIONS } : null
+    return env.NODE_ENV === "development" && sub === DEV_SUB
+      ? { roles: ["direttivo"], permissions: ESIGN_PERMISSIONS }
+      : null
   const subject = index.bySub(sub)
-  return subject ? { roles: [], permissions: index.permissions(subject) } : null
+  return subject ? { roles: index.roles(subject), permissions: index.permissions(subject) } : null
 }
 
 function catalog(): AccessCatalog {
-  return { roles: [], permissions: ESIGN_PERMISSIONS.map((key) => ({ key, name: key })) }
+  const index = idp?.snapshot?.current()
+  if (!index) return env.NODE_ENV === "development" ? DEV_CATALOG : { roles: [], permissions: [] }
+  const { roles, permissions } = index.catalog()
+  return { roles: [...roles], permissions: [...permissions] }
 }
 
 export const esign = createEsignService({
