@@ -29,7 +29,7 @@ function setup(
     directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
   } = {}
 ) {
-  let clock = new Date("2026-10-17T10:00:00Z").getTime()
+  let clock = Date.now()
   const store = createMemoryStore()
   const drive = createMockDrive()
   const archive = createMockDrive({ id: "archive", label: "Archive" })
