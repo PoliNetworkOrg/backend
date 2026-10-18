@@ -52,7 +52,12 @@ describe("Azure tRPC routes without credentials", () => {
     const { azureDirectory } = await import("@/azure/directory")
     const { IncompleteMemberError } = await import("@/azure/errors")
     const create = azureDirectory.createMember
+    let creating!: () => void
+    const firstCreateStarted = new Promise<void>((resolve) => {
+      creating = resolve
+    })
     vi.spyOn(azureDirectory, "createMember").mockImplementationOnce(async (input) => {
+      creating()
       const member = await create(input)
       throw new IncompleteMemberError(
         {
@@ -68,10 +73,11 @@ describe("Azure tRPC routes without credentials", () => {
     vi.spyOn(azureDirectory, "findByMemberNumber").mockResolvedValue(null)
     const input = { firstName: "Katherine", lastName: "Johnson", assocNumber: 2042, sendEmailTo: "test@example.com" }
 
-    const results = await Promise.all([
-      caller.members.create(input),
-      caller.members.create({ ...input, firstName: "Mary" }),
-    ])
+    // The second request must queue behind the first, whose mock is the one that fails.
+    const first = caller.members.create(input)
+    await firstCreateStarted
+    const second = caller.members.create({ ...input, firstName: "Mary" })
+    const results = await Promise.all([first, second])
 
     expect(results[0]?.error).toContain("setup and cleanup failed")
     expect(results[1]?.error).toContain("Member number 2042 is already assigned")
