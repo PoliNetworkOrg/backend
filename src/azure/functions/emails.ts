@@ -11,7 +11,8 @@ export async function sendEmail(
   to: string | string[],
   subject: string,
   component: JSX.Element,
-  attachments: EmailAttachment[] = []
+  attachments: EmailAttachment[] = [],
+  options: { throwOnError?: boolean; messageId?: string } = {}
 ) {
   const html = await render(component)
   const text = toPlainText(html, {
@@ -29,6 +30,7 @@ export async function sendEmail(
     subject,
     text,
     html,
+    messageId: options.messageId,
     attachments: attachments.map((a) => ({
       filename: a.filename,
       content: Buffer.from(a.content),
@@ -46,6 +48,7 @@ export async function sendEmail(
     return true
   } catch (error) {
     logger.error({ error }, "[Azure Graph API] Could not send email")
+    if (options.throwOnError) throw error
     return false
   }
 }

@@ -2,6 +2,8 @@ import { and, asc, desc, eq, exists, inArray, isNull, lt, notExists, or, sql } f
 import { alias } from "drizzle-orm/pg-core"
 import type { DB as Database } from "@/db"
 import { schema } from "@/db/schema/esign"
+import { receiptRequests, receipts } from "@/db/schema/people"
+import type { Transaction } from "@/people/store-pg"
 import type {
   DocumentMeta,
   DocumentRecord,
@@ -9,6 +11,7 @@ import type {
   Job,
   Profile,
   RequestEvent,
+  SignatureCommit,
   Signer,
   SigningRequest,
 } from "./store"
@@ -82,7 +85,13 @@ const toSigner = (row: typeof signers.$inferSelect): Signer => ({
 })
 
 /** The e-signing store over the backend's Postgres. */
-export function createPgStore(db: Db): EsignStore {
+export function createPgStore(
+  db: Db,
+  hooks: {
+    beforeSignature?: (tx: Transaction, commit: SignatureCommit) => Promise<void>
+    afterSignature?: (tx: Transaction, commit: SignatureCommit) => Promise<void>
+  } = {}
+): EsignStore {
   async function attachSigners(rows: (typeof requests.$inferSelect)[]): Promise<SigningRequest[]> {
     if (rows.length === 0) return []
     const all = await db
@@ -95,7 +104,21 @@ export function createPgStore(db: Db): EsignStore {
         )
       )
       .orderBy(asc(signers.position))
+    const sources = await db
+      .select({ requestId: receiptRequests.requestId, receipt: receipts.data })
+      .from(receiptRequests)
+      .innerJoin(receipts, eq(receipts.id, receiptRequests.receiptId))
+      .where(
+        inArray(
+          receiptRequests.requestId,
+          rows.map((r) => r.id)
+        )
+      )
     return rows.map((r) => ({
+      peopleReceipt: (() => {
+        const source = sources.find((s) => s.requestId === r.id)?.receipt
+        return source ? { receiptId: source.id, number: source.number, year: source.year } : null
+      })(),
       id: r.id,
       title: r.title,
       status: r.status,
@@ -357,6 +380,8 @@ export function createPgStore(db: Db): EsignStore {
         const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for("update")
         if (!request || request.status === "in_progress" || request.delivery?.status === "pending")
           return "conflict" as const
+        const [receipt] = await tx.select().from(receiptRequests).where(eq(receiptRequests.requestId, id)).limit(1)
+        if (receipt) return "conflict" as const
         await tx.delete(requests).where(eq(requests.id, id))
         return "ok" as const
       })
@@ -411,6 +436,7 @@ export function createPgStore(db: Db): EsignStore {
     },
     async commitSignature(commit) {
       return db.transaction(async (tx) => {
+        await hooks.beforeSignature?.(tx, commit)
         // Serializes signatures on one request.
         const [request] = await tx.select().from(requests).where(eq(requests.id, commit.requestId)).for("update")
         if (!request || request.status !== "in_progress") return "conflict" as const
@@ -472,6 +498,7 @@ export function createPgStore(db: Db): EsignStore {
           await tx.insert(events).values({ requestId: commit.requestId, actorSub: null, type: "completed" })
         if (profile && !profile.fiscalCode && fiscalCode)
           await tx.update(profiles).set({ fiscalCode, certificateSubject }).where(eq(profiles.sub, commit.identity.sub))
+        await hooks.afterSignature?.(tx, commit)
         return "ok" as const
       })
     },
