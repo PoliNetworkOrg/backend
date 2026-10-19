@@ -7,6 +7,7 @@ import { ARRAY_AUDIT_TYPE, AUDIT_BASIS, AUDIT_REVIEW, AUDIT_TYPE } from "@/db/sc
 import type { TUserRole } from "@/db/schema/tg/permissions"
 import type { ProjectResourceKind } from "@/db/schema/web/projects"
 import { tgMessagesCipher } from "@/routers/tg/messages"
+import { defaultFreshmanCards } from "@/routers/web/freshman/seed"
 import { encryptUser } from "@/utils/users"
 
 const USERS_COUNT = 2000
@@ -731,6 +732,9 @@ const FAQ_CONTENT: {
   },
 ]
 
+// Clear featured references first when explicitly replacing the development FAQ catalog.
+if (force) await DB.delete(SCHEMA.WEB.freshmanFaqs)
+
 await seedTable("web_faq_categories", SCHEMA.WEB.faqCategories, () =>
   FAQ_CONTENT.map(({ titleIt, titleEn, icon }) => ({ titleIt, titleEn, icon, ...seedAuthor }))
 )
@@ -759,6 +763,19 @@ await seedTable("web_faqs", SCHEMA.WEB.faqs, () =>
     }))
   })
 )
+
+await seedTable("web_freshman_cards", SCHEMA.WEB.freshmanCards, () =>
+  defaultFreshmanCards.map((card) => ({ ...card, ...seedAuthor }))
+)
+const [featuredFaq] = await DB.select().from(SCHEMA.WEB.freshmanFaqs).limit(1)
+if (!featuredFaq) {
+  const catalog = await DB.select({ id: SCHEMA.WEB.faqs.id }).from(SCHEMA.WEB.faqs).orderBy(SCHEMA.WEB.faqs.id).limit(5)
+  if (catalog.length === 5) {
+    await DB.insert(SCHEMA.WEB.freshmanFaqs).values(
+      catalog.map((faq, position) => ({ position, faqId: faq.id, ...seedAuthor }))
+    )
+  } else console.warn("SEED: at least five FAQs are needed to initialize the Freshman selections")
+}
 
 await seedTable("web_guides_matricole", SCHEMA.WEB.guidesMatricole, () =>
   [

@@ -61,3 +61,12 @@ Actor fields such as `createdBy`, `adderId` or `performerId` are read only from 
 The bot's socket.io client authenticates with its service token in `auth.token` (scope `backend:tg:events`) and is disconnected when the token expires. Set `OAUTH_BOT_CLIENT_ID` on the backend to the same registered OAuth client ID used by the bot. This is the actual client ID, not its display name. Token sockets are rejected if this setting is absent, the client ID differs, the token is not a service token or the scope is missing. Without a token the socket is identified by its `type` query, while `LEGACY_ANONYMOUS=allow`.
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
+
+## Freshman content
+
+`web.freshman` exposes fixed-slot content for the website and authorized admin editors. Its schema, permissions,
+rollout and test procedure are described in [the API contract](docs/freshman-api.md). Migration
+`0023_freshman_content` initializes 10 resources, 8 Telegram links and 5 existing/new FAQs, preserving matching
+catalog entries. Selected FAQs/categories must be replaced in Freshman before deleting them from the catalog.
+The development seed also initializes the card slots and selections; `--force` clears those selections before
+replacing the sample FAQ catalog.
