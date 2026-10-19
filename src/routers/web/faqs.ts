@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm"
+import { asc, eq, sql } from "drizzle-orm"
 import z from "zod"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
@@ -8,6 +8,7 @@ import { createTRPCRouter, policy } from "@/trpc"
 const FAQS = SCHEMA.WEB.faqs
 
 const FAQ_CATEGORIES = SCHEMA.WEB.faqCategories
+const FEATURED = SCHEMA.WEB.freshmanFaqs
 
 export default createTRPCRouter({
   getAllFaqs: policy(publicData)
@@ -171,10 +172,20 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       const { id } = input
-      const deleted = await DB.delete(FAQS).where(eq(FAQS.id, id)).returning()
+      return DB.transaction(async (tx) => {
+        // Match selectFaq's lock order so a FAQ cannot become selected between this check and deletion.
+        await tx.execute(sql`LOCK TABLE ${FEATURED} IN SHARE ROW EXCLUSIVE MODE`)
+        const [featured] = await tx
+          .select({ position: FEATURED.position })
+          .from(FEATURED)
+          .where(eq(FEATURED.faqId, id))
+          .limit(1)
+        if (featured) return { error: "FEATURED_FAQ" }
+        const deleted = await tx.delete(FAQS).where(eq(FAQS.id, id)).returning()
 
-      if (deleted.length === 0) return { error: "NOT_FOUND" }
-      return { error: null }
+        if (deleted.length === 0) return { error: "NOT_FOUND" }
+        return { error: null }
+      })
     }),
 
   deleteFaqsCategory: policy(dashboard("web:content:write"))
@@ -185,9 +196,19 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       const { id } = input
-      const deleted = await DB.delete(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).returning()
+      return DB.transaction(async (tx) => {
+        await tx.execute(sql`LOCK TABLE ${FEATURED} IN SHARE ROW EXCLUSIVE MODE`)
+        const [featured] = await tx
+          .select({ position: FEATURED.position })
+          .from(FEATURED)
+          .innerJoin(FAQS, eq(FEATURED.faqId, FAQS.id))
+          .where(eq(FAQS.categoryId, id))
+          .limit(1)
+        if (featured) return { error: "FEATURED_FAQ" }
+        const deleted = await tx.delete(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).returning()
 
-      if (deleted.length === 0) return { error: "NOT_FOUND" }
-      return { error: null }
+        if (deleted.length === 0) return { error: "NOT_FOUND" }
+        return { error: null }
+      })
     }),
 })
