@@ -62,11 +62,44 @@ The bot's socket.io client authenticates with its service token in `auth.token` 
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
 
+## E-signing with the CIE
+
+The `esign` router and `/esign/agent/*` endpoints let dashboard users sign PDFs with the Italian identity card
+(CIE). The backend prepares a PAdES baseline B-B signature (incremental update with a visible stamp), the user's
+[PoliNetwork Sign Agent](https://github.com/PoliNetworkOrg/sign-agent) signs the digest with the card, and the backend
+embeds the CMS, then saves the signed PDF to OneDrive and emails it. See the admin repository's
+`docs/esign/contracts.md` for the flow.
+
+| Variable                        | Meaning                                                                                                                      |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `ESIGN_DRIVES`                  | JSON array of the OneDrive/SharePoint libraries the dashboard offers, see below. Without Azure credentials in-memory drives are used. |
+| `ESIGN_DASHBOARD_URL`           | Dashboard origin for links in emails (default `https://admin.polinetwork.org`).                                               |
+| `ESIGN_ALLOW_TEST_CERTIFICATES` | `true` accepts certificates not issued by the CIE CAs (the agent's development key). Defaults to `true` outside production. |
+
+`ESIGN_DRIVES` lists one entry per library; `id` is a stable key stored with each request (lowercase letters, digits
+and dashes, keep it when changing the rest), `label` is shown in the dashboard, `driveId` is the Graph drive ID and
+`rootId` the item ID of the folder the dashboard may browse and write (default `root`, the whole drive):
+
+```sh
+ESIGN_DRIVES='[{"id":"segreteria","label":"Segreteria","driveId":"b!…"},{"id":"tesoreria","label":"Tesoreria","driveId":"b!…","rootId":"01…"}]'
+```
+
+Requirements:
+
+- IdP permissions `esign:sign` (sign and see one's requests) and `esign:requests:manage` (create and manage requests).
+  `esign:drives:manage` sets which roles and permissions may use each drive (dashboard: Signatures › Drives).
+- Graph application permission `Files.ReadWrite.All` (or `Sites.Selected` with write access to the site), with admin
+  consent, for the drive; emails use the existing `Mail.Send` sender.
+- The dashboard proxies `/api/esign/agent/*` to this backend's `/esign/agent/*`; the agent never calls the backend
+  directly. Those endpoints are authenticated only by the job's single-use ticket.
+
+Signatures are checked against the CIE certification authorities of the Ministero dell'Interno bundled in
+`src/esign/trust`. Tests: `bunx vitest run tests/esign-*.test.ts` (validated with poppler `pdfsig` when installed).
+
 ## Freshman content
 
-`web.freshman` exposes fixed-slot content for the website and authorized admin editors. Its schema, permissions,
-rollout and test procedure are described in [the API contract](docs/freshman-api.md). Migration
-`0022_freshman_content` initializes 10 resources, 8 Telegram links and 5 existing/new FAQs, preserving matching
+`web.freshman` exposes fixed-slot content for the website and authorized admin editors. Migration
+`0026_freshman_content` initializes 10 resources, 8 Telegram links and 5 existing/new FAQs, preserving matching
 catalog entries. Selected FAQs/categories must be replaced in Freshman before deleting them from the catalog.
 The development seed also initializes the card slots and selections; `--force` clears those selections before
 replacing the sample FAQ catalog.

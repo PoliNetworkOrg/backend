@@ -13,6 +13,8 @@ import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
 import { sendWelcomeEmail } from "./emails/mailer"
 import { env } from "./env"
+import { esign } from "./esign"
+import { agentRoutes } from "./esign/agent-routes"
 import { authenticateRequest, idp, startIdp, stopIdp } from "./idp"
 import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
@@ -70,6 +72,8 @@ app.use(
 app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
+
+app.route("/esign/agent", agentRoutes(esign))
 
 // Access-changed events from the IdP (RFC v3 §5.6). Authenticated by the event's own signature.
 app.post("/internal/events", (c) => (idp?.events ? idp.events(c.req.raw) : c.body(null, 404)))

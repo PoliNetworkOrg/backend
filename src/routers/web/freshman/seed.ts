@@ -1,4 +1,4 @@
-/** Initial website cards for the explicit development seed, matching migration 0022. */
+/** Initial website cards for the explicit development seed, matching migration 0026. */
 export const defaultFreshmanCards = [
   {
     id: "featured-1",

@@ -5,7 +5,14 @@ import { env } from "@/env"
 import { logger } from "@/logger"
 import { getAzureClient } from "../client"
 
-export async function sendEmail(to: string, subject: string, component: JSX.Element) {
+export type EmailAttachment = { filename: string; content: Uint8Array; contentType: string }
+
+export async function sendEmail(
+  to: string | string[],
+  subject: string,
+  component: JSX.Element,
+  attachments: EmailAttachment[] = []
+) {
   const html = await render(component)
   const text = toPlainText(html, {
     selectors: [
@@ -22,6 +29,11 @@ export async function sendEmail(to: string, subject: string, component: JSX.Elem
     subject,
     text,
     html,
+    attachments: attachments.map((a) => ({
+      filename: a.filename,
+      content: Buffer.from(a.content),
+      contentType: a.contentType,
+    })),
   })
   const mimeMessage = await mail.compile().build()
   const base64Encoded = mimeMessage.toString("base64")
