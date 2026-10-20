@@ -110,32 +110,28 @@ describe.skipIf(!testPort)("database seed", () => {
     expect(await query("SELECT count(*)::int AS count FROM tg_messages")).toEqual([{ count: 1 }])
   }, 30_000)
 
-  it.each([false, true])(
-    "reconciles FAQ categories with a matching category present: %s",
-    async (matching) => {
-      await query(`INSERT INTO web_faq_categories (title_it, title_en, created_by_sub)
+  it.each([false, true])("reconciles FAQ categories with a matching category present: %s", async (matching) => {
+    await query(`INSERT INTO web_faq_categories (title_it, title_en, created_by_sub)
       VALUES ('Custom', 'Custom', 'retained')`)
-      if (matching) {
-        await query(`INSERT INTO web_faq_categories (title_it, title_en, created_by_sub)
+    if (matching) {
+      await query(`INSERT INTO web_faq_categories (title_it, title_en, created_by_sub)
         VALUES ('Gruppi', 'Existing groups', 'retained')`)
-      }
+    }
 
-      await seed()
+    await seed()
 
-      expect(await query("SELECT count(*)::int AS count FROM web_faqs")).toEqual([{ count: 9 }])
-      expect(await query("SELECT count(*)::int AS count FROM web_faq_categories")).toEqual([{ count: 5 }])
-      expect(await query("SELECT title_en FROM web_faq_categories WHERE title_it = 'Custom'")).toEqual([
-        { title_en: "Custom" },
+    expect(await query("SELECT count(*)::int AS count FROM web_faqs")).toEqual([{ count: 9 }])
+    expect(await query("SELECT count(*)::int AS count FROM web_faq_categories")).toEqual([{ count: 5 }])
+    expect(await query("SELECT title_en FROM web_faq_categories WHERE title_it = 'Custom'")).toEqual([
+      { title_en: "Custom" },
+    ])
+    if (matching) {
+      expect(await query("SELECT title_en FROM web_faq_categories WHERE title_it = 'Gruppi'")).toEqual([
+        { title_en: "Existing groups" },
       ])
-      if (matching) {
-        expect(await query("SELECT title_en FROM web_faq_categories WHERE title_it = 'Gruppi'")).toEqual([
-          { title_en: "Existing groups" },
-        ])
-        expect(await query("SELECT count(*)::int AS count FROM web_faqs WHERE category_id = 2")).toEqual([{ count: 3 }])
-      }
-    },
-    30_000
-  )
+      expect(await query("SELECT count(*)::int AS count FROM web_faqs WHERE category_id = 2")).toEqual([{ count: 3 }])
+    }
+  }, 30_000)
 
   it("preserves samples on reruns and replaces populated sample tables with --force", async () => {
     await seed()
