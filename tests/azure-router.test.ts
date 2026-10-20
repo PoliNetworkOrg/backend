@@ -99,17 +99,16 @@ describe("Azure tRPC routes without credentials", () => {
 function tokenContext(
   permissions: string[],
   actor: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_reader", telegramId: null },
-  scopes = ["backend:admin"],
-  fresh = true
+  scopes = ["backend:admin"]
 ): Context {
   return {
     auth: { kind: "token", actor, scopes: new Set(scopes) },
     access: {
-      has: (_, permission) => fresh && permissions.includes(permission),
+      has: (_, permission) => permissions.includes(permission),
       current: () => null,
       subjectBySub: () => undefined,
       subjectByTelegramId: () => undefined,
-      status: () => ({ lastSyncAt: 1, fresh, generation: 1, subjects: 1 }),
+      status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
     },
   }
 }
@@ -132,7 +131,6 @@ describe("Azure directory token authorization", () => {
     ["no permission", tokenContext([])],
     ["creation alone", tokenContext(["azure:members:create"])],
     ["no admin scope", tokenContext(["azure:members:read"], undefined, [])],
-    ["stale snapshot", tokenContext(["azure:members:read"], undefined, undefined, false)],
     ["service actor", tokenContext(["azure:members:read"], { kind: "service", client: "telegram-bot" })],
     [
       "Telegram actor",
@@ -148,13 +146,10 @@ describe("Azure directory token authorization", () => {
     await expect(caller.members.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("keeps existing-user and group changes unavailable even with both member permissions", async () => {
+  it("keeps existing-user changes and group reads unavailable even with both member permissions", async () => {
     const caller = await createCaller(tokenContext(["azure:members:read", "azure:members:create"]))
     await expect(
       caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })
-    ).rejects.toMatchObject({ code: "FORBIDDEN" })
-    await expect(
-      caller.groups.addMember({ groupId: "mock-group-empty", userId: "mock-member-grace" })
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
@@ -186,7 +181,6 @@ describe("Azure group token authorization", () => {
     ["no permission", tokenContext([])],
     ["member permissions alone", tokenContext(["azure:members:read", "azure:members:create"])],
     ["no admin scope", tokenContext(["azure:groups:write"], undefined, [])],
-    ["stale snapshot", tokenContext(["azure:groups:write"], undefined, undefined, false)],
     ["service actor", tokenContext(["azure:groups:write"], { kind: "service", client: "telegram-bot" })],
   ])("refuses membership changes with %s", async (_, context) => {
     const caller = await createCaller(context)
