@@ -891,7 +891,12 @@ export function createEsignService(options: ServiceOptions) {
         versions,
         currentDocumentId: current?.id ?? null,
         signingNow: signingNow
-          ? { sub: signingNow.sub, name: request.signers.find((s) => s.id === signingNow.signerId)?.name ?? "" }
+          ? {
+              sub: signingNow.sub,
+              name: request.signers.find((s) => s.id === signingNow.signerId)?.name ?? "",
+              /** The job's expiry: the request is free again by then at the latest. */
+              until: signingNow.expiresAt,
+            }
           : null,
       }
     },

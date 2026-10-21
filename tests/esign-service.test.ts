@@ -291,9 +291,15 @@ describe("e-signing service", () => {
   it("lets one signer at a time sign an unordered request", async () => {
     const request = await prepareRequest(env, false)
     expect(request.turn).toEqual([secretary.sub, president.sub])
-    await env.service.createJob(secretary, request.id)
+    const { expiresAt } = await env.service.createJob(secretary, request.id)
+    expect((await env.service.getRequest(president, request.id)).signingNow).toEqual({
+      sub: secretary.sub,
+      name: "Mario Rossi",
+      until: expiresAt,
+    })
     await expect(env.service.createJob(president, request.id)).rejects.toThrow(/Mario Rossi is signing/)
     env.advance(11 * 60 * 1000)
+    expect((await env.service.getRequest(president, request.id)).signingNow).toBeNull()
     await expect(env.service.createJob(president, request.id)).resolves.toMatchObject({ ticket: expect.any(String) })
   })
 
