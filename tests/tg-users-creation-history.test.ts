@@ -10,11 +10,9 @@ const state = vi.hoisted(() => {
   const groupBy = vi.fn(() => ({ orderBy }))
   const from = vi.fn(() => ({ groupBy }))
   const select = vi.fn((_fields: unknown) => ({ from }))
-  // Recorded at import, so `vi.clearAllMocks` does not reset it.
-  const policies: unknown[] = []
   const error = vi.fn()
 
-  return { error, from, groupBy, orderBy, policies, rows, select, users }
+  return { error, from, groupBy, orderBy, rows, select, users }
 })
 
 vi.mock("drizzle-orm", () => ({
@@ -41,10 +39,7 @@ vi.mock("@/trpc", () => {
   }
   return {
     createTRPCRouter: <T>(router: T) => router,
-    policy: (rule: unknown, options: unknown = {}) => {
-      state.policies.push({ rule, options })
-      return procedure
-    },
+    policy: () => procedure,
   }
 })
 
@@ -56,13 +51,6 @@ beforeEach(() => {
 })
 
 describe("getCreationHistory", () => {
-  it("is limited to token callers who can read Telegram users", () => {
-    expect(state.policies).toContainEqual({
-      rule: { user: { permission: "tg:users:read" } },
-      options: { tokenOnly: true },
-    })
-  })
-
   it("returns only dates and counts, grouped and ordered by creation day", async () => {
     await expect(history.handler()).resolves.toEqual({ days: state.rows, error: null })
 

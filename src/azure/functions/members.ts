@@ -2,7 +2,7 @@ import { logger } from "@/logger"
 import { generatePassword } from "@/utils/password"
 import { withRetry } from "@/utils/wait"
 import { getAzureClient } from "../client"
-import { IncompleteMemberError } from "../errors"
+import { IncompleteMemberError, safeErrorDetail } from "../errors"
 import { MAIL_DOMAIN } from "../mailbox"
 import type { CreatedMember, CreateMemberInput, MemberSummary, ParsedUser, User } from "../types"
 
@@ -167,7 +167,7 @@ export async function createMember({
         }
       })
     } catch (cleanupError) {
-      logger.error({ error: cleanupError, memberId: id }, "[AZURE] incomplete account cleanup failed")
+      logger.error({ error: safeErrorDetail(cleanupError), memberId: id }, "[AZURE] incomplete account cleanup failed")
       throw new IncompleteMemberError(
         { id, displayName: `${firstName} ${lastName}`, givenName: firstName, mail, employeeId: assocNumber.toString() },
         error

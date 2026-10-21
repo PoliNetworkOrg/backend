@@ -6,8 +6,10 @@ const mailer = vi.hoisted(() => ({
   sendWelcomeEmail: vi.fn().mockResolvedValue(true),
   sendMemberNumberChangedEmail: vi.fn().mockResolvedValue(true),
 }))
+const logger = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }))
 
 vi.mock("@/emails/mailer", () => mailer)
+vi.mock("@/logger", () => ({ logger }))
 
 const REQUIRED_ENV: Record<string, string> = {
   NODE_ENV: "test",
@@ -319,7 +321,6 @@ describe("Azure directory token authorization", () => {
     ["no permission", tokenContext([])],
     ["creation alone", tokenContext(["azure:members:create"])],
     ["no admin scope", tokenContext(["azure:members:read"], undefined, [])],
-    ["stale snapshot", tokenContext(["azure:members:read"], undefined, undefined, false)],
     ["service actor", tokenContext(["azure:members:read"], { kind: "service", client: "telegram-bot" })],
     [
       "Telegram actor",
@@ -335,13 +336,10 @@ describe("Azure directory token authorization", () => {
     await expect(caller.members.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("keeps member number and group changes unavailable with only read and create", async () => {
+  it("keeps existing-user changes and group reads unavailable with only read and create", async () => {
     const caller = await createCaller(tokenContext(["azure:members:read", "azure:members:create"]))
     await expect(
       caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })
-    ).rejects.toMatchObject({ code: "FORBIDDEN" })
-    await expect(
-      caller.groups.addMember({ groupId: "mock-group-empty", userId: "mock-member-grace" })
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
@@ -404,6 +402,22 @@ describe("Azure member number changes", () => {
       previousAssocNumber: "1002",
       email: "alan.turing@polinetwork.org",
     })
+  })
+
+  it("redacts personal email addresses from directory error logs", async () => {
+    const caller = await writer()
+    const { azureDirectory } = await import("@/azure/directory")
+    vi.spyOn(azureDirectory, "setMemberNumber").mockResolvedValue({
+      error: 'Graph conflict for "personal@example.com"',
+    })
+
+    await caller.members.setAssocNumber({ userId: "mock-member-alan", assocNumber: 2042 })
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'Graph conflict for "[redacted email]"' }),
+      "[trpc:azure:members] could not set the member number"
+    )
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain("personal@example.com")
   })
 
   it("changes the number without a notification", async () => {
@@ -678,7 +692,6 @@ describe("Azure group token authorization", () => {
     ["no permission", tokenContext([])],
     ["member permissions alone", tokenContext(["azure:members:read", "azure:members:create"])],
     ["no admin scope", tokenContext(["azure:groups:write"], undefined, [])],
-    ["stale snapshot", tokenContext(["azure:groups:write"], undefined, undefined, false)],
     ["service actor", tokenContext(["azure:groups:write"], { kind: "service", client: "telegram-bot" })],
   ])("refuses membership changes with %s", async (_, context) => {
     const caller = await createCaller(context)

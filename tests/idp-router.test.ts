@@ -1,4 +1,6 @@
 import type { Actor } from "@polinetwork/auth-kit"
+import type { SQL } from "drizzle-orm"
+import { PgDialect } from "drizzle-orm/pg-core"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Context } from "@/trpc"
 
@@ -18,6 +20,8 @@ const db = vi.hoisted(() => ({
   /** Rows each table returns, by SQL name. */
   rows: {} as Record<string, unknown[]>,
   inserted: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  /** The `where` condition of each select, in order. */
+  wheres: [] as unknown[],
   /** Whether an insert hits the idempotency key. */
   conflict: false,
 }))
@@ -33,10 +37,21 @@ vi.mock("@/db", async () => {
     import("@/db/schema/views"),
   ])
   const { getTableName } = await import("drizzle-orm")
+  // Every builder method chains; awaiting the query returns the rows of the table it reads.
   const select = () => ({
     from: (table: Parameters<typeof getTableName>[0]) => {
-      const rows = () => db.rows[getTableName(table)] ?? []
-      return { where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }) }
+      const rows = db.rows[getTableName(table)] ?? []
+      const query: Record<string, unknown> = {
+        // biome-ignore lint/suspicious/noThenProperty: the query builder is awaited like a promise
+        then: (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      }
+      for (const method of ["leftJoin", "innerJoin", "groupBy", "orderBy", "limit"]) query[method] = () => query
+      query.where = (condition: unknown) => {
+        db.wheres.push(condition)
+        return query
+      }
+      return query
     },
   })
   const insert = (table: Parameters<typeof getTableName>[0]) => ({
@@ -140,6 +155,67 @@ describe("app router", () => {
       },
     }
     await expect(appRouter.createCaller(ctx).tg.groupLabels.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+})
+
+describe("groups.search", () => {
+  const website: Actor = { kind: "service", client: "website" }
+  const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
+  const access: NonNullable<Context["access"]> = {
+    has: () => true,
+    current: () => null,
+    subjectBySub: () => undefined,
+    subjectByTelegramId: () => undefined,
+    status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+  }
+  const callers = {
+    website: () =>
+      appRouter.createCaller({ auth: { kind: "token", actor: website, scopes: new Set(["backend:public:read"]) } })
+        .groups.search,
+    dashboard: () =>
+      appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access })
+        .groups.search,
+    anonymous: () => appRouter.createCaller({}).groups.search,
+  }
+  /** Whether the last query filtered out hidden groups. */
+  const hidesHidden = () => {
+    const condition = db.wheres.at(-1)
+    return condition !== undefined && /\bnot "\w+"\."hide"/.test(new PgDialect().sqlToQuery(condition as SQL).sql)
+  }
+
+  beforeEach(() => {
+    db.rows = {}
+    db.wheres = []
+  })
+
+  it("opens both reads to the website's token", async () => {
+    await expect(callers.website().getAll()).resolves.toEqual([])
+    await expect(callers.website().search({ query: "poli" })).resolves.toEqual({ groups: [], count: 0 })
+  })
+
+  it("never gives the website hidden groups", async () => {
+    await callers.website().getAll()
+    expect(hidesHidden()).toBe(true)
+    await callers.website().search({ showHidden: true })
+    expect(hidesHidden()).toBe(true)
+  })
+
+  it("still gives hidden groups to the dashboard and to legacy callers", async () => {
+    for (const caller of [callers.dashboard(), callers.anonymous()]) {
+      await caller.getAll()
+      expect(hidesHidden()).toBe(false)
+      await caller.search({ showHidden: true })
+      expect(hidesHidden()).toBe(false)
+      await caller.search({})
+      expect(hidesHidden()).toBe(true)
+    }
+  })
+
+  it("refuses service tokens without backend:public:read", async () => {
+    const bot = appRouter.createCaller({
+      auth: { kind: "token", actor: { kind: "service", client: "telegram-bot" }, scopes: new Set(["backend:tg:read"]) },
+    })
+    await expect(bot.groups.search.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 })
 

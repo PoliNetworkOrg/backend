@@ -1,7 +1,7 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import z from "zod"
 import { azureDirectory } from "@/azure/directory"
-import { IncompleteMemberError } from "@/azure/errors"
+import { IncompleteMemberError, safeErrorDetail } from "@/azure/errors"
 import { MAIL_DOMAIN, mailboxLocalPart, mailboxSchema } from "@/azure/mailbox"
 import type { CreatedMember, MemberSummary } from "@/azure/types"
 import { sendMemberNumberChangedEmail, sendWelcomeEmail } from "@/emails/mailer"
@@ -128,7 +128,10 @@ export default createTRPCRouter({
 
           const { error } = await azureDirectory.setMemberNumber(member.id, input.assocNumber)
           if (error) {
-            logger.error({ error, by, memberId: member.id }, "[trpc:azure:members] could not set the member number")
+            logger.error(
+              { error: safeErrorDetail(error), by, memberId: member.id },
+              "[trpc:azure:members] could not set the member number"
+            )
             return { error: "Microsoft 365 refused the change, see the backend logs." }
           }
           rememberNumber(member, input.assocNumber)
@@ -157,13 +160,19 @@ export default createTRPCRouter({
               email: member.mail,
             })
           } catch (error) {
-            logger.error({ error, by, memberId: member.id }, "[AZURE] member number notification failed")
+            logger.error(
+              { error: safeErrorDetail(error), by, memberId: member.id },
+              "[AZURE] member number notification failed"
+            )
             notificationSent = false
           }
         }
         return { error: null, notificationSent }
       } catch (error) {
-        logger.error({ error, by, userId: input.userId }, "[trpc:azure:members] error in setAssocNumber procedure")
+        logger.error(
+          { error: safeErrorDetail(error), by, userId: input.userId },
+          "[trpc:azure:members] error in setAssocNumber procedure"
+        )
         return {
           error: error instanceof Error ? error.message : "Unknown error, see backend logs",
           notificationSent: null,
@@ -245,7 +254,7 @@ export default createTRPCRouter({
             { firstName: input.firstName, assocNumber: input.assocNumber }
           )
         } catch (error) {
-          logger.error({ error, by, memberId: member.id }, "[AZURE] welcome email failed")
+          logger.error({ error: safeErrorDetail(error), by, memberId: member.id }, "[AZURE] welcome email failed")
         }
 
         return {
@@ -256,10 +265,16 @@ export default createTRPCRouter({
         }
       } catch (error) {
         if (error instanceof IncompleteMemberError) {
-          logger.error({ error: error.cause, by, memberId: error.member.id }, "[AZURE] member setup incomplete")
+          logger.error(
+            { error: safeErrorDetail(error.cause), by, memberId: error.member.id },
+            "[AZURE] member setup incomplete"
+          )
           return { error: error.message }
         }
-        logger.error({ error, by, assocNumber: input.assocNumber }, "[trpc:azure:members] error in create procedure")
+        logger.error(
+          { error: safeErrorDetail(error), by, assocNumber: input.assocNumber },
+          "[trpc:azure:members] error in create procedure"
+        )
         if (isAddressConflict(error)) return { error: `The address ${mail} is already in use.` }
         return { error: error instanceof Error ? error.message : "Unknown error, see backend logs" }
       }
