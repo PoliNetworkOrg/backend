@@ -208,7 +208,10 @@ export const esignRouter = createTRPCRouter({
     decline: user
       .input(z.object({ id: z.uuid(), reason: z.string().max(500).nullable() }))
       .mutation(({ ctx, input }) => run(() => esign.declineRequest(callerOf(ctx), input.id, input.reason))),
-    /** The fallback: a PDF signed with the official CIE app, uploaded by its signer. */
+    /**
+     * The fallback: a PDF signed with the official CIE app, uploaded by its signer. The dashboard no longer offers it;
+     * once no deployed dashboard calls it, this and the service's `uploadSigned` can be removed.
+     */
     uploadSigned: user
       .input(
         z
