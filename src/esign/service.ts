@@ -471,7 +471,7 @@ export function createEsignService(options: ServiceOptions) {
       )
     if (job.status === "expired" || job.expiresAt < now()) {
       await store.transitionJob(job.id, ["pending", "prepared"], { status: "expired" })
-      throw new EsignError("job_expired", "This signing link expired. Start again from the dashboard.")
+      throw new EsignError("job_expired", "This signing link expired.")
     }
     if (!allowed.includes(job.status)) throw new EsignError("conflict", "The signature is not ready")
     return job
