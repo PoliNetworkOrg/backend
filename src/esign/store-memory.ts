@@ -225,12 +225,12 @@ export function createMemoryStore(): EsignStore {
       }
       return true
     },
-    async cancelRequest(id, event) {
+    async cancelRequest(id, event, jobError) {
       const request = requests.get(id)
       if (!request || request.status !== "in_progress") return "conflict"
       for (const [jobId, job] of jobs)
         if (job.requestId === id && (job.status === "pending" || job.status === "prepared"))
-          jobs.set(jobId, { ...job, status: "cancelled" })
+          jobs.set(jobId, { ...job, status: "cancelled", errorCode: jobError.code, errorMessage: jobError.message })
       requests.set(id, { ...request, status: "cancelled", cancelledAt: new Date() })
       events.push({ ...event, id: events.length + 1, at: new Date() })
       return "ok"
@@ -249,7 +249,7 @@ export function createMemoryStore(): EsignStore {
       for (let i = events.length - 1; i >= 0; i--) if (events[i].requestId === id) events.splice(i, 1)
       return "ok"
     },
-    async declineRequest(id, signerId, reason, event) {
+    async declineRequest(id, signerId, reason, event, jobError) {
       const request = requests.get(id)
       const signer = signers.get(signerId)
       if (
@@ -263,7 +263,7 @@ export function createMemoryStore(): EsignStore {
       signers.set(signerId, { ...signer, status: "declined", declineReason: reason })
       for (const [jobId, job] of jobs)
         if (job.requestId === id && (job.status === "pending" || job.status === "prepared"))
-          jobs.set(jobId, { ...job, status: "cancelled" })
+          jobs.set(jobId, { ...job, status: "cancelled", errorCode: jobError.code, errorMessage: jobError.message })
       requests.set(id, { ...request, status: "declined" })
       events.push({ ...event, id: events.length + 1, at: new Date() })
       return "ok"

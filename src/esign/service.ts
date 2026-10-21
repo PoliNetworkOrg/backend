@@ -249,6 +249,17 @@ export function createEsignService(options: ServiceOptions) {
     return request
   }
 
+  /** Refuses to sign a request that ended since the caller's page loaded, saying how it ended. */
+  function assertInProgress(request: SigningRequest) {
+    if (request.status === "in_progress") return
+    const ended = {
+      cancelled: "was cancelled",
+      declined: "was declined",
+      completed: "is already signed by everyone",
+    }[request.status]
+    throw new EsignError("conflict", `“${request.title}” ${ended}.`)
+  }
+
   async function profileName(sub: string) {
     return (await store.getProfile(sub))?.name ?? "A PoliNetwork member"
   }
@@ -344,6 +355,7 @@ export function createEsignService(options: ServiceOptions) {
     const planned: { request: SigningRequest; signer: Signer; current: DocumentRecord; places: PlaceJson[] }[] = []
     for (const item of items) {
       const request = await requestFor(caller, item.requestId)
+      assertInProgress(request)
       const signer = turnOf(request).find((s) => s.sub === caller.sub)
       if (!signer) throw new EsignError("forbidden", `It is not your turn to sign “${request.title}”`)
       const denied = request.drives.find((d) => !maySign(rules, caller.sub, d))
@@ -425,7 +437,13 @@ export function createEsignService(options: ServiceOptions) {
     if (!job) throw new EsignError("ticket_invalid", "This signing link is not valid")
     if (job.status === "completed") throw new EsignError("job_done", "This document is already signed")
     if (job.status === "cancelled")
-      throw new EsignError("job_cancelled", "This signature was cancelled in the dashboard")
+      throw new EsignError(
+        "job_cancelled",
+        // A job the signer cancelled keeps the agent's last error ("Wrong PIN."): pass on only a cancel's or decline's.
+        job.errorCode === "request_cancelled" || job.errorCode === "request_declined"
+          ? (job.errorMessage ?? "This signature was cancelled.")
+          : "This signature was cancelled."
+      )
     if (job.status === "expired" || job.expiresAt < now()) {
       await store.transitionJob(job.id, ["pending", "prepared"], { status: "expired" })
       throw new EsignError("job_expired", "This signing link expired. Start again from the dashboard.")
@@ -836,12 +854,11 @@ export function createEsignService(options: ServiceOptions) {
     async cancelRequest(caller: Caller, id: string) {
       await requestFor(caller, id)
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can cancel requests")
-      const result = await store.cancelRequest(id, {
-        requestId: id,
-        actorSub: caller.sub,
-        type: "cancelled",
-        data: null,
-      })
+      const result = await store.cancelRequest(
+        id,
+        { requestId: id, actorSub: caller.sub, type: "cancelled", data: null },
+        { code: "request_cancelled", message: `${await profileName(caller.sub)} cancelled this request.` }
+      )
       if (result === "conflict") throw new EsignError("conflict", "The request is not in progress")
     },
 
@@ -860,12 +877,13 @@ export function createEsignService(options: ServiceOptions) {
       const signer = request.signers.find((s) => s.sub === caller.sub && s.status === "pending")
       if (request.status !== "in_progress" || !signer) throw new EsignError("conflict", "There is nothing to decline")
       const why = reason?.trim() || null
-      const result = await store.declineRequest(id, signer.id, why, {
-        requestId: id,
-        actorSub: caller.sub,
-        type: "declined",
-        data: { reason: why },
-      })
+      const result = await store.declineRequest(
+        id,
+        signer.id,
+        why,
+        { requestId: id, actorSub: caller.sub, type: "declined", data: { reason: why } },
+        { code: "request_declined", message: `${signer.name} declined this request${why ? `: “${why}”` : ""}.` }
+      )
       if (result === "conflict") throw new EsignError("conflict", "The request changed; reload it")
     },
 
@@ -1069,6 +1087,7 @@ export function createEsignService(options: ServiceOptions) {
      */
     async uploadSigned(caller: Caller, requestId: string, bytes: Uint8Array) {
       const request = await requestFor(caller, requestId)
+      assertInProgress(request)
       const signer = turnOf(request).find((s) => s.sub === caller.sub)
       if (!signer) throw new EsignError("forbidden", "It is not your turn to sign")
       const rules = await accessRules()

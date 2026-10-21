@@ -308,12 +308,41 @@ describe("e-signing service", () => {
     ).rejects.toMatchObject({ code: "certificate_invalid" })
   })
 
-  it("cancels open signatures with the request", async () => {
+  it("cancels open signatures with the request, saying who cancelled it", async () => {
     const request = await prepareRequest(env)
     const { ticket, jobId } = await env.service.createJob(secretary, request.id)
     await env.service.cancelRequest(manager, request.id)
-    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({ code: "job_cancelled" })
-    expect((await env.service.jobStatuses(secretary, [jobId]))[0].status).toBe("cancelled")
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "cancelled",
+      errorCode: "request_cancelled",
+      errorMessage: "Luca Verdi cancelled this request.",
+    })
+    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({
+      code: "job_cancelled",
+      message: "Luca Verdi cancelled this request.",
+    })
+    await expect(env.service.createJob(secretary, request.id)).rejects.toMatchObject({
+      code: "conflict",
+      message: "“Verbale CD 10/10/2026” was cancelled.",
+    })
+  })
+
+  it("cancels open signatures when a co-signer declines, with the reason", async () => {
+    const request = await prepareRequest(env, false)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    await env.service.declineRequest(president, request.id, "Errore nel testo")
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "cancelled",
+      errorCode: "request_declined",
+      errorMessage: "Anna Bianchi declined this request: “Errore nel testo”.",
+    })
+    await expect(env.service.agentJob(ticket)).rejects.toThrow(
+      "Anna Bianchi declined this request: “Errore nel testo”."
+    )
+    await expect(env.service.uploadSigned(secretary, request.id, await samplePdf())).rejects.toMatchObject({
+      code: "conflict",
+      message: "“Verbale CD 10/10/2026” was declined.",
+    })
   })
 
   it("records agent failures without ending the job", async () => {
@@ -329,6 +358,7 @@ describe("e-signing service", () => {
     })
     await env.service.agentFail(ticket, "cancelled", null)
     expect((await env.service.jobStatuses(secretary, [jobId]))[0].status).toBe("cancelled")
+    await expect(env.service.agentJob(ticket)).rejects.toThrow("This signature was cancelled.")
   })
 
   it("accepts a PDF signed with the official CIE app as a fallback", async () => {
@@ -528,6 +558,7 @@ describe("e-signing service", () => {
     await sign(env, secretary, secretarySigner, request.id)
     await sign(env, president, presidentSigner, request.id)
     await expect(env.service.cancelRequest(manager, request.id)).rejects.toMatchObject({ code: "conflict" })
+    await expect(env.service.createJob(president, request.id)).rejects.toThrow("is already signed by everyone")
   })
 
   it("deletes only a finished request, and only managers delete", async () => {
