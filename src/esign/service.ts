@@ -105,6 +105,8 @@ const MARK_GROWTH_BYTES = 4 * 1024
 /** A delivery attempt older than this is presumed dead and may be resumed. */
 const DELIVERY_CLAIM_MS = 5 * 60 * 1000
 const STAGED_TTL_MS = 24 * 60 * 60 * 1000
+/** The longest message a job keeps for the agent and the dashboard to show. */
+const MAX_JOB_MESSAGE = 300
 const MAX_SIGNERS = 10
 /** Documents signed with one PIN. */
 const MAX_BATCH = 10
@@ -158,6 +160,9 @@ export type RequestView = Omit<SigningRequest, "signers"> & {
 const sha256Hex = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex")
 const b64 = (data: Uint8Array) => Buffer.from(data).toString("base64")
 const fromB64 = (data: string) => new Uint8Array(Buffer.from(data, "base64"))
+/** `text` cut to at most `max` characters, ending in an ellipsis when cut. */
+const clip = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, Math.max(max - 1, 0)).trimEnd()}…`
 
 /** "Verbale CD.pdf" with characters OneDrive refuses removed. */
 export function safeFileName(name: string): string {
@@ -498,7 +503,7 @@ export function createEsignService(options: ServiceOptions) {
     await store.transitionJob(job.id, ["pending", "prepared"], {
       status: "failed",
       errorCode: code,
-      errorMessage: message?.slice(0, 300) ?? null,
+      errorMessage: message?.slice(0, MAX_JOB_MESSAGE) ?? null,
       preparedPdf: null,
     })
   }
@@ -947,7 +952,10 @@ export function createEsignService(options: ServiceOptions) {
       const result = await store.cancelRequest(
         id,
         { requestId: id, actorSub: caller.sub, type: "cancelled", data: null },
-        { code: "request_cancelled", message: `${await profileName(caller.sub)} cancelled this request.` }
+        {
+          code: "request_cancelled",
+          message: `${await profileName(caller.sub)} cancelled this request.`.slice(0, MAX_JOB_MESSAGE),
+        }
       )
       if (result === "conflict") throw new EsignError("conflict", "The request is not in progress")
     },
@@ -967,12 +975,15 @@ export function createEsignService(options: ServiceOptions) {
       const signer = request.signers.find((s) => s.sub === caller.sub && s.status === "pending")
       if (request.status !== "in_progress" || !signer) throw new EsignError("conflict", "There is nothing to decline")
       const why = reason?.trim() || null
+      // The signer and the event keep the whole reason; the jobs' message quotes as much of it as fits.
+      const lead = `${signer.name} declined this request`
+      const quoted = why ? `: “${clip(why, MAX_JOB_MESSAGE - lead.length - 5)}”` : ""
       const result = await store.declineRequest(
         id,
         signer.id,
         why,
         { requestId: id, actorSub: caller.sub, type: "declined", data: { reason: why } },
-        { code: "request_declined", message: `${signer.name} declined this request${why ? `: “${why}”` : ""}.` }
+        { code: "request_declined", message: `${lead}${quoted}.`.slice(0, MAX_JOB_MESSAGE) }
       )
       if (result === "conflict") throw new EsignError("conflict", "The request changed; reload it")
     },
@@ -1267,6 +1278,10 @@ export function createEsignService(options: ServiceOptions) {
       const job = await resolveTicket(ticket, ["pending", "prepared", "failed"])
       if (job.status === "failed") return { status: job.status }
       const safeCode = code.replace(/[^a-z_]/g, "").slice(0, 40) || "unknown"
+      // These codes say how this service ended a job (a request cancelled or declined, a job done or expired): an
+      // agent's report must not pass for one.
+      if (safeCode.startsWith("request_") || safeCode.startsWith("job_"))
+        throw new EsignError("bad_request", "This error code is reserved")
       if (safeCode === "cancelled") {
         await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
         return { status: "cancelled" as const }
@@ -1277,7 +1292,7 @@ export function createEsignService(options: ServiceOptions) {
       }
       await store.transitionJob(job.id, ["pending", "prepared"], {
         errorCode: safeCode,
-        errorMessage: message?.slice(0, 300) ?? null,
+        errorMessage: message?.slice(0, MAX_JOB_MESSAGE) ?? null,
       })
       return { status: job.status }
     },

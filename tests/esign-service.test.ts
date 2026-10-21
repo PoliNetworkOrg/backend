@@ -377,6 +377,32 @@ describe("e-signing service", () => {
     await expect(env.service.agentJob(ticket)).rejects.toThrow("This signature was cancelled.")
   })
 
+  it("refuses an agent error that would pass for how the service ended the job", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    for (const code of ["request_cancelled", "request_declined", "job_done", "job_cancelled"])
+      await expect(env.service.agentFail(ticket, code, "Luca Verdi cancelled this request.")).rejects.toMatchObject({
+        code: "bad_request",
+      })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "pending",
+      errorCode: null,
+      errorMessage: null,
+    })
+  })
+
+  it("quotes as much of a long decline reason as fits in the open signatures' message", async () => {
+    const request = await prepareRequest(env, false)
+    const { jobId } = await env.service.createJob(secretary, request.id)
+    const reason = "Il testo del verbale non corrisponde a quanto deliberato. ".repeat(8).trim()
+    await env.service.declineRequest(president, request.id, reason)
+    const { errorMessage } = (await env.service.jobStatuses(secretary, [jobId]))[0]
+    expect(errorMessage?.length).toBeLessThanOrEqual(300)
+    expect(errorMessage).toMatch(/^Anna Bianchi declined this request: “Il testo del verbale .+…”\.$/)
+    const { request: detail } = await env.service.getRequest(manager, request.id)
+    expect(detail.signers.find((s) => s.sub === president.sub)?.declineReason).toBe(reason)
+  })
+
   it("ends the job on an agent error that retrying can't fix", async () => {
     const request = await prepareRequest(env)
     const { ticket, jobId } = await env.service.createJob(secretary, request.id)
