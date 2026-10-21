@@ -244,6 +244,22 @@ describe("e-signing service", () => {
     expect(env.mailer.signatureRequest.mock.calls.map(([to]) => to)).toEqual(["mario@example.org"])
   })
 
+  it("records a signer who couldn't be emailed and why", async () => {
+    env.mailer.signatureRequest.mockResolvedValueOnce(false)
+    const request = await prepareRequest(env)
+    await env.service.syncProfile(president, { name: "Anna Bianchi", email: null })
+    await sign(env, secretary, secretarySigner, request.id)
+    await vi.waitFor(async () => {
+      const { events } = await env.service.getRequest(manager, request.id)
+      expect(events.filter((e) => e.type === "notify_failed").map((e) => e.data)).toEqual([
+        { sub: secretary.sub, reason: "send_failed" },
+        { sub: president.sub, reason: "no_email" },
+      ])
+    })
+    const { events } = await env.service.getRequest(manager, request.id)
+    expect(events.some((e) => e.type === "notified")).toBe(false)
+  })
+
   it("binds a signer to the CIE of their first signature", async () => {
     const request = await prepareRequest(env, false)
     await sign(env, secretary, secretarySigner, request.id)

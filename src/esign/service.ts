@@ -283,13 +283,19 @@ export function createEsignService(options: ServiceOptions) {
     return { document, pdf }
   }
 
-  /** Emails these signers that it is their turn, all at once, and records who was emailed in signer order. */
+  /**
+   * Emails these signers that it is their turn, all at once, and records in signer order who was emailed and who
+   * couldn't be.
+   */
   async function notifyTurn(request: SigningRequest, signers: Signer[]) {
     const requestedBy = await profileName(request.createdBySub)
     const results = await Promise.all(
       signers.map(async (signer) => {
         const profile = await store.getProfile(signer.sub)
-        if (!profile?.email) return { signer, sent: false }
+        if (!profile?.email) {
+          logger.warn({ requestId: request.id, sub: signer.sub }, "[ESIGN] signer has no email")
+          return { signer, outcome: "no_email" as const }
+        }
         const sent = await mailer
           .signatureRequest(profile.email, {
             signerName: profile.name.split(" ")[0] ?? profile.name,
@@ -302,12 +308,15 @@ export function createEsignService(options: ServiceOptions) {
             logger.error({ error, requestId: request.id }, "[ESIGN] cannot send the signature request email")
             return false
           })
-        return { signer, sent }
+        return { signer, outcome: sent ? ("sent" as const) : ("send_failed" as const) }
       })
     )
-    for (const { signer, sent } of results)
-      if (sent)
-        await store.addEvent({ requestId: request.id, actorSub: null, type: "notified", data: { sub: signer.sub } })
+    for (const { signer, outcome } of results)
+      await store.addEvent(
+        outcome === "sent"
+          ? { requestId: request.id, actorSub: null, type: "notified", data: { sub: signer.sub } }
+          : { requestId: request.id, actorSub: null, type: "notify_failed", data: { sub: signer.sub, reason: outcome } }
+      )
   }
 
   const signaturePlaces = (places: PlaceJson[]) => places.filter((p) => p.kind === "signature")
@@ -776,7 +785,10 @@ export function createEsignService(options: ServiceOptions) {
         type: "created",
         data: { signers: signers.length },
       })
-      await notifyTurn(request, turnOf(request).filter((s) => s.sub !== caller.sub))
+      await notifyTurn(
+        request,
+        turnOf(request).filter((s) => s.sub !== caller.sub)
+      )
       return view(caller, request)
     },
 
