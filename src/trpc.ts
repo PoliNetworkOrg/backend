@@ -2,6 +2,7 @@ import type { AccessSnapshotClient, Actor } from "@polinetwork/auth-kit"
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
 import { ZodError, z } from "zod/v4"
+import { env } from "./env"
 import type { RequestAuth } from "./idp/auth"
 import { logger } from "./logger"
 
@@ -57,7 +58,8 @@ export const createTRPCRouter = t.router
 const timingMiddleware = t.middleware(async ({ next, path }) => {
   const start = Date.now()
 
-  if (t._config.isDev) {
+  // tRPC's isDev is true for any NODE_ENV but production, which would also slow down every test call.
+  if (env.NODE_ENV === "development") {
     // artificial delay in dev
     const waitMs = Math.floor(Math.random() * 100) + 100
     await new Promise((resolve) => setTimeout(resolve, waitMs))

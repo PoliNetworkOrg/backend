@@ -14,12 +14,15 @@ const alg = {
 
 export type TestSigner = { cert: Uint8Array; key: webcrypto.CryptoKey; name: string; fiscalCode: string }
 
+// Fixed, so the certificates also cover the frozen clock of the service tests.
+const VALID_FROM = new Date("2026-01-01T00:00:00Z")
+
 export async function createTestCa() {
   const keys = await webcrypto.subtle.generateKey(alg, true, ["sign", "verify"])
   const cert = await x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: "01",
     name: "C=IT, O=Test, CN=Test CIE CA",
-    notBefore: new Date(Date.now() - 86_400_000),
+    notBefore: VALID_FROM,
     notAfter: new Date(Date.now() + 3650 * 86_400_000),
     signingAlgorithm: alg,
     keys,
@@ -33,7 +36,7 @@ export async function createTestCa() {
       // Shaped like a CIE authentication certificate: CN "<codice fiscale>/<NIS>", serialNumber the document number.
       subject: `C=IT, 2.5.4.4=${surname}, 2.5.4.42=${given}, 2.5.4.5=IDCIT-CA00000AA, CN=${fiscalCode}/041001234567`,
       issuer: cert.subject,
-      notBefore: new Date(Date.now() - 86_400_000),
+      notBefore: VALID_FROM,
       notAfter: new Date(Date.now() + 365 * 86_400_000),
       signingAlgorithm: alg,
       publicKey: own.publicKey,
