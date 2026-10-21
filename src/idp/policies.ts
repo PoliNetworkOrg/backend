@@ -1,3 +1,4 @@
+import type { Actor } from "@polinetwork/auth-kit"
 import type { Policy } from "@/trpc"
 
 /** Backend scopes (RFC v3 §6.2). */
@@ -23,3 +24,8 @@ export function botReadOrDashboard(permission: string): Policy {
 
 /** Public website data, also readable in the dashboard. */
 export const publicData: Policy = { service: { scope: SCOPE.publicRead }, ...dashboard("admin:access") }
+
+/** Hidden groups are dashboard data (RFC v3 §8); anonymous legacy callers keep the old behaviour. */
+export function seesHiddenGroups(actor: Actor | null): boolean {
+  return actor === null || actor.kind === "user"
+}
