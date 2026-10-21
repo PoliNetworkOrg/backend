@@ -1,4 +1,5 @@
 import { createHash, randomBytes, X509Certificate } from "node:crypto"
+import { outdatedAgent } from "./agent-version"
 import { type Drive, DriveError, MAX_PDF_BYTES } from "./drive/types"
 import { EsignError } from "./errors"
 import { identityOf, titleCase } from "./identity"
@@ -131,6 +132,13 @@ const TERMINAL = new Set([
   "job_done",
   "agent_outdated",
 ])
+
+/** Tells an agent too old to sign to update; `version` is the one it reported, if any. */
+const agentOutdated = (version: string | null) =>
+  new EsignError(
+    "agent_outdated",
+    `${version ? `PoliNetwork eSign ${version} is` : "This version of PoliNetwork eSign is"} too old. Install the latest version from the setup guide, then sign again.`
+  )
 
 export type CreateRequestInput = {
   title: string
@@ -483,10 +491,20 @@ export function createEsignService(options: ServiceOptions) {
 
   // ── Ticket resolution for the agent ──────────────────────────────────────────────────────────────────────────
 
-  async function resolveTicket(ticket: string, allowed: Job["status"][]): Promise<Job> {
+  /**
+   * The job of a ticket, if its status is allowed. With the agent's `userAgent`, an agent older than the minimum is
+   * told to update whatever the job's state, and its open job ends: the dashboard shows why.
+   */
+  async function resolveTicket(ticket: string, allowed: Job["status"][], userAgent?: string | null): Promise<Job> {
     if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) throw new EsignError("ticket_invalid", "This signing link is not valid")
     const job = await store.getJobByTicketHash(sha256Hex(ticket))
     if (!job) throw new EsignError("ticket_invalid", "This signing link is not valid")
+    const outdated = outdatedAgent(userAgent ?? null)
+    if (outdated) {
+      const error = agentOutdated(outdated)
+      await failJob(job, error.code, error.message)
+      throw error
+    }
     if (job.status === "completed") throw new EsignError("job_done", "This document is already signed")
     if (job.status === "failed") {
       if (allowed.includes("failed")) return job
@@ -1039,8 +1057,9 @@ export function createEsignService(options: ServiceOptions) {
 
     // ── The agent's side, authenticated by the ticket ──────────────────────────────────────────────────────────
 
-    async agentJob(ticket: string) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
+    /** The job the agent's page shows; `userAgent` is the agent's, which refuses one too old before the PIN. */
+    async agentJob(ticket: string, userAgent: string | null = null) {
+      const job = await resolveTicket(ticket, ["pending", "prepared"], userAgent)
       return failOnTerminal(job, async () => {
         const { request, signer, current } = await jobContext(job)
         if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
@@ -1062,14 +1081,17 @@ export function createEsignService(options: ServiceOptions) {
       })
     },
 
-    async agentPrepare(ticket: string, certificateB64: string, chainB64: string[] = [], protocol = 1) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
+    async agentPrepare(
+      ticket: string,
+      certificateB64: string,
+      chainB64: string[] = [],
+      protocol = 1,
+      userAgent: string | null = null
+    ) {
+      const job = await resolveTicket(ticket, ["pending", "prepared"], userAgent)
       return failOnTerminal(job, async () => {
-        if (protocol < 2)
-          throw new EsignError(
-            "agent_outdated",
-            "This version of the signing app is too old. Install the latest PoliNetwork eSign from the setup guide, then sign again."
-          )
+        // The safety net for agents that don't send their version: caught here, once the PIN opened the card.
+        if (protocol < 2) throw agentOutdated(null)
         const { request, signer, current } = await jobContext(job)
         const place = signaturePlaces(job.places)[job.step]
         if (!place) throw new EsignError("conflict", "The signature changed state; start again")

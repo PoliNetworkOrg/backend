@@ -92,6 +92,10 @@ Requirements:
   consent, for the drive; emails use the existing `Mail.Send` sender.
 - The dashboard proxies `/api/esign/agent/*` to this backend's `/esign/agent/*`; the agent never calls the backend
   directly. Those endpoints are authenticated only by the job's single-use ticket.
+- The proxy passes on the agent's `User-Agent: PoliNetwork-eSign/<version>`. An agent older than `MIN_AGENT_VERSION`
+  (`src/esign/agent-version.ts`) gets 426 `agent_outdated` when it loads a job, before the PIN, and the job fails so
+  the dashboard can say why. No User-Agent, a development build or an unreadable version passes; preparing a signature
+  still refuses an agent without protocol 2.
 
 Signatures are checked against the CIE certification authorities of the Ministero dell'Interno bundled in
 `src/esign/trust`. Tests: `bunx vitest run tests/esign-*.test.ts` (validated with poppler `pdfsig` when installed).

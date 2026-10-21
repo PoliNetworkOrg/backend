@@ -925,6 +925,47 @@ describe("e-signing service", () => {
     })
   })
 
+  it("refuses an agent below the minimum version when it loads the job, before the PIN", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    const old = "PoliNetwork-eSign/v0.1.9"
+    await expect(env.service.agentJob(ticket, old)).rejects.toMatchObject({
+      code: "agent_outdated",
+      message: "PoliNetwork eSign 0.1.9 is too old. Install the latest version from the setup guide, then sign again.",
+    })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "failed",
+      errorCode: "agent_outdated",
+      seen: false,
+    })
+    // Reopening the window with the same agent says the same, not that the job failed.
+    await expect(env.service.agentJob(ticket, old)).rejects.toMatchObject({ code: "agent_outdated" })
+
+    const next = await env.service.createJob(secretary, request.id)
+    await expect(
+      env.service.agentPrepare(next.ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2, old)
+    ).rejects.toMatchObject({ code: "agent_outdated" })
+    expect((await env.service.jobStatuses(secretary, [next.jobId]))[0].errorCode).toBe("agent_outdated")
+  })
+
+  it("lets an agent sign that is current, a development build, or doesn't say its version", async () => {
+    for (const userAgent of [
+      "PoliNetwork-eSign/v0.2.0",
+      "PoliNetwork-eSign/0.3.1-4-gabc1234-dirty",
+      "PoliNetwork-eSign/dev",
+      "PoliNetwork-Sign-Agent/0.1.0",
+      "node",
+      null,
+    ]) {
+      const request = await prepareRequest(env)
+      const { ticket } = await env.service.createJob(secretary, request.id)
+      await expect(env.service.agentJob(ticket, userAgent)).resolves.toMatchObject({ status: "pending" })
+      await expect(
+        env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2, userAgent)
+      ).resolves.toMatchObject({ step: 0 })
+    }
+  })
+
   it("restricts each drive to the roles and permissions its rule names", async () => {
     const boardOnly = { roles: ["direttivo"], permissions: [] }
     const admin: Caller = { ...manager, canManageDrives: true }
