@@ -23,7 +23,8 @@ const failBody = z.object({ code: z.string().max(60), message: z.string().max(50
 /**
  * The sign agent's endpoints, mounted at `/esign/agent` and reached through the dashboard's proxy. The ticket in
  * the path is the only credential: a single-use, ten-minute capability for one signature. The proxy passes on the
- * agent's `User-Agent: PoliNetwork-eSign/<version>`, which loading a job and preparing a signature check.
+ * agent's `User-Agent: PoliNetwork-eSign/<version>` (`PoliNetwork-Sign-Agent/<version>` before 0.2.0), which loading
+ * a job and preparing a signature check.
  */
 export function agentRoutes(service: EsignService) {
   const app = new Hono()

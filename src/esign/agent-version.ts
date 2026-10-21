@@ -21,12 +21,13 @@ const MIN = parse(MIN_AGENT_VERSION) as Version
 
 /**
  * The version an agent's `User-Agent: PoliNetwork-eSign/<version>` names when it is older than the minimum; null
- * otherwise. A missing or different User-Agent, a development or source build (`dev`, `v0.1.1-6-g0cb0f7b`) or
- * anything unparsable is never too old, so the dashboard and the agent can be deployed in any order; preparing a
- * signature still refuses one without protocol 2. A pre-release counts as its release: `v0.2.0-rc.1` is 0.2.0.
+ * otherwise. Agents released before the rename to PoliNetwork eSign (0.1.x) send `PoliNetwork-Sign-Agent/<version>`.
+ * A missing or different User-Agent, a development or source build (`dev`, `v0.1.1-6-g0cb0f7b`) or anything
+ * unparsable is never too old, so the dashboard and the agent can be deployed in any order; preparing a signature
+ * still refuses one without protocol 2. A pre-release counts as its release: `v0.2.0-rc.1` is 0.2.0.
  */
 export function outdatedAgent(userAgent: string | null): string | null {
-  const text = /^PoliNetwork-eSign\/(\S{1,32})$/.exec(userAgent ?? "")?.[1] ?? ""
+  const text = /^PoliNetwork-(?:eSign|Sign-Agent)\/(\S{1,32})$/.exec(userAgent ?? "")?.[1] ?? ""
   const version = SOURCE_BUILD.test(text) ? null : parse(text)
   if (!version) return null
   const [major, minor, patch] = version

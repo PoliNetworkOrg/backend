@@ -12,6 +12,13 @@ describe("agent version", () => {
     expect(outdatedAgent("PoliNetwork-eSign/v0.1.1-rc.2")).toBe("0.1.1-rc.2")
   })
 
+  it("reads the version of an agent released before the rename to PoliNetwork eSign", () => {
+    expect(outdatedAgent("PoliNetwork-Sign-Agent/v0.1.0")).toBe("0.1.0")
+    expect(outdatedAgent("PoliNetwork-Sign-Agent/v0.1.1")).toBe("0.1.1")
+    expect(outdatedAgent("PoliNetwork-Sign-Agent/v0.1.1-3-g8c16235")).toBeNull()
+    expect(outdatedAgent("PoliNetwork-Sign-Agent/dev")).toBeNull()
+  })
+
   it("lets through the minimum and newer, pre-releases counting as their release", () => {
     for (const version of ["v0.2.0", "0.2.0", "v0.2.1", "v0.3.0", "v1.0.0", "v0.10.0", "v0.2.0-rc.1", "v0.3.0+build.5"])
       expect(outdatedAgent(`PoliNetwork-eSign/${version}`)).toBeNull()
@@ -31,7 +38,8 @@ describe("agent version", () => {
       "PoliNetwork-eSign/abc1234",
       "PoliNetwork-eSign/0.1",
       "PoliNetwork-eSign/0.1.9 extra",
-      "PoliNetwork-Sign-Agent/0.1.0",
+      "PoliNetwork-SignAgent/0.1.0",
+      "PoliNetwork-Sign-Agent/0.1",
       "Mozilla/5.0 PoliNetwork-eSign/0.1.0",
       "node",
     ])
