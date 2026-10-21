@@ -115,6 +115,10 @@ export const esignRouter = createTRPCRouter({
       }),
     /** Every drive's access rules and the roles and permissions they can name. */
     access: user.query(({ ctx }) => run(() => esign.driveAccess(callerOf(ctx)))),
+    /** The in-progress requests and signers a new "be asked to sign" rule would strand, before saving it. */
+    accessImpact: user
+      .input(z.object({ driveId: z.string().min(1), sign: driveRule }))
+      .query(({ ctx, input }) => run(() => esign.driveAccessImpact(callerOf(ctx), input.driveId, input.sign))),
     setAccess: user
       .input(z.object({ driveId: z.string().min(1), request: driveRule, sign: driveRule }))
       .mutation(({ ctx, input }) =>

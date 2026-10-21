@@ -139,9 +139,17 @@ export type CreateRequestInput = {
   email: { to: string[]; message: string | null } | null
 }
 
-export type RequestView = SigningRequest & {
+export type RequestView = Omit<SigningRequest, "signers"> & {
+  signers: (Signer & {
+    /**
+     * While the request waits for this signer: the label of a drive whose documents they may no longer sign, after its
+     * rule or their IdP roles changed. Null otherwise.
+     */
+    lostAccess: string | null
+  })[]
   /** Signers who may sign now. */
   turn: string[]
+  /** The caller is in `turn` and may still sign the request's drives. */
   myTurn: boolean
   signedCount: number
   createdByName: string
@@ -285,12 +293,20 @@ export function createEsignService(options: ServiceOptions) {
     return (await store.getProfile(sub))?.name ?? "A PoliNetwork member"
   }
 
-  async function view(caller: Caller, request: SigningRequest): Promise<RequestView> {
+  async function view(caller: Caller, request: SigningRequest, rules: Rules): Promise<RequestView> {
     const turn = turnOf(request).map((s) => s.sub)
+    const signers = request.signers.map((signer) => {
+      const denied =
+        request.status === "in_progress" && signer.status === "pending"
+          ? request.drives.find((d) => !maySign(rules, signer.sub, d))
+          : undefined
+      return { ...signer, lostAccess: denied ? driveLabel(denied) : null }
+    })
     return {
       ...request,
+      signers,
       turn,
-      myTurn: turn.includes(caller.sub),
+      myTurn: turn.includes(caller.sub) && !signers.some((s) => s.sub === caller.sub && s.lostAccess),
       signedCount: request.signers.filter((s) => s.status === "signed").length,
       createdByName: await profileName(request.createdBySub),
     }
@@ -689,6 +705,27 @@ export function createEsignService(options: ServiceOptions) {
       logger.info({ driveId, by: caller.sub }, "[ESIGN] drive access changed")
     },
 
+    /**
+     * The in-progress requests that a new "be asked to sign" rule for the drive would strand, with the pending signers
+     * who may sign its documents now and no longer would: for a confirmation before saving the rule.
+     */
+    async driveAccessImpact(caller: Caller, driveId: string, sign: DriveRule) {
+      if (!caller.canManageDrives) throw new EsignError("forbidden", "You cannot manage drive access")
+      driveFor(driveId)
+      const rules = await accessRules()
+      const requests = await store.listRequests({ status: ["in_progress"] })
+      return requests
+        .filter((r) => r.drives.includes(driveId))
+        .map((r) => ({
+          id: r.id,
+          title: r.title,
+          signers: r.signers
+            .filter((s) => s.status === "pending" && maySign(rules, s.sub, driveId) && !satisfies(sign, s.sub))
+            .map((s) => s.name),
+        }))
+        .filter((r) => r.signers.length > 0)
+    },
+
     async syncProfile(caller: Caller, profile: { name: string; email: string | null }): Promise<Profile> {
       return store.upsertProfile({ sub: caller.sub, name: profile.name.trim().slice(0, 120), email: profile.email })
     },
@@ -862,7 +899,7 @@ export function createEsignService(options: ServiceOptions) {
         request,
         turnOf(request).filter((s) => s.sub !== caller.sub)
       )
-      return view(caller, request)
+      return view(caller, request, rules)
     },
 
     async listRequests(caller: Caller, scope: "inbox" | "mine" | "all") {
@@ -873,20 +910,23 @@ export function createEsignService(options: ServiceOptions) {
       )
       const rules = await accessRules()
       const visible = requests.filter((r) => canView(rules, caller, r))
-      return Promise.all(visible.map((r) => view(caller, r)))
+      const views = await Promise.all(visible.map((r) => view(caller, r, rules)))
+      // A signer who may no longer sign a drive's documents can't act on them: they stay under Requests only.
+      return scope === "inbox" ? views.filter((r) => r.myTurn) : views
     },
 
     async getRequest(caller: Caller, id: string) {
       const request = await requestFor(caller, id)
-      const [events, versions, open] = await Promise.all([
+      const [events, versions, open, rules] = await Promise.all([
         store.listEvents(id),
         store.listVersions(id),
         store.openJobs(id),
+        accessRules(),
       ])
       const current = versions.at(-1)
       const signingNow = open.find((j) => j.expiresAt > now())
       return {
-        request: await view(caller, request),
+        request: await view(caller, request, rules),
         events,
         versions,
         currentDocumentId: current?.id ?? null,

@@ -957,8 +957,14 @@ describe("e-signing service", () => {
     expect(await env.service.listRequests(manager, "all")).toHaveLength(1)
     expect(await env.service.listRequests(president, "inbox")).toHaveLength(1)
 
-    // A signer who loses access can't sign any more.
+    // A signer who loses access can't sign any more, and is told so instead of seeing their turn.
     env.people.set(president.sub, { roles: [], permissions: ["esign:sign"] })
+    expect(await env.service.listRequests(president, "inbox")).toHaveLength(0)
+    expect(await env.service.listRequests(president, "mine")).toHaveLength(1)
+    const { request: stranded } = await env.service.getRequest(president, request.id)
+    expect(stranded.myTurn).toBe(false)
+    expect(stranded.turn).toEqual([president.sub])
+    expect(stranded.signers[0].lostAccess).toBe("Archive")
     await expect(env.service.createJob(president, request.id)).rejects.toThrow(/no longer sign documents of Archive/)
 
     // Clearing the rule restores the default.
@@ -967,7 +973,44 @@ describe("e-signing service", () => {
       sign: { roles: [], permissions: [] },
     })
     expect((await env.service.drivesFor(other)).map((d) => d.id)).toEqual(["dev", "archive"])
+    expect((await env.service.getRequest(president, request.id)).request.signers[0].lostAccess).toBeNull()
     await expect(env.service.createJob(president, request.id)).resolves.toMatchObject({ ticket: expect.any(String) })
+  })
+
+  it("lists the requests in progress that a narrower sign rule would strand", async () => {
+    const admin: Caller = { ...manager, canManageDrives: true }
+    const boardOnly = { roles: ["direttivo"], permissions: [] }
+    env.people.set(president.sub, { roles: ["direttivo"], permissions: ["esign:sign"] })
+    env.people.set(secretary.sub, { roles: [], permissions: ["esign:sign"] })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    await env.service.syncProfile(president, { name: "Anna Bianchi", email: "anna@example.org" })
+    const { document } = await env.service.stageDriveItem(manager, "archive", "mock-verbale-cd")
+    // The secretary signs second: a later signer of an ordered request is stranded too.
+    const request = await env.service.createRequest(manager, {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: true,
+      signers: [
+        { sub: president.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+        { sub: secretary.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+      ],
+      output: null,
+      email: null,
+    })
+
+    expect(await env.service.driveAccessImpact(admin, "archive", boardOnly)).toEqual([
+      { id: request.id, title: "Verbale", signers: ["Mario Rossi"] },
+    ])
+    expect(await env.service.driveAccessImpact(admin, "dev", boardOnly)).toEqual([])
+    expect(await env.service.driveAccessImpact(admin, "archive", { roles: [], permissions: [] })).toEqual([])
+    await env.service.setDriveAccess(admin, "archive", { request: { roles: [], permissions: [] }, sign: boardOnly })
+    expect(await env.service.driveAccessImpact(admin, "archive", boardOnly)).toEqual([])
+    expect(
+      await env.service.driveAccessImpact(admin, "archive", { roles: ["direttivo", "socio"], permissions: [] })
+    ).toEqual([])
+    await expect(env.service.driveAccessImpact(manager, "archive", boardOnly)).rejects.toMatchObject({
+      code: "forbidden",
+    })
   })
 
   it("matches a rule by permission as well as by role", async () => {
