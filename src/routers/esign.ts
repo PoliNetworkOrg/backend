@@ -31,6 +31,7 @@ const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {
   job_expired: "CONFLICT",
   job_done: "CONFLICT",
   job_cancelled: "CONFLICT",
+  job_failed: "CONFLICT",
   document_changed: "CONFLICT",
   certificate_invalid: "BAD_REQUEST",
   signer_mismatch: "FORBIDDEN",

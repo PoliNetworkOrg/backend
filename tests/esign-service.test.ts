@@ -268,14 +268,24 @@ describe("e-signing service", () => {
     expect(events.some((e) => e.type === "notified")).toBe(false)
   })
 
-  it("binds a signer to the CIE of their first signature", async () => {
+  it("binds a signer to the CIE of their first signature, ending a job signed with another", async () => {
     const request = await prepareRequest(env, false)
     await sign(env, secretary, secretarySigner, request.id)
     const other = await prepareRequest(env, false)
-    const { ticket } = await env.service.createJob(secretary, other.id)
+    const { ticket, jobId } = await env.service.createJob(secretary, other.id)
     await expect(
       env.service.agentPrepare(ticket, Buffer.from(presidentSigner.cert).toString("base64"), [], 2)
     ).rejects.toMatchObject({ code: "signer_mismatch" })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "failed",
+      errorCode: "signer_mismatch",
+      errorMessage: "This CIE does not belong to Mario Rossi",
+    })
+    expect((await env.service.getRequest(president, other.id)).signingNow).toBeNull()
+    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({
+      code: "job_failed",
+      message: "This CIE does not belong to Mario Rossi",
+    })
   })
 
   it("lets one signer at a time sign an unordered request", async () => {
@@ -359,6 +369,24 @@ describe("e-signing service", () => {
     await env.service.agentFail(ticket, "cancelled", null)
     expect((await env.service.jobStatuses(secretary, [jobId]))[0].status).toBe("cancelled")
     await expect(env.service.agentJob(ticket)).rejects.toThrow("This signature was cancelled.")
+  })
+
+  it("ends the job on an agent error that retrying can't fix", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    await expect(env.service.agentFail(ticket, "pin_locked", "Your CIE PIN is blocked.")).resolves.toEqual({
+      status: "failed",
+    })
+    const failed = { status: "failed", errorCode: "pin_locked", errorMessage: "Your CIE PIN is blocked." }
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject(failed)
+    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({
+      code: "job_failed",
+      message: "Your CIE PIN is blocked.",
+    })
+    // The agent reports the backend's own errors back: the failed job stays as it is.
+    await expect(env.service.agentFail(ticket, "job_failed", "Something else")).resolves.toEqual({ status: "failed" })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject(failed)
+    await expect(env.service.createJob(secretary, request.id)).resolves.toMatchObject({ ticket: expect.any(String) })
   })
 
   it("accepts a PDF signed with the official CIE app as a fallback", async () => {
@@ -850,14 +878,14 @@ describe("e-signing service", () => {
     })
   })
 
-  it("asks an outdated agent to update before it signs", async () => {
+  it("asks an outdated agent to update before it signs, ending the job", async () => {
     const request = await prepareRequest(env)
     const { ticket, jobId } = await env.service.createJob(secretary, request.id)
     await expect(
       env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"))
     ).rejects.toMatchObject({ code: "agent_outdated" })
     expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
-      status: "pending",
+      status: "failed",
       errorCode: "agent_outdated",
     })
   })

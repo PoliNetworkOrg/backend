@@ -108,6 +108,27 @@ const STAGED_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_SIGNERS = 10
 /** Documents signed with one PIN. */
 const MAX_BATCH = 10
+/**
+ * Errors that end a signature job, because trying again in the same agent window can't succeed; any other error
+ * leaves the job open. The agent and the dashboard keep the same list, documented in the admin's
+ * docs/esign/contracts.md.
+ */
+const TERMINAL = new Set([
+  // Reported by the agent.
+  "pin_locked",
+  "card_untrusted",
+  "middleware_missing",
+  "not_paired",
+  "certificate_not_found",
+  // Raised by this service.
+  "signer_mismatch",
+  "certificate_invalid",
+  "signature_invalid",
+  "document_changed",
+  "pdf_invalid",
+  "job_done",
+  "agent_outdated",
+])
 
 export type CreateRequestInput = {
   title: string
@@ -436,6 +457,10 @@ export function createEsignService(options: ServiceOptions) {
     const job = await store.getJobByTicketHash(sha256Hex(ticket))
     if (!job) throw new EsignError("ticket_invalid", "This signing link is not valid")
     if (job.status === "completed") throw new EsignError("job_done", "This document is already signed")
+    if (job.status === "failed") {
+      if (allowed.includes("failed")) return job
+      throw new EsignError("job_failed", job.errorMessage ?? "This signature failed. Start again from the dashboard.")
+    }
     if (job.status === "cancelled")
       throw new EsignError(
         "job_cancelled",
@@ -450,6 +475,26 @@ export function createEsignService(options: ServiceOptions) {
     }
     if (!allowed.includes(job.status)) throw new EsignError("conflict", "The signature is not ready")
     return job
+  }
+
+  /** Ends the job: the dashboard stops waiting and shows why, and the agent can't retry it. */
+  async function failJob(job: Job, code: string, message: string | null) {
+    await store.transitionJob(job.id, ["pending", "prepared"], {
+      status: "failed",
+      errorCode: code,
+      errorMessage: message?.slice(0, 300) ?? null,
+      preparedPdf: null,
+    })
+  }
+
+  /** Runs an agent step on an open job, failing the job when the step hits an error that retrying can't fix. */
+  async function failOnTerminal<T>(job: Job, step: () => Promise<T>): Promise<T> {
+    try {
+      return await step()
+    } catch (error) {
+      if (error instanceof EsignError && TERMINAL.has(error.code)) await failJob(job, error.code, error.message)
+      throw error
+    }
   }
 
   /** The request and signer of an open job, checked again: either may have changed since the job started. */
@@ -921,162 +966,164 @@ export function createEsignService(options: ServiceOptions) {
 
     async agentJob(ticket: string) {
       const job = await resolveTicket(ticket, ["pending", "prepared"])
-      const { request, signer, current } = await jobContext(job)
-      if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
-      return {
-        id: job.id,
-        status: job.status,
-        expiresAt: job.expiresAt,
-        document: { title: request.title, fileName: current.fileName, pages: current.pages },
-        signer: { name: signer.name, role: signer.role },
-        placement: { page: signaturePlaces(job.places)[job.step]?.page ?? 0 },
-        requestedBy: await profileName(request.createdBySub),
-        /** Signatures still to make, one after another with the same card session. */
-        signatures: signaturesLeft(job),
-        /** Extra marks the next signature draws. */
-        marks: job.step === 0 ? job.places.length - signaturePlaces(job.places).length : 0,
-        /** Pages with this signer's boxes, 0-based. */
-        pages: [...new Set(job.places.map((p) => p.page))].sort((a, b) => a - b),
-      }
+      return failOnTerminal(job, async () => {
+        const { request, signer, current } = await jobContext(job)
+        if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
+        return {
+          id: job.id,
+          status: job.status,
+          expiresAt: job.expiresAt,
+          document: { title: request.title, fileName: current.fileName, pages: current.pages },
+          signer: { name: signer.name, role: signer.role },
+          placement: { page: signaturePlaces(job.places)[job.step]?.page ?? 0 },
+          requestedBy: await profileName(request.createdBySub),
+          /** Signatures still to make, one after another with the same card session. */
+          signatures: signaturesLeft(job),
+          /** Extra marks the next signature draws. */
+          marks: job.step === 0 ? job.places.length - signaturePlaces(job.places).length : 0,
+          /** Pages with this signer's boxes, 0-based. */
+          pages: [...new Set(job.places.map((p) => p.page))].sort((a, b) => a - b),
+        }
+      })
     },
 
     async agentPrepare(ticket: string, certificateB64: string, chainB64: string[] = [], protocol = 1) {
       const job = await resolveTicket(ticket, ["pending", "prepared"])
-      if (protocol < 2) {
-        const message =
-          "This version of the signing app is too old. Install the latest PoliNetwork eSign from the setup guide, then sign again."
-        await store.transitionJob(job.id, ["pending", "prepared"], {
-          errorCode: "agent_outdated",
-          errorMessage: message,
-        })
-        throw new EsignError("agent_outdated", message)
-      }
-      const { request, signer, current } = await jobContext(job)
-      const place = signaturePlaces(job.places)[job.step]
-      if (!place) throw new EsignError("conflict", "The signature changed state; start again")
-      let cert: X509Certificate
-      try {
-        cert = new X509Certificate(Buffer.from(certificateB64, "base64"))
-      } catch {
-        throw new EsignError("certificate_invalid", "The card's certificate cannot be read")
-      }
-      const at = now()
-      if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
-        throw new EsignError("certificate_invalid", "The CIE certificate is expired")
-      const trust = (options.trust ?? cieChain)(cert, at)
-      if (!trust.trusted && !options.allowTestCertificates)
-        throw new EsignError("certificate_invalid", "This certificate was not issued for a CIE")
-      const identity = identityOf(cert)
-      if (!identity.fiscalCode && !options.allowTestCertificates)
-        throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
-      const revocation = await revocationOf(cert, trust.issuer)
-      const profile = await store.getProfile(signer.sub)
-      if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
-        throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
+      return failOnTerminal(job, async () => {
+        if (protocol < 2)
+          throw new EsignError(
+            "agent_outdated",
+            "This version of the signing app is too old. Install the latest PoliNetwork eSign from the setup guide, then sign again."
+          )
+        const { request, signer, current } = await jobContext(job)
+        const place = signaturePlaces(job.places)[job.step]
+        if (!place) throw new EsignError("conflict", "The signature changed state; start again")
+        let cert: X509Certificate
+        try {
+          cert = new X509Certificate(Buffer.from(certificateB64, "base64"))
+        } catch {
+          throw new EsignError("certificate_invalid", "The card's certificate cannot be read")
+        }
+        const at = now()
+        if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
+          throw new EsignError("certificate_invalid", "The CIE certificate is expired")
+        const trust = (options.trust ?? cieChain)(cert, at)
+        if (!trust.trusted && !options.allowTestCertificates)
+          throw new EsignError("certificate_invalid", "This certificate was not issued for a CIE")
+        const identity = identityOf(cert)
+        if (!identity.fiscalCode && !options.allowTestCertificates)
+          throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
+        const revocation = await revocationOf(cert, trust.issuer)
+        const profile = await store.getProfile(signer.sub)
+        if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
+          throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
 
-      const pdf = await info(current.sha256, current.content)
-      const used = new Set(pdf.fieldNames)
-      let fieldName = `Firma ${identity.name}`
-      for (let i = 2; used.has(fieldName); i++) fieldName = `Firma ${identity.name} ${i}`
-      const chain = trust.trusted ? trust.chain : chainB64.slice(0, 4).map(fromB64)
-      let prepared: PreparedSignature
-      try {
-        prepared = await prepareSignature(current.content, new Uint8Array(cert.raw), {
-          placement: place,
-          // The first signature draws the marks, so it covers them.
-          marks: job.step === 0 ? job.places.filter((p) => p.kind === "mark") : [],
-          fieldName,
-          signerName: identity.name,
-          reason: signer.role ? `${titleCase(signer.role)} - ${request.title}` : request.title,
-          signingTime: at,
-          appearance: {
-            lines: [
-              { text: "Firmato digitalmente da", muted: true },
-              { text: identity.name, bold: true },
-              ...(signer.role ? [{ text: titleCase(signer.role) }] : []),
-              { text: `${formatRomeDate(at)} · CIE`, muted: true },
-            ],
+        const pdf = await info(current.sha256, current.content)
+        const used = new Set(pdf.fieldNames)
+        let fieldName = `Firma ${identity.name}`
+        for (let i = 2; used.has(fieldName); i++) fieldName = `Firma ${identity.name} ${i}`
+        const chain = trust.trusted ? trust.chain : chainB64.slice(0, 4).map(fromB64)
+        let prepared: PreparedSignature
+        try {
+          prepared = await prepareSignature(current.content, new Uint8Array(cert.raw), {
+            placement: place,
+            // The first signature draws the marks, so it covers them.
+            marks: job.step === 0 ? job.places.filter((p) => p.kind === "mark") : [],
+            fieldName,
+            signerName: identity.name,
+            reason: signer.role ? `${titleCase(signer.role)} - ${request.title}` : request.title,
+            signingTime: at,
+            appearance: {
+              lines: [
+                { text: "Firmato digitalmente da", muted: true },
+                { text: identity.name, bold: true },
+                ...(signer.role ? [{ text: titleCase(signer.role) }] : []),
+                { text: `${formatRomeDate(at)} · CIE`, muted: true },
+              ],
+            },
+          })
+        } catch (error) {
+          if (error instanceof PdfError || error instanceof SignatureError)
+            throw new EsignError(error instanceof SignatureError ? "certificate_invalid" : "pdf_invalid", error.message)
+          throw error
+        }
+        const ok = await store.transitionJob(job.id, ["pending", "prepared"], {
+          status: "prepared",
+          errorCode: null,
+          errorMessage: null,
+          preparedPdf: prepared.placeholder.pdf,
+          prepared: {
+            byteRange: prepared.placeholder.byteRange,
+            contentsOffset: prepared.placeholder.contentsOffset,
+            contentsHexLength: prepared.placeholder.contentsHexLength,
+            signedAttrs: b64(prepared.signedAttrs),
+            toBeSigned: b64(prepared.toBeSigned),
+            certificate: b64(prepared.certificate),
+            chain: chain.map(b64),
+            signingTime: at.toISOString(),
+            revocation,
           },
         })
-      } catch (error) {
-        if (error instanceof PdfError || error instanceof SignatureError)
-          throw new EsignError(error instanceof SignatureError ? "certificate_invalid" : "pdf_invalid", error.message)
-        throw error
-      }
-      const ok = await store.transitionJob(job.id, ["pending", "prepared"], {
-        status: "prepared",
-        errorCode: null,
-        errorMessage: null,
-        preparedPdf: prepared.placeholder.pdf,
-        prepared: {
-          byteRange: prepared.placeholder.byteRange,
-          contentsOffset: prepared.placeholder.contentsOffset,
-          contentsHexLength: prepared.placeholder.contentsHexLength,
-          signedAttrs: b64(prepared.signedAttrs),
+        if (!ok) throw new EsignError("conflict", "The signature changed state; start again")
+        return {
           toBeSigned: b64(prepared.toBeSigned),
-          certificate: b64(prepared.certificate),
-          chain: chain.map(b64),
-          signingTime: at.toISOString(),
-          revocation,
-        },
+          algorithm: "RSASSA-PKCS1-v1_5-SHA256" as const,
+          step: job.step,
+          steps: signaturePlaces(job.places).length,
+        }
       })
-      if (!ok) throw new EsignError("conflict", "The signature changed state; start again")
-      return {
-        toBeSigned: b64(prepared.toBeSigned),
-        algorithm: "RSASSA-PKCS1-v1_5-SHA256" as const,
-        step: job.step,
-        steps: signaturePlaces(job.places).length,
-      }
     },
 
     async agentComplete(ticket: string, signatureB64: string) {
       const job = await resolveTicket(ticket, ["prepared"])
-      const { request, signer, current } = await jobContext(job)
-      const state = job.prepared
-      const pdf = await store.getPreparedPdf(job.id)
-      if (!state || !pdf) throw new EsignError("conflict", "The signature is not ready")
-      const prepared: PreparedSignature = {
-        placeholder: {
-          pdf,
-          byteRange: state.byteRange,
-          contentsOffset: state.contentsOffset,
-          contentsHexLength: state.contentsHexLength,
-        },
-        signedAttrs: fromB64(state.signedAttrs),
-        toBeSigned: fromB64(state.toBeSigned),
-        certificate: fromB64(state.certificate),
-      }
-      let signed: Uint8Array
-      try {
-        signed = finalizeSignature(prepared, fromB64(signatureB64), state.chain.map(fromB64))
-      } catch (error) {
-        if (error instanceof SignatureError) {
-          await store.transitionJob(job.id, ["prepared"], {
-            errorCode: "signature_invalid",
-            errorMessage: error.message,
-          })
-          throw new EsignError("signature_invalid", "The card's signature does not match. Try again.")
+      return failOnTerminal(job, async () => {
+        const { request, signer, current } = await jobContext(job)
+        const state = job.prepared
+        const pdf = await store.getPreparedPdf(job.id)
+        if (!state || !pdf) throw new EsignError("conflict", "The signature is not ready")
+        const prepared: PreparedSignature = {
+          placeholder: {
+            pdf,
+            byteRange: state.byteRange,
+            contentsOffset: state.contentsOffset,
+            contentsHexLength: state.contentsHexLength,
+          },
+          signedAttrs: fromB64(state.signedAttrs),
+          toBeSigned: fromB64(state.toBeSigned),
+          certificate: fromB64(state.certificate),
         }
-        throw error
-      }
-      const sha256 = sha256Hex(signed)
-      const check = await info(sha256, signed)
-      const last = check.signatures.at(-1)
-      if (!last?.intact || !last.verified || !last.coversWholeDocument)
-        throw new EsignError("signature_invalid", "The signed document failed verification")
+        let signed: Uint8Array
+        try {
+          signed = finalizeSignature(prepared, fromB64(signatureB64), state.chain.map(fromB64))
+        } catch (error) {
+          if (error instanceof SignatureError) {
+            logger.warn({ error, jobId: job.id }, "[ESIGN] the card's signature does not match")
+            throw new EsignError(
+              "signature_invalid",
+              "The card's signature does not match. Start again from the dashboard."
+            )
+          }
+          throw error
+        }
+        const sha256 = sha256Hex(signed)
+        const check = await info(sha256, signed)
+        const last = check.signatures.at(-1)
+        if (!last?.intact || !last.verified || !last.coversWholeDocument)
+          throw new EsignError("signature_invalid", "The signed document failed verification")
 
-      const identity = identityOf(new X509Certificate(Buffer.from(prepared.certificate)))
-      return commitSigned({
-        request,
-        signer,
-        current,
-        job,
-        signed,
-        sha256,
-        identity,
-        method: "agent",
-        revocation: state.revocation ?? null,
-        final: signaturesLeft(job) === 1,
+        const identity = identityOf(new X509Certificate(Buffer.from(prepared.certificate)))
+        return commitSigned({
+          request,
+          signer,
+          current,
+          job,
+          signed,
+          sha256,
+          identity,
+          method: "agent",
+          revocation: state.revocation ?? null,
+          final: signaturesLeft(job) === 1,
+        })
       })
     },
 
@@ -1169,16 +1216,25 @@ export function createEsignService(options: ServiceOptions) {
       })
     },
 
+    /** The agent reports an error, or the user's cancel: a terminal error fails the job, others leave it open. */
     async agentFail(ticket: string, code: string, message: string | null) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
+      // The agent also reports the errors this service raised, which may have failed the job already.
+      const job = await resolveTicket(ticket, ["pending", "prepared", "failed"])
+      if (job.status === "failed") return { status: job.status }
       const safeCode = code.replace(/[^a-z_]/g, "").slice(0, 40) || "unknown"
-      if (safeCode === "cancelled") await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
-      else
-        await store.transitionJob(job.id, ["pending", "prepared"], {
-          errorCode: safeCode,
-          errorMessage: message?.slice(0, 300) ?? null,
-        })
-      return { status: safeCode === "cancelled" ? "cancelled" : job.status }
+      if (safeCode === "cancelled") {
+        await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
+        return { status: "cancelled" as const }
+      }
+      if (TERMINAL.has(safeCode)) {
+        await failJob(job, safeCode, message)
+        return { status: "failed" as const }
+      }
+      await store.transitionJob(job.id, ["pending", "prepared"], {
+        errorCode: safeCode,
+        errorMessage: message?.slice(0, 300) ?? null,
+      })
+      return { status: job.status }
     },
 
     /** Periodic cleanup: expired jobs, their prepared PDFs and abandoned uploads. */
