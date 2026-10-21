@@ -645,6 +645,8 @@ export function createEsignService(options: ServiceOptions) {
     const outdated = outdatedAgent(userAgent ?? null)
     if (outdated) {
       const error = agentOutdated(outdated)
+      // The agent did reach the job: the dashboard tells one to update from one that isn't running.
+      if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
       await failJob(job, error.code, error.message)
       throw error
     }

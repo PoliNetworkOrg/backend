@@ -966,7 +966,7 @@ describe("e-signing service", () => {
     expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
       status: "failed",
       errorCode: "agent_outdated",
-      seen: false,
+      seen: true,
     })
     // Reopening the window with the same agent says the same, not that the job failed.
     await expect(env.service.agentJob(ticket, old)).rejects.toMatchObject({ code: "agent_outdated" })
