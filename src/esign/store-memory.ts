@@ -279,6 +279,13 @@ export function createMemoryStore(): EsignStore {
       requests.set(id, { ...request, delivery: { ...delivery, status: "pending", attemptedAt: at.toISOString() } })
       return true
     },
+    async finishDelivery(id, at, delivery) {
+      const request = requests.get(id)
+      const claim = request?.delivery
+      if (!request || claim?.status !== "pending" || claim.attemptedAt !== at.toISOString()) return false
+      requests.set(id, { ...request, delivery, updatedAt: new Date() })
+      return true
+    },
     async pendingDeliveries(staleBefore) {
       return [...requests.values()]
         .filter(

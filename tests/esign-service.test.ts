@@ -745,6 +745,37 @@ describe("e-signing service", () => {
     expect(env.mailer.signedDocument).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps only the result of the run holding the delivery's claim", async () => {
+    const request = await prepareRequest(env)
+    const upload = env.drive.upload
+    let release: () => void = () => {}
+    vi.spyOn(env.drive, "upload").mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { ...(await upload(...args)), id: "stale-run" }
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    await sign(env, president, presidentSigner, request.id)
+    await vi.waitFor(() => expect(env.drive.upload).toHaveBeenCalledOnce())
+    // The upload hangs past the claim: the sweep takes the delivery over and finishes it.
+    env.advance(6 * 60 * 1000)
+    await env.service.sweep()
+    const delivered = (await env.service.getRequest(manager, request.id)).request.delivery
+    expect(delivered).toMatchObject({ status: "delivered", driveItem: { name: "Verbale CD firmato.pdf" } })
+    await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+
+    release()
+    await vi.waitFor(() =>
+      expect(env.logger.warn).toHaveBeenCalledWith(
+        { requestId: request.id },
+        "[ESIGN] a later delivery attempt took over, this one's result is dropped"
+      )
+    )
+    expect((await env.service.getRequest(manager, request.id)).request.delivery).toEqual(delivered)
+    expect(env.mailer.requestUpdate).toHaveBeenCalledOnce()
+  })
+
   it("refuses an email-only request whose signed PDF would be too large to attach", async () => {
     await env.service.syncProfile(manager, { name: "Luca Verdi", email: null })
     await env.service.syncProfile(secretary, { name: "Mario Rossi", email: null })

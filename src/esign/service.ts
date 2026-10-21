@@ -707,7 +707,8 @@ export function createEsignService(options: ServiceOptions) {
 
   /**
    * Uploads and emails a completed request's PDF. A claim makes one worker do it at a time; a crash leaves it pending,
-   * and the sweep resumes it once the claim is stale.
+   * and the sweep resumes it once the claim is stale. A run that outlives its claim may already have saved or emailed
+   * a copy, but only the run holding the claim records its result and emails the outcome.
    */
   async function deliver(requestId: string, retryBy: string | null = null) {
     const at = now()
@@ -764,7 +765,10 @@ export function createEsignService(options: ServiceOptions) {
       logger.error({ error, requestId }, "[ESIGN] delivery failed")
       await store.addEvent({ requestId, actorSub: null, type: "delivery_failed", data: { error: delivery.error } })
     }
-    await store.updateRequest(requestId, { delivery })
+    if (!(await store.finishDelivery(requestId, at, delivery))) {
+      logger.warn({ requestId }, "[ESIGN] a later delivery attempt took over, this one's result is dropped")
+      return
+    }
     void emailDelivery(request, delivery, step, retryBy).catch((error) =>
       logger.error({ error, requestId }, "[ESIGN] request update crashed")
     )
