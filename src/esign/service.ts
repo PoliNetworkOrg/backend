@@ -135,6 +135,8 @@ const STAGED_TTL_MS = 24 * 60 * 60 * 1000
 /** The longest message a job keeps for the agent and the dashboard to show. */
 const MAX_JOB_MESSAGE = 300
 const MAX_SIGNERS = 10
+/** The IdP permission to use e-signing at all: be picked as a signer, open the dashboard's pages. */
+const SIGN = "esign:sign"
 /** The IdP permission to create and manage requests, retrying a delivery included. */
 const MANAGE = "esign:requests:manage"
 /** Documents signed with one PIN. */
@@ -438,7 +440,10 @@ export function createEsignService(options: ServiceOptions) {
       )
   }
 
-  /** Who may retry a request's delivery, by subject: managers who may see the request. Empty if they can't be listed. */
+  /**
+   * Who may retry a request's delivery, by subject: managers who may use e-signing and see the request. Empty if they
+   * can't be listed.
+   */
   async function managersOf(request: SigningRequest): Promise<Map<string, { name: string; email: string | null }>> {
     try {
       const [rules, people] = await Promise.all([
@@ -447,11 +452,12 @@ export function createEsignService(options: ServiceOptions) {
       ])
       return new Map(
         people
-          .filter(
-            (p) =>
-              options.access?.(p.sub)?.permissions.includes(MANAGE) &&
-              canView(rules, { sub: p.sub, canManage: true }, request)
-          )
+          .filter((p) => {
+            const held = options.access?.(p.sub)?.permissions ?? []
+            return (
+              held.includes(SIGN) && held.includes(MANAGE) && canView(rules, { sub: p.sub, canManage: true }, request)
+            )
+          })
           .map((p) => [p.sub, { name: p.name, email: p.email }])
       )
     } catch (error) {
@@ -927,7 +933,7 @@ export function createEsignService(options: ServiceOptions) {
       const registered = options.directory ? await options.directory() : profiles
       const bySub = new Map(profiles.map((profile) => [profile.sub, profile]))
       return registered
-        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes("esign:sign"))
+        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes(SIGN))
         .map((person) => {
           const profile = bySub.get(person.sub)
           return {
@@ -1017,7 +1023,7 @@ export function createEsignService(options: ServiceOptions) {
       for (const s of input.signers) {
         const person = registered ? registered.get(s.sub) : await store.getProfile(s.sub)
         if (!person) throw new EsignError("bad_request", "A signer is not a registered user")
-        if (registered && !options.access?.(s.sub)?.permissions.includes("esign:sign"))
+        if (registered && !options.access?.(s.sub)?.permissions.includes(SIGN))
           throw new EsignError("bad_request", `${person.name} is not allowed to sign`)
         if (registered)
           profilesToSync.push({

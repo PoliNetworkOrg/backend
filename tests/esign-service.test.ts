@@ -1236,22 +1236,28 @@ describe("e-signing service", () => {
 
     it("tells the creator and whoever may retry that the delivery failed, but not the last signer", async () => {
       const other = { sub: "sub-other-manager", name: "Giulia Neri", email: "giulia@example.org" }
+      const unsigned = { sub: "sub-manage-only", name: "Paolo Gialli", email: "paolo@example.org" }
       env.people.set(manager.sub, managing)
       env.people.set(president.sub, managing)
       env.people.set(other.sub, managing)
+      // Retrying goes through the dashboard, which takes esign:sign too.
+      env.people.set(unsigned.sub, { roles: [], permissions: ["esign:requests:manage"] })
       env.people.set(secretary.sub, { roles: [], permissions: ["esign:sign"] })
       await env.store.upsertProfile(other)
+      await env.store.upsertProfile(unsigned)
       const request = await prepareRequest(env)
       env.mailer.signedDocument.mockResolvedValue(false)
       await sign(env, secretary, secretarySigner, request.id)
       await sign(env, president, presidentSigner, request.id)
       await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(2))
+      await new Promise((resolve) => setTimeout(resolve, 20))
       const failed = {
         outcome: "delivery_failed",
         failed: { step: "email", target: "archivio@example.org" },
         error: "The email could not be sent",
         canRetry: true,
       }
+      expect(updates()).toHaveLength(2)
       expect(updates()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ ...failed, to: "luca@example.org", requestedBy: null }),
