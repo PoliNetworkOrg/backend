@@ -9,6 +9,7 @@ import { inspectPdf, type PdfInfo } from "./pdf/inspect"
 import { finalizeSignature, type PreparedSignature, prepareSignature, SignatureError } from "./pdf/pades"
 import { type PlaceInput, type PlacementInput, validatePlacement, validatePlaces } from "./placement"
 import type {
+  DeliveryJson,
   DocumentMeta,
   DocumentRecord,
   DriveAccess,
@@ -33,6 +34,28 @@ export type Access = { roles: string[]; permissions: string[] }
 
 /** What a drive access rule can name, for the dashboard's picker. */
 export type AccessCatalog = { roles: { key: string; name: string }[]; permissions: { key: string; name: string }[] }
+
+/** How a request ended, or why its signed PDF didn't reach its destination. */
+export type RequestOutcome =
+  | { outcome: "declined"; by: string; reason: string | null }
+  | {
+      outcome: "completed"
+      /** The OneDrive copy, when there is one. */
+      savedTo: { path: string; url: string | null } | null
+      emailedTo: string[]
+    }
+  | {
+      outcome: "delivery_failed"
+      /** The step that failed and where it was going: a OneDrive path, or the email recipients. */
+      failed: { step: "save" | "email"; target: string }
+      error: string
+      /** The creator's name, when the recipient isn't the creator. */
+      requestedBy: string | null
+      canRetry: boolean
+    }
+
+/** A "Request update" email to one person. */
+export type RequestUpdate = { recipientName: string; title: string; url: string } & RequestOutcome
 
 export type Mailer = {
   signatureRequest(
@@ -59,6 +82,7 @@ export type Mailer = {
     },
     attachment: { filename: string; content: Uint8Array; contentType: string } | null
   ): Promise<boolean>
+  requestUpdate: (to: string, props: RequestUpdate) => Promise<boolean>
 }
 
 type Logger = {
@@ -111,6 +135,8 @@ const STAGED_TTL_MS = 24 * 60 * 60 * 1000
 /** The longest message a job keeps for the agent and the dashboard to show. */
 const MAX_JOB_MESSAGE = 300
 const MAX_SIGNERS = 10
+/** The IdP permission to create and manage requests, retrying a delivery included. */
+const MANAGE = "esign:requests:manage"
 /** Documents signed with one PIN. */
 const MAX_BATCH = 10
 /**
@@ -196,6 +222,16 @@ function formatRomeDate(date: Date) {
     minute: "2-digit",
   }).format(date)
 }
+
+/** "Verbali/Verbale CD.pdf"; just the name in the drive's root folder. */
+const drivePath = (folderPath: string, name: string) => [folderPath, name].filter(Boolean).join("/")
+
+/** The signer whose signature completed a request: the one who made the newest version. */
+const lastSigner = (request: SigningRequest) =>
+  request.signers.reduce<Signer | undefined>(
+    (last, s) => ((s.version ?? -1) > (last?.version ?? -1) ? s : last),
+    undefined
+  )
 
 /** Signers who may sign now: the first pending one in order, or every pending one. */
 export function turnOf(request: SigningRequest): Signer[] {
@@ -402,6 +438,111 @@ export function createEsignService(options: ServiceOptions) {
       )
   }
 
+  /** Who may retry a request's delivery, by subject: managers who may see the request. Empty if they can't be listed. */
+  async function managersOf(request: SigningRequest): Promise<Map<string, { name: string; email: string | null }>> {
+    try {
+      const [rules, people] = await Promise.all([
+        accessRules(),
+        options.directory ? options.directory() : store.listProfiles(),
+      ])
+      return new Map(
+        people
+          .filter(
+            (p) =>
+              options.access?.(p.sub)?.permissions.includes(MANAGE) &&
+              canView(rules, { sub: p.sub, canManage: true }, request)
+          )
+          .map((p) => [p.sub, { name: p.name, email: p.email }])
+      )
+    } catch (error) {
+      logger.error({ error, requestId: request.id }, "[ESIGN] cannot list who may retry a delivery")
+      return new Map()
+    }
+  }
+
+  /**
+   * Emails these people a "Request update", except `actor`, who saw it happen; `known` has names and addresses for
+   * people without a profile. Each outcome is reached by one call only, so it is emailed once. A failure is only
+   * logged: the action that led here succeeded.
+   */
+  async function emailUpdate(
+    request: SigningRequest,
+    subs: string[],
+    actor: string | null,
+    outcome: (sub: string) => RequestOutcome,
+    known = new Map<string, { name: string; email: string | null }>()
+  ) {
+    const recipients = [...new Set(subs)].filter((sub) => sub !== actor)
+    await Promise.all(
+      recipients.map(async (sub) => {
+        const profile = await store.getProfile(sub)
+        const name = profile?.name ?? known.get(sub)?.name ?? ""
+        const email = profile?.email ?? known.get(sub)?.email
+        if (!email) {
+          logger.warn({ requestId: request.id, sub }, "[ESIGN] no email for a request update")
+          return
+        }
+        try {
+          const sent = await mailer.requestUpdate(email, {
+            recipientName: name.split(" ")[0] || name,
+            title: request.title,
+            url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
+            ...outcome(sub),
+          })
+          if (!sent) throw new Error("The email could not be sent")
+        } catch (error) {
+          logger.error({ error, requestId: request.id, sub }, "[ESIGN] cannot send the request update email")
+        }
+      })
+    )
+  }
+
+  /**
+   * After a delivery attempt: tells the creator everyone signed, unless they signed last; or, when an attempt nobody
+   * asked for fails, the creator and everyone who may retry it. A manager watches their own retry: only its success is
+   * emailed.
+   */
+  async function emailDelivery(
+    request: SigningRequest,
+    delivery: DeliveryJson,
+    step: "save" | "email",
+    retryBy: string | null
+  ) {
+    const last = lastSigner(request)
+    const actor = retryBy ?? last?.sub ?? null
+    const { output } = request
+    if (delivery.status === "delivered") {
+      if (last?.sub === request.createdBySub) return
+      const item = delivery.driveItem
+      await emailUpdate(request, [request.createdBySub], actor, () => ({
+        outcome: "completed",
+        savedTo: output && item ? { path: drivePath(output.folderPath, item.name), url: item.webUrl } : null,
+        emailedTo: delivery.emailedTo,
+      }))
+      return
+    }
+    if (retryBy) return
+    const managers = await managersOf(request)
+    const requestedBy = await profileName(request.createdBySub)
+    const failed =
+      step === "save" && output
+        ? { step, target: drivePath(output.folderPath, output.fileName) }
+        : { step: "email" as const, target: request.email?.to.join(", ") ?? "" }
+    await emailUpdate(
+      request,
+      [request.createdBySub, ...managers.keys()],
+      actor,
+      (sub) => ({
+        outcome: "delivery_failed",
+        failed,
+        error: delivery.error ?? "Unknown error",
+        requestedBy: sub === request.createdBySub ? null : requestedBy,
+        canRetry: managers.has(sub),
+      }),
+      managers
+    )
+  }
+
   const signaturePlaces = (places: PlaceJson[]) => places.filter((p) => p.kind === "signature")
   const signaturesLeft = (job: Job) => signaturePlaces(job.places).length - job.step
 
@@ -566,9 +707,10 @@ export function createEsignService(options: ServiceOptions) {
    * Uploads and emails a completed request's PDF. A claim makes one worker do it at a time; a crash leaves it pending,
    * and the sweep resumes it once the claim is stale.
    */
-  async function deliver(requestId: string, retry = false) {
+  async function deliver(requestId: string, retryBy: string | null = null) {
     const at = now()
-    if (!(await store.claimDelivery(requestId, at, new Date(at.getTime() - DELIVERY_CLAIM_MS), retry))) return
+    if (!(await store.claimDelivery(requestId, at, new Date(at.getTime() - DELIVERY_CLAIM_MS), retryBy !== null)))
+      return
     const request = await store.getRequest(requestId)
     if (!request || request.status !== "completed") return
     const document = await store.latestDocument(requestId)
@@ -580,6 +722,7 @@ export function createEsignService(options: ServiceOptions) {
       error: null as string | null,
       attemptedAt: now().toISOString(),
     }
+    let step: "save" | "email" = "save"
     try {
       if (request.output && !delivery.driveItem) {
         const drive = driveFor(request.output.driveId)
@@ -592,6 +735,7 @@ export function createEsignService(options: ServiceOptions) {
           data: { name: item.name, path: request.output.folderPath, drive: drive.label },
         })
       }
+      step = "email"
       if (request.email && request.email.to.length > 0 && delivery.emailedTo.length === 0) {
         const attach = document.size <= MAX_ATTACHMENT_BYTES
         if (!attach && !delivery.driveItem?.webUrl)
@@ -619,6 +763,9 @@ export function createEsignService(options: ServiceOptions) {
       await store.addEvent({ requestId, actorSub: null, type: "delivery_failed", data: { error: delivery.error } })
     }
     await store.updateRequest(requestId, { delivery })
+    void emailDelivery(request, delivery, step, retryBy).catch((error) =>
+      logger.error({ error, requestId }, "[ESIGN] request update crashed")
+    )
   }
 
   /** Stores a signed version, binds the signer's CIE, then delivers or asks the next signer. */
@@ -1027,6 +1174,11 @@ export function createEsignService(options: ServiceOptions) {
         { code: "request_declined", message: `${lead}${quoted}.`.slice(0, MAX_JOB_MESSAGE) }
       )
       if (result === "conflict") throw new EsignError("conflict", "The request changed; reload it")
+      void emailUpdate(request, [request.createdBySub], caller.sub, () => ({
+        outcome: "declined",
+        by: signer.name,
+        reason: why,
+      })).catch((error) => logger.error({ error, requestId: id }, "[ESIGN] request update crashed"))
     },
 
     async retryDelivery(caller: Caller, id: string) {
@@ -1034,7 +1186,7 @@ export function createEsignService(options: ServiceOptions) {
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can retry the delivery")
       if (request.status !== "completed" || request.delivery?.status !== "failed")
         throw new EsignError("conflict", "Nothing to retry")
-      await deliver(id, true)
+      await deliver(id, caller.sub)
       return (await store.getRequest(id))?.delivery ?? null
     },
 

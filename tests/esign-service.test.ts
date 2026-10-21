@@ -41,14 +41,16 @@ function setup(
   const mailer = {
     signatureRequest: vi.fn<Mailer["signatureRequest"]>().mockResolvedValue(true),
     signedDocument: vi.fn<Mailer["signedDocument"]>().mockResolvedValue(true),
+    requestUpdate: vi.fn<Mailer["requestUpdate"]>().mockResolvedValue(true),
   }
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
   const service = createEsignService({
     store,
     drives: [drive, archive],
     access: (sub) => people.get(sub) ?? null,
     directory: opts.directory,
     mailer,
-    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    logger,
     dashboardUrl: "https://admin.example.org",
     allowTestCertificates: opts.allowTestCertificates ?? true,
     revocation: opts.policy ?? "prefer",
@@ -66,7 +68,7 @@ function setup(
   const advance = (ms: number) => {
     clock += ms
   }
-  return { service, store, drive, archive, people, mailer, advance }
+  return { service, store, drive, archive, people, mailer, logger, advance }
 }
 
 async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {
@@ -1121,6 +1123,157 @@ describe("e-signing service", () => {
     expect((await env.service.drivesFor(manager)).map((d) => d.id)).toEqual(["dev", "archive"])
     expect((await env.service.drivesFor({ sub: "nobody", canManage: true })).map((d) => d.id)).toEqual(["dev"])
     expect(await env.service.drivesFor({ sub: manager.sub, canManage: false })).toEqual([])
+  })
+
+  describe("request update email", () => {
+    const managing = { roles: [], permissions: ["esign:sign", "esign:requests:manage"] }
+    const updates = () => env.mailer.requestUpdate.mock.calls.map(([to, props]) => ({ to, ...props }))
+
+    it("tells the creator who declined and why, once", async () => {
+      const request = await prepareRequest(env)
+      await env.service.declineRequest(secretary, request.id, "La data è sbagliata")
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()).toEqual([
+        {
+          to: "luca@example.org",
+          recipientName: "Luca",
+          title: "Verbale CD 10/10/2026",
+          url: `https://admin.example.org/dashboard/esign/requests/${request.id}`,
+          outcome: "declined",
+          by: "Mario Rossi",
+          reason: "La data è sbagliata",
+        },
+      ])
+      await expect(env.service.declineRequest(president, request.id, null)).rejects.toMatchObject({ code: "conflict" })
+      expect(env.mailer.requestUpdate).toHaveBeenCalledOnce()
+    })
+
+    it("doesn't email a creator who declined", async () => {
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered: true,
+        signers: [{ sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+        output: null,
+        email: null,
+      })
+      await env.service.declineRequest(manager, request.id, null)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).not.toHaveBeenCalled()
+    })
+
+    it("tells the creator that everyone signed and where the PDF went", async () => {
+      const request = await prepareRequest(env)
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, president, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()).toEqual([
+        expect.objectContaining({
+          to: "luca@example.org",
+          outcome: "completed",
+          savedTo: { path: "Firmati/Verbale CD firmato.pdf", url: null },
+          emailedTo: ["archivio@example.org"],
+        }),
+      ])
+    })
+
+    it("doesn't tell a creator who signed last that everyone signed", async () => {
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered: true,
+        signers: [
+          { sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+          { sub: manager.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+        ],
+        output: null,
+        email: null,
+      })
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, manager, presidentSigner, request.id)
+      await vi.waitFor(async () =>
+        expect((await env.service.getRequest(manager, request.id)).request.delivery?.status).toBe("delivered")
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).not.toHaveBeenCalled()
+    })
+
+    it("tells the creator and whoever may retry that the delivery failed, but not the last signer", async () => {
+      const other = { sub: "sub-other-manager", name: "Giulia Neri", email: "giulia@example.org" }
+      env.people.set(manager.sub, managing)
+      env.people.set(president.sub, managing)
+      env.people.set(other.sub, managing)
+      env.people.set(secretary.sub, { roles: [], permissions: ["esign:sign"] })
+      await env.store.upsertProfile(other)
+      const request = await prepareRequest(env)
+      env.mailer.signedDocument.mockResolvedValue(false)
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, president, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(2))
+      const failed = {
+        outcome: "delivery_failed",
+        failed: { step: "email", target: "archivio@example.org" },
+        error: "The email could not be sent",
+        canRetry: true,
+      }
+      expect(updates()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ...failed, to: "luca@example.org", requestedBy: null }),
+          expect.objectContaining({
+            ...failed,
+            to: "giulia@example.org",
+            recipientName: "Giulia",
+            requestedBy: "Luca Verdi",
+          }),
+        ])
+      )
+
+      // A retry that fails again is seen by whoever retried; one that works tells the creator.
+      await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(2)
+      env.mailer.signedDocument.mockResolvedValue(true)
+      await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3))
+      expect(updates()[2]).toMatchObject({
+        to: "luca@example.org",
+        outcome: "completed",
+        savedTo: { path: "Firmati/Verbale CD firmato.pdf" },
+      })
+    })
+
+    it("says which save failed, and that only a manager can retry", async () => {
+      const request = await prepareRequest(env)
+      vi.spyOn(env.drive, "upload").mockRejectedValue(new Error("Access denied"))
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, president, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()[0]).toMatchObject({
+        to: "luca@example.org",
+        outcome: "delivery_failed",
+        failed: { step: "save", target: "Firmati/Verbale CD firmato.pdf" },
+        error: "Access denied",
+        canRetry: false,
+      })
+    })
+
+    it("logs an email that can't be sent without failing the decline", async () => {
+      const request = await prepareRequest(env)
+      env.mailer.requestUpdate.mockRejectedValue(new Error("mailbox down"))
+      await env.service.declineRequest(secretary, request.id, null)
+      await vi.waitFor(() =>
+        expect(env.logger.error).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: request.id, sub: manager.sub }),
+          "[ESIGN] cannot send the request update email"
+        )
+      )
+      expect((await env.service.getRequest(manager, request.id)).request.status).toBe("declined")
+    })
   })
 
   it("lets a signer decline", async () => {

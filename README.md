@@ -102,6 +102,9 @@ Emails (`src/emails/templates`, preview with `bun run email`):
 - "Signature needed" tells signers their turn started.
 - "Documento firmato" sends the signed PDF to the addresses the request names, in Italian since they are often outside
   PoliNetwork. The PDF is attached up to 2 MB, otherwise linked from OneDrive; replies go to whoever sent the request.
+- "Request update" tells a request's creator that a signer declined, with the reason, or that everyone signed (unless
+  the creator signed last). When saving or emailing the signed PDF fails, it also tells the managers who may retry.
+  Nobody is emailed about what they just did, each outcome is emailed once, and an email that fails is only logged.
 
 Signatures are checked against the CIE certification authorities of the Ministero dell'Interno bundled in
 `src/esign/trust`. Tests: `bunx vitest run tests/esign-*.test.ts` (validated with poppler `pdfsig` when installed).

@@ -1,7 +1,9 @@
 import { render } from "@react-email/components"
 import { createElement } from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import RequestUpdateEmail, { requestUpdateSubject } from "@/emails/templates/request-update"
 import SignedDocumentEmail, { type SignedDocumentProps } from "@/emails/templates/signed-document"
+import type { RequestUpdate } from "@/esign/service"
 
 const post = vi.fn()
 vi.mock("@/env", () => ({ env: { AZURE_EMAIL_SENDER: "noreply@polinetwork.org", NODE_ENV: "test" } }))
@@ -64,6 +66,58 @@ describe("signed document email", () => {
     )
     expect(await text({ ...signed, sentBy: null })).toContain(
       "Inviato tramite PoliNetwork. Non rispondere a questa email."
+    )
+  })
+})
+
+describe("request update email", () => {
+  const base = {
+    recipientName: "Luca",
+    title: "Verbale CD",
+    url: "https://admin.example.org/dashboard/esign/requests/1",
+  }
+  const update = async (props: RequestUpdate) => ({
+    subject: requestUpdateSubject(props),
+    body: (await render(createElement(RequestUpdateEmail, props), { plainText: true })).replace(/\s+/g, " "),
+  })
+
+  it("quotes who declined and why", async () => {
+    const { subject, body } = await update({
+      ...base,
+      outcome: "declined",
+      by: "Anna Bianchi",
+      reason: "Data sbagliata",
+    })
+    expect(subject).toBe("Declined: Verbale CD")
+    expect(body).toContain("Hi Luca, Anna Bianchi declined to sign Verbale CD. “Data sbagliata”")
+    expect(body).toContain("Open the request https://admin.example.org/dashboard/esign/requests/1")
+  })
+
+  it("says where the signed PDF went", async () => {
+    const { subject, body } = await update({
+      ...base,
+      outcome: "completed",
+      savedTo: { path: "Verbali/Verbale CD.pdf", url: null },
+      emailedTo: ["archivio@example.org"],
+    })
+    expect(subject).toBe("Signed by everyone: Verbale CD")
+    expect(body).toContain(
+      "Everyone signed Verbale CD. The signed PDF is saved in Verbali/Verbale CD.pdf and was emailed to archivio@example.org."
+    )
+  })
+
+  it("says what failed, whose request it is and who can retry", async () => {
+    const { subject, body } = await update({
+      ...base,
+      outcome: "delivery_failed",
+      failed: { step: "email", target: "archivio@example.org" },
+      error: "The email could not be sent",
+      requestedBy: "Mario Rossi",
+      canRetry: true,
+    })
+    expect(subject).toBe("Not delivered: Verbale CD")
+    expect(body).toContain(
+      "Everyone signed Mario Rossi’s request Verbale CD, but the signed PDF couldn’t be emailed to archivio@example.org. You can retry it from the request. Error: The email could not be sent"
     )
   })
 })

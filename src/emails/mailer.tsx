@@ -5,6 +5,7 @@ import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } 
 import { env } from "@/env"
 import { logger } from "@/logger"
 import OtpEmail from "./templates/otp"
+import RequestUpdateEmail, { type RequestUpdateProps, requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
 import Welcome from "./templates/welcome"
@@ -79,6 +80,10 @@ export async function sendSignatureRequestEmail(
   }
 ) {
   return sendEmail(toAddress, makeSubject(`Signature needed: ${props.title}`), <SignatureRequestEmail {...props} />)
+}
+
+export async function sendRequestUpdateEmail(toAddress: string, props: RequestUpdateProps) {
+  return sendEmail(toAddress, makeSubject(requestUpdateSubject(props)), <RequestUpdateEmail {...props} />)
 }
 
 /** In Italian: it goes to offices and people outside PoliNetwork. Replies reach whoever sent the request. */
