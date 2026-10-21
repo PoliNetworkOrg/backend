@@ -117,7 +117,21 @@ describe("request update email", () => {
     })
     expect(subject).toBe("Not delivered: Verbale CD")
     expect(body).toContain(
-      "Everyone signed Mario Rossi’s request Verbale CD, but the signed PDF couldn’t be emailed to archivio@example.org. You can retry it from the request. Error: The email could not be sent"
+      "The signed PDF of Mario Rossi’s request Verbale CD couldn’t be emailed to archivio@example.org. You can retry it from the request. Error: The email could not be sent"
+    )
+  })
+
+  it("tells the creator what failed in their own request, even one only they signed", async () => {
+    const { body } = await update({
+      ...base,
+      outcome: "delivery_failed",
+      failed: { step: "save", target: "Firmati/Verbale CD.pdf" },
+      error: "Access denied",
+      requestedBy: null,
+      canRetry: false,
+    })
+    expect(body).toContain(
+      "Hi Luca, The signed PDF of Verbale CD couldn’t be saved to Firmati/Verbale CD.pdf. A manager can retry it. Error: Access denied"
     )
   })
 })

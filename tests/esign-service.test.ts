@@ -1234,7 +1234,7 @@ describe("e-signing service", () => {
       expect(env.mailer.requestUpdate).not.toHaveBeenCalled()
     })
 
-    it("tells the creator and whoever may retry that the delivery failed, but not the last signer", async () => {
+    it("tells the creator and everyone who may retry that the delivery failed, the last signer included", async () => {
       const other = { sub: "sub-other-manager", name: "Giulia Neri", email: "giulia@example.org" }
       const unsigned = { sub: "sub-manage-only", name: "Paolo Gialli", email: "paolo@example.org" }
       env.people.set(manager.sub, managing)
@@ -1249,7 +1249,7 @@ describe("e-signing service", () => {
       env.mailer.signedDocument.mockResolvedValue(false)
       await sign(env, secretary, secretarySigner, request.id)
       await sign(env, president, presidentSigner, request.id)
-      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3))
       await new Promise((resolve) => setTimeout(resolve, 20))
       const failed = {
         outcome: "delivery_failed",
@@ -1257,7 +1257,7 @@ describe("e-signing service", () => {
         error: "The email could not be sent",
         canRetry: true,
       }
-      expect(updates()).toHaveLength(2)
+      expect(updates()).toHaveLength(3)
       expect(updates()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ ...failed, to: "luca@example.org", requestedBy: null }),
@@ -1267,21 +1267,87 @@ describe("e-signing service", () => {
             recipientName: "Giulia",
             requestedBy: "Luca Verdi",
           }),
+          expect.objectContaining({ ...failed, to: "anna@example.org", requestedBy: "Luca Verdi" }),
         ])
       )
 
       // A retry that fails again is seen by whoever retried; one that works tells the creator.
       await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
       await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(2)
+      expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3)
       env.mailer.signedDocument.mockResolvedValue(true)
       await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
-      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3))
-      expect(updates()[2]).toMatchObject({
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(4))
+      expect(updates()[3]).toMatchObject({
         to: "luca@example.org",
         outcome: "completed",
         savedTo: { path: "Firmati/Verbale CD firmato.pdf" },
       })
+    })
+
+    it("tells a creator who signed last that saving failed, and that a retry worked", async () => {
+      const other = { sub: "sub-other-manager", name: "Giulia Neri", email: "giulia@example.org" }
+      env.people.set(manager.sub, managing)
+      env.people.set(other.sub, managing)
+      await env.store.upsertProfile(other)
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered: true,
+        signers: [
+          { sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+          { sub: manager.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+        ],
+        output: { driveId: "dev", folderId: "mock-firmati", fileName: "Verbale firmato" },
+        email: null,
+      })
+      vi.spyOn(env.drive, "upload").mockRejectedValueOnce(new Error("Access denied"))
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, manager, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(2))
+      expect(updates()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ to: "luca@example.org", outcome: "delivery_failed", requestedBy: null }),
+          expect.objectContaining({ to: "giulia@example.org", outcome: "delivery_failed" }),
+        ])
+      )
+
+      await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3))
+      expect(updates()[2]).toMatchObject({ to: "luca@example.org", outcome: "completed" })
+    })
+
+    it("tells a creator who signed their own request alone that saving failed", async () => {
+      env.people.set(manager.sub, managing)
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Dichiarazione",
+        documentId: document.id,
+        ordered: true,
+        signers: [{ sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+        output: { driveId: "dev", folderId: "mock-firmati", fileName: "Dichiarazione firmata" },
+        email: null,
+      })
+      vi.spyOn(env.drive, "upload").mockRejectedValue(new Error("Access denied"))
+      await sign(env, manager, secretarySigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()[0]).toMatchObject({
+        to: "luca@example.org",
+        outcome: "delivery_failed",
+        failed: { step: "save", target: "Firmati/Dichiarazione firmata.pdf" },
+        error: "Access denied",
+        requestedBy: null,
+        canRetry: true,
+      })
+
+      // Their own retry that fails again needs no email: they see it.
+      await env.service.retryDelivery(manager, request.id)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).toHaveBeenCalledOnce()
     })
 
     it("says which save failed, and that only a manager can retry", async () => {

@@ -58,9 +58,9 @@ function Summary(props: RequestUpdate) {
       return (
         <>
           <Text className="my-2 text-base leading-normal">
-            Everyone signed {props.requestedBy ? <>{props.requestedBy}’s request </> : null}
-            {title}, but the signed PDF couldn’t be {props.failed.step === "save" ? "saved to" : "emailed to"}{" "}
-            {props.failed.target}. {props.canRetry ? "You can retry it from the request." : "A manager can retry it."}
+            The signed PDF of {props.requestedBy ? <>{props.requestedBy}’s request </> : null}
+            {title} couldn’t be {props.failed.step === "save" ? "saved to" : "emailed to"} {props.failed.target}.{" "}
+            {props.canRetry ? "You can retry it from the request." : "A manager can retry it."}
           </Text>
           <Text className="my-2 text-sm leading-normal text-gray-700">Error: {props.error}</Text>
         </>

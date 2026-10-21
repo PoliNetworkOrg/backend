@@ -504,9 +504,9 @@ export function createEsignService(options: ServiceOptions) {
   }
 
   /**
-   * After a delivery attempt: tells the creator everyone signed, unless they signed last; or, when an attempt nobody
-   * asked for fails, the creator and everyone who may retry it. A manager watches their own retry: only its success is
-   * emailed.
+   * After a delivery attempt: tells the creator everyone signed, unless they saw it happen by signing last or retrying;
+   * or, when an attempt nobody asked for fails, the creator and everyone who may retry it, the last signer included,
+   * who may have left before it ran. A manager watches their own retry: only its success is emailed.
    */
   async function emailDelivery(
     request: SigningRequest,
@@ -514,13 +514,10 @@ export function createEsignService(options: ServiceOptions) {
     step: "save" | "email",
     retryBy: string | null
   ) {
-    const last = lastSigner(request)
-    const actor = retryBy ?? last?.sub ?? null
     const { output } = request
     if (delivery.status === "delivered") {
-      if (last?.sub === request.createdBySub) return
       const item = delivery.driveItem
-      await emailUpdate(request, [request.createdBySub], actor, () => ({
+      await emailUpdate(request, [request.createdBySub], retryBy ?? lastSigner(request)?.sub ?? null, () => ({
         outcome: "completed",
         savedTo: output && item ? { path: drivePath(output.folderPath, item.name), url: item.webUrl } : null,
         emailedTo: delivery.emailedTo,
@@ -537,7 +534,7 @@ export function createEsignService(options: ServiceOptions) {
     await emailUpdate(
       request,
       [request.createdBySub, ...managers.keys()],
-      actor,
+      null,
       (sub) => ({
         outcome: "delivery_failed",
         failed,
