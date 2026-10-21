@@ -26,6 +26,23 @@ describe("People census imports", () => {
     const p = h.state().persons["P-0004"]
     expect(p).toMatchObject({ member: null, accountSub: null, census: [{ answer: "continues", source: "forms" }] })
   })
+  it("keeps only the first response for a person in one census file", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.listCampaigns(master)
+    const file = csvFile(
+      `${header}\nSara,Neri,sara@example.org,,sara_test,Informatica,2nd year,Leonardo,continues\nSara,Neri,SARA@example.org,,sara_test,Informatica,2nd year,Leonardo,leaving\n`
+    )
+    const preview = await h.service.importPreview(master, { campaignId: "2026/27", file })
+    expect(preview.counts).toMatchObject({ newPeople: 1, invalid: 1 })
+    expect(preview.tabs.invalid[0].detail).toContain("same email")
+    expect(await h.service.importCommit(master, { importId: preview.importId, duplicates: {}, telegram: {} })).toEqual({
+      imported: 1,
+    })
+    expect(
+      Object.values(h.state().persons).filter((p) => p.profile.personalEmail?.toLowerCase() === "sara@example.org")
+    ).toHaveLength(1)
+  })
   it("requires the preview's exact duplicate decisions and isolates previews by owner", async () => {
     const h = harness()
     await h.seed()
@@ -118,6 +135,9 @@ describe("People census imports", () => {
   })
   it("checks content, archive budgets, row bounds and CSV quoting", async () => {
     await expect(parseImport(new File(["not a workbook"], "fake.xlsx"))).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await expect(parseImport(new File([new Uint8Array([0xff, 0xfe])], "invalid-utf8.csv"))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
     await expect(
       parseImport(new File([zipSync({ "file.txt": strToU8("text") })], "archive.xlsx"))
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })

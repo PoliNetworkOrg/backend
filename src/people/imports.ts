@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { XMLParser, XMLValidator } from "fast-xml-parser"
 import { Unzip, UnzipInflate } from "fflate"
 import { z } from "zod"
@@ -190,7 +191,7 @@ export async function parseImport(file: File) {
     rows =
       bytes[0] === 0x50 && bytes[1] === 0x4b ? parseXlsx(bytes) : parseCsv(decoder.decode(bytes).replace(/^\ufeff/, ""))
   } catch (error) {
-    if (error instanceof Error && "code" in error) throw error
+    if (error instanceof TRPCError) throw error
     fail("BAD_REQUEST", "Cannot read a UTF-8 CSV or XLSX workbook")
   }
   if (rows.length < 2 || rows.length > MAX_ROWS + 1) fail("BAD_REQUEST", "Import must contain 1–5,000 responses")

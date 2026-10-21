@@ -52,7 +52,8 @@ export type PeopleOptions = {
   config: PeopleConfig
   now?: () => Date
   directory: () => Promise<Account[]>
-  telegram: () => Promise<{ users: TelegramUser[]; groups: TelegramGroup[] }>
+  telegramGroups: () => Promise<TelegramGroup[]>
+  telegramUsers: () => Promise<TelegramUser[]>
   provisionMember: (person: Person, number: string) => Promise<{ id: string; email: string }>
   setMemberNumber: (person: Person, number: string) => Promise<void>
   sendMail: (mail: {
@@ -312,18 +313,18 @@ export function createPeopleService(options: PeopleOptions) {
   return {
     async listPeople(v: Viewer) {
       requireGeneral(v, "people:read")
-      const telegram = await options.telegram()
+      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
-        hydrateGroups(u.state, telegram.groups)
+        hydrateGroups(u.state, telegramGroups)
         activeCampaign(u.state)
         return Object.values(u.state.persons).map((p) => row(u.state, p, v, config, date()))
       })
     },
     async getPerson(v: Viewer, input: { id: string }) {
       requireGeneral(v, "people:read")
-      const telegram = await options.telegram()
+      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
-        hydrateGroups(u.state, telegram.groups)
+        hydrateGroups(u.state, telegramGroups)
         return record(u.state, find(u.state, input.id), v, config, date())
       })
     },
@@ -479,7 +480,10 @@ export function createPeopleService(options: PeopleOptions) {
         const allowed = general(v, "people:read") ? [...C.TEAM_IDS] : v.can("people:self") ? leads(own(u.state, v)) : []
         if (!allowed.length) fail("FORBIDDEN", "No readable teams")
         return allowed.map((id) => {
-          const people = Object.values(u.state.persons).filter((p) => p.teams.some((t) => t.team === id))
+          const full = general(v, "people:read")
+          const people = Object.values(u.state.persons).filter((p) =>
+            p.teams.some((t) => t.team === id && (full || !t.endedOn))
+          )
           const lead = people.find((p) => leads(p, id).length)
           return {
             id,
@@ -629,7 +633,7 @@ export function createPeopleService(options: PeopleOptions) {
     async importPreview(v: Viewer, input: { campaignId: string; file: File }) {
       requireGeneral(v, "people:write")
       const parsed = await parseImport(input.file)
-      const telegram = await options.telegram()
+      const telegramUsers = await options.telegramUsers()
       return tx((u) => {
         const c = campaign(u.state, input.campaignId)
         if (c.status !== "open") fail("CONFLICT", "Campaign is closed")
@@ -652,6 +656,7 @@ export function createPeopleService(options: PeopleOptions) {
         }
         const rows: ImportRow[] = []
         const seen = new Set<string>()
+        const seenEmails = new Set<string>()
         for (const source of parsed) {
           const fp = `${c.year}:${source.fingerprint}`
           const display = {
@@ -670,6 +675,12 @@ export function createPeopleService(options: PeopleOptions) {
             continue
           }
           const inputProfile = source.profile
+          const emailKey = inputProfile.personalEmail.toLowerCase()
+          if (seenEmails.has(emailKey)) {
+            preview.tabs.invalid.push({ ...display, detail: "Another response in this file uses the same email" })
+            continue
+          }
+          seenEmails.add(emailKey)
           const emailMatches = Object.values(u.state.persons).filter(
             (p) => p.profile.personalEmail?.toLowerCase() === inputProfile.personalEmail.toLowerCase()
           )
@@ -677,7 +688,7 @@ export function createPeopleService(options: PeopleOptions) {
           const possible =
             exact ?? Object.values(u.state.persons).find((p) => nameOf(p).toLowerCase() === display.name.toLowerCase())
           const duplicateId = !exact && possible ? `pair-${source.row}` : null
-          const suggestion = telegram.users.find(
+          const suggestion = telegramUsers.find(
             (t) => t.username?.toLowerCase() === inputProfile.telegramUsername.toLowerCase()
           )
           const entry: C.CensusEntry = {
@@ -752,7 +763,7 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async importCommit(v: Viewer, input: C.ImportCommitInput) {
       requireGeneral(v, "people:write")
-      const telegram = await options.telegram()
+      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
         const batch = u.state.imports[input.importId]
         if (!batch || batch.owner !== v.sub || batch.expiresAt < now().toISOString())
@@ -829,7 +840,7 @@ export function createPeopleService(options: PeopleOptions) {
             if (p.admin) {
               p.admin.availableAsCapo = r.volunteer.availableAsCapo
               for (const id of r.volunteer.requestedGroups) {
-                const group = telegram.groups.find((g) => g.chatId === id)
+                const group = telegramGroups.find((g) => g.chatId === id)
                 if (!group) fail("BAD_REQUEST", `Unknown requested Telegram group: ${id}`)
                 if (!p.admin.requested.some((g) => g.chatId === id))
                   p.admin.requested.push({
@@ -1278,7 +1289,9 @@ export function createPeopleService(options: PeopleOptions) {
       return tx((u) => {
         const p = requireOwn(u.state, v)
         if (!account) fail("PRECONDITION_FAILED", "IdP account unavailable")
-        review(u.state, v, account, "name-only", p, `Correction: ${input.field} → ${input.value}; ${input.note}`)
+        const text = `Correction: ${input.field} → ${input.value}; ${input.note}`
+        const r = review(u.state, v, account, "name-only", p, text)
+        if (!r.message?.includes(text)) r.message = [r.message, text].filter(Boolean).join("\n")
         log(p, v.sub, `Requested correction: ${input.field}`, now())
       })
     },
@@ -1292,9 +1305,9 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async getCapoArea(v: Viewer): Promise<C.CapoArea> {
       requireSelf(v)
-      const telegram = await options.telegram()
+      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
-        hydrateGroups(u.state, telegram.groups)
+        hydrateGroups(u.state, telegramGroups)
         const p = requireOwn(u.state, v)
         const scope = p.admin?.status === "active" ? p.admin.capoScope : null
         if (!scope) fail("FORBIDDEN", "No active Capo Admin scope")
@@ -1304,7 +1317,7 @@ export function createPeopleService(options: PeopleOptions) {
         const ids = new Set(
           [...(p.admin?.groups ?? []), ...scoped.flatMap((p) => p.admin?.groups ?? [])].map((g) => g.chatId)
         )
-        const groups = telegram.groups.filter((g) => ids.has(g.chatId))
+        const groups = telegramGroups.filter((g) => ids.has(g.chatId))
         const allowed = new Set(groups.map((g) => g.chatId))
         return {
           scope,
@@ -1330,9 +1343,9 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async handleJoinRequest(v: Viewer, input: { requestId: string }, approve: boolean) {
       requireSelf(v)
-      const telegram = await options.telegram()
+      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
-        hydrateGroups(u.state, telegram.groups)
+        hydrateGroups(u.state, telegramGroups)
         const me = requireOwn(u.state, v)
         if (me.admin?.status !== "active" || !me.admin.capoScope) fail("FORBIDDEN", "No active Capo Admin scope")
         const p = Object.values(u.state.persons).find(

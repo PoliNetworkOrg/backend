@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { myAreaSchema } from "@/people/contract"
+import { isValidIban } from "@/people/iban"
 import { academicYear, csvCell, today } from "@/people/model"
 import { samplePdf } from "./esign-fixtures"
 import { admit, harness, issue, master, permissions, vice, viewer } from "./people-fixtures"
 
 describe("People authorization and projections", () => {
+  it("validates the configured IBAN country length and mod-97 checksum", () => {
+    expect(isValidIban("IT60X0542811101000000123456")).toBe(true)
+    expect(isValidIban("IT61X0542811101000000123456")).toBe(false)
+    expect(isValidIban("IT60X054281110100000012345")).toBe(false)
+    expect(isValidIban("ZZ60X0542811101000000123456")).toBe(false)
+  })
+  it("does not load Telegram users for ordinary People reads", async () => {
+    const telegramUsers = vi.fn(async () => [])
+    const h = harness({ telegramUsers })
+    await h.seed()
+    await h.service.listPeople(master)
+    expect(telegramUsers).not.toHaveBeenCalled()
+  })
   it("keeps the member register independent of general read access", async () => {
     const h = harness()
     await h.seed()
@@ -77,6 +91,51 @@ describe("People authorization and projections", () => {
       note: "",
     })
     expect(h.state().persons["P-0003"].teams[0].endedOn).toBe("2026-10-18")
+  })
+  it("does not expose former team members to a Team Lead", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.addTeamMember(master, {
+      teamId: "it",
+      personId: "P-0001",
+      role: "lead",
+      since: "2026-10-01",
+      fields: {},
+    })
+    await h.service.addTeamMember(master, {
+      teamId: "it",
+      personId: "P-0003",
+      role: "member",
+      since: "2026-10-01",
+      fields: {},
+    })
+    await h.service.endTeamMembership(master, {
+      teamId: "it",
+      personId: "P-0003",
+      lastDay: "2026-10-18",
+      reason: "Leaving",
+      note: "",
+    })
+    const teams = await h.service.listTeams(viewer("president", ["people:self"]))
+    expect(teams[0].members.map((p) => p.id)).toEqual(["P-0001"])
+  })
+  it("preserves every correction when an open name review already exists", async () => {
+    const h = harness()
+    await h.seed()
+    const member = viewer("member", ["people:self"])
+    await h.service.requestCorrection(member, { field: "Something else", value: "Luca Maria", note: "Updated name" })
+    await h.service.requestCorrection(member, {
+      field: "Personal email",
+      value: "luca.new@example.org",
+      note: "New address",
+    })
+    expect(Object.values(h.state().reviews)).toHaveLength(1)
+    expect(Object.values(h.state().reviews)[0].message).toContain(
+      "Correction: Something else → Luca Maria; Updated name"
+    )
+    expect(Object.values(h.state().reviews)[0].message).toContain(
+      "Correction: Personal email → luca.new@example.org; New address"
+    )
   })
   it("does not grant record roles or mutation rights to an unconfirmed match", async () => {
     const h = harness()

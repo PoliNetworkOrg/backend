@@ -1,6 +1,7 @@
 import { createEnv } from "@t3-oss/env-core"
 import { z } from "zod"
 import { TRUSTED_ORIGINS } from "./constants"
+import { isValidIban } from "./people/iban"
 
 const PORT = 3000
 const NODE_ENV = z.enum(["development", "production", "test"])
@@ -100,6 +101,7 @@ export const env = createEnv({
     PEOPLE_IBAN: z
       .string()
       .regex(/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/)
+      .refine(isValidIban, "PEOPLE_IBAN must have a valid country length and checksum")
       .optional(),
     PEOPLE_LEGAL_NAME: z.string().max(200).optional(),
     PEOPLE_ADDRESS: z.string().max(300).optional(),

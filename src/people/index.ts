@@ -28,29 +28,36 @@ export const people = createPeopleService({
       telegramId: idp?.snapshot?.current()?.bySub(a.sub)?.telegramId ?? null,
     }))
   },
-  async telegram() {
-    const [users, groups, admins] = await Promise.all([
-      DB.select().from(SCHEMA.TG.users),
+  async telegramGroups() {
+    const [groups, admins] = await Promise.all([
       DB.select().from(SCHEMA.TG.groups),
       DB.select().from(SCHEMA.TG.groupAdmins),
     ])
-    return {
-      users: await Promise.all(
-        users.map(async (u) => {
-          const p = await decryptUser(u)
-          return {
-            id: String(p.id),
-            name: [p.firstName, p.lastName].filter(Boolean).join(" "),
-            username: p.username ?? null,
-          }
-        })
-      ),
-      groups: groups.map((g) => ({
-        chatId: String(g.telegramId),
-        title: g.title,
-        admins: admins.filter((a) => a.groupId === g.telegramId).map((a) => String(a.userId)),
-      })),
+    const adminsByGroup = new Map<string, string[]>()
+    for (const admin of admins) {
+      const id = String(admin.groupId)
+      const members = adminsByGroup.get(id) ?? []
+      members.push(String(admin.userId))
+      adminsByGroup.set(id, members)
     }
+    return groups.map((g) => ({
+      chatId: String(g.telegramId),
+      title: g.title,
+      admins: adminsByGroup.get(String(g.telegramId)) ?? [],
+    }))
+  },
+  async telegramUsers() {
+    const users = await DB.select().from(SCHEMA.TG.users)
+    return Promise.all(
+      users.map(async (u) => {
+        const p = await decryptUser(u)
+        return {
+          id: String(p.id),
+          name: [p.firstName, p.lastName].filter(Boolean).join(" "),
+          username: p.username ?? null,
+        }
+      })
+    )
   },
   async provisionMember(person, number) {
     if (!azureCredentials && env.NODE_ENV === "production")

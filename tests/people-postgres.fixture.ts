@@ -93,7 +93,8 @@ try {
     store,
     config,
     directory: async () => directory,
-    telegram: async () => ({ users: [], groups: [] }),
+    telegramGroups: async () => [],
+    telegramUsers: async () => [],
     provisionMember: async (p) => ({
       id: `azure-${p.id}`,
       email: `${p.profile.firstName.toLowerCase()}@polinetwork.org`,
