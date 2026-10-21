@@ -1,6 +1,7 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import type { AuditRecorder } from "@/audit"
 import { env } from "@/env"
 import { esign } from "@/esign"
 import { MAX_PDF_BYTES } from "@/esign/drive/types"
@@ -75,6 +76,11 @@ function publicPdf(pdf: PdfInfo) {
 const accessKey = z.string().regex(/^[A-Za-z0-9:._-]{1,100}$/)
 const driveRule = z.object({ roles: z.array(accessKey).max(50), permissions: z.array(accessKey).max(50) })
 
+/** Names the request a mutation acts on in its audit event. */
+async function auditRequest(ctx: { audit: AuditRecorder }, id: string) {
+  ctx.audit.set({ target: { type: "esign.request", id, label: await esign.requestTitle(id) } })
+}
+
 function requireManage(caller: Caller) {
   if (!caller.canManage) throw new TRPCError({ code: "FORBIDDEN", message: "You cannot manage signature requests" })
 }
@@ -100,6 +106,7 @@ export const esignRouter = createTRPCRouter({
     }),
     /** Forgets the CIE bound to a person, e.g. after they renewed their card. */
     resetIdentity: user.input(z.object({ sub: z.string().min(1) })).mutation(({ ctx, input }) => {
+      ctx.audit.set({ target: { type: "esign.signer", id: input.sub } })
       requireManage(callerOf(ctx))
       return run(() => esign.resetIdentity(input.sub))
     }),
@@ -116,9 +123,16 @@ export const esignRouter = createTRPCRouter({
     access: user.query(({ ctx }) => run(() => esign.driveAccess(callerOf(ctx)))),
     setAccess: user
       .input(z.object({ driveId: z.string().min(1), request: driveRule, sign: driveRule }))
-      .mutation(({ ctx, input }) =>
-        run(() => esign.setDriveAccess(callerOf(ctx), input.driveId, { request: input.request, sign: input.sign }))
-      ),
+      .mutation(async ({ ctx, input }) => {
+        const caller = callerOf(ctx)
+        const drive = (await run(() => esign.driveAccess(caller))).drives.find((d) => d.id === input.driveId)
+        ctx.audit.set({
+          target: { type: "esign.drive", id: input.driveId, label: drive?.label },
+          before: drive && { request: drive.request, sign: drive.sign },
+          after: { request: input.request, sign: input.sign },
+        })
+        return run(() => esign.setDriveAccess(caller, input.driveId, { request: input.request, sign: input.sign }))
+      }),
   }),
 
   documents: createTRPCRouter({
@@ -135,6 +149,10 @@ export const esignRouter = createTRPCRouter({
         const { document, pdf } = await run(async () =>
           esign.stageUpload(caller, input.name, new Uint8Array(await input.arrayBuffer()))
         )
+        ctx.audit.set({
+          target: { type: "esign.document", id: document.id, label: document.fileName },
+          after: document,
+        })
         return { document, pdf: publicPdf(pdf) }
       }),
     fromDrive: user
@@ -143,6 +161,10 @@ export const esignRouter = createTRPCRouter({
         const caller = callerOf(ctx)
         requireManage(caller)
         const { document, pdf } = await run(() => esign.stageDriveItem(caller, input.driveId, input.itemId))
+        ctx.audit.set({
+          target: { type: "esign.document", id: document.id, label: document.fileName },
+          after: document,
+        })
         return { document, pdf: publicPdf(pdf) }
       }),
     /** The document's metadata, pages and existing signatures. */
@@ -187,22 +209,33 @@ export const esignRouter = createTRPCRouter({
           email: z.object({ to: z.array(z.email()).max(20), message: z.string().max(2000).nullable() }).nullable(),
         })
       )
-      .mutation(({ ctx, input }) => run(() => esign.createRequest(callerOf(ctx), input))),
+      .mutation(async ({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "esign.document", id: input.documentId, label: input.title } })
+        const request = await run(() => esign.createRequest(callerOf(ctx), input))
+        ctx.audit.set({ target: { type: "esign.request", id: request.id, label: request.title }, after: request })
+        return request
+      }),
     list: user
       .input(z.object({ scope: z.enum(["inbox", "mine", "all"]) }))
       .query(({ ctx, input }) => run(() => esign.listRequests(callerOf(ctx), input.scope))),
     get: user
       .input(z.object({ id: z.uuid() }))
       .query(({ ctx, input }) => run(() => esign.getRequest(callerOf(ctx), input.id))),
-    cancel: user
-      .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => run(() => esign.cancelRequest(callerOf(ctx), input.id))),
-    delete: user
-      .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => run(() => esign.deleteRequest(callerOf(ctx), input.id))),
+    cancel: user.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+      await auditRequest(ctx, input.id)
+      return run(() => esign.cancelRequest(callerOf(ctx), input.id))
+    }),
+    delete: user.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+      await auditRequest(ctx, input.id)
+      return run(() => esign.deleteRequest(callerOf(ctx), input.id))
+    }),
     decline: user
       .input(z.object({ id: z.uuid(), reason: z.string().max(500).nullable() }))
-      .mutation(({ ctx, input }) => run(() => esign.declineRequest(callerOf(ctx), input.id, input.reason))),
+      .mutation(async ({ ctx, input }) => {
+        await auditRequest(ctx, input.id)
+        ctx.audit.set({ reason: input.reason })
+        return run(() => esign.declineRequest(callerOf(ctx), input.id, input.reason))
+      }),
     /** The fallback: a PDF signed with the official CIE app, uploaded by its signer. */
     uploadSigned: user
       .input(
@@ -216,14 +249,16 @@ export const esignRouter = createTRPCRouter({
             })
           )
       )
-      .mutation(({ ctx, input }) =>
-        run(async () =>
+      .mutation(async ({ ctx, input }) => {
+        await auditRequest(ctx, input.requestId)
+        return run(async () =>
           esign.uploadSigned(callerOf(ctx), input.requestId, new Uint8Array(await input.file.arrayBuffer()))
         )
-      ),
-    retryDelivery: user
-      .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => run(() => esign.retryDelivery(callerOf(ctx), input.id))),
+      }),
+    retryDelivery: user.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
+      await auditRequest(ctx, input.id)
+      return run(() => esign.retryDelivery(callerOf(ctx), input.id))
+    }),
   }),
 
   jobs: createTRPCRouter({
@@ -240,7 +275,17 @@ export const esignRouter = createTRPCRouter({
             .max(10),
         })
       )
-      .mutation(({ ctx, input }) => run(() => esign.createJobs(callerOf(ctx), input.items))),
+      .mutation(({ ctx, input }) => {
+        const ids = input.items.map((item) => item.requestId)
+        ctx.audit.set({
+          target: {
+            type: "esign.request",
+            id: ids.join(","),
+            label: ids.length === 1 ? null : `${ids.length} requests`,
+          },
+        })
+        return run(() => esign.createJobs(callerOf(ctx), input.items))
+      }),
     statuses: user
       .input(z.object({ jobIds: z.array(z.uuid()).min(1).max(10) }))
       .query(({ ctx, input }) => run(() => esign.jobStatuses(callerOf(ctx), input.jobIds))),

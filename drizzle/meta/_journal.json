@@ -183,6 +183,13 @@
       "when": 1792237528329,
       "tag": "0025_esign_drive_access",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792616705733,
+      "tag": "0026_audit_events",
+      "breakpoints": true
     }
   ]
 }

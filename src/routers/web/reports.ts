@@ -20,6 +20,10 @@ async function assertGroupExists(groupId: number, type: "tg" | "wa") {
   if (!groups.length) throw new Error("Group not found")
 }
 
+function reportsTarget(ids: number[]) {
+  return { type: "web.report", id: ids.join(","), label: ids.length === 1 ? null : `${ids.length} reports` }
+}
+
 export const reports = createTRPCRouter({
   create: policy({ service: { scope: SCOPE.publicRead } })
     .input(
@@ -37,12 +41,16 @@ export const reports = createTRPCRouter({
         }),
       ])
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       if (input.reportType === "broken_link") {
         await assertGroupExists(input.groupId, input.type)
       }
 
-      await DB.insert(REPORTS).values(input)
+      const [report] = await DB.insert(REPORTS).values(input).returning()
+      ctx.audit.set({
+        target: { type: "web.report", id: report.id, label: report.label ?? report.reportedLink },
+        after: report,
+      })
 
       return { ok: true as const }
     }),
@@ -74,13 +82,25 @@ export const reports = createTRPCRouter({
 
   resolve: policy(dashboard("web:reports:manage"))
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
-    .mutation(async ({ input }) => {
-      return await DB.update(REPORTS).set({ status: "resolved" }).where(inArray(REPORTS.id, input.ids)).returning()
+    .mutation(async ({ input, ctx }) => {
+      const before = await DB.select().from(REPORTS).where(inArray(REPORTS.id, input.ids))
+      const after = await DB.update(REPORTS)
+        .set({ status: "resolved" })
+        .where(inArray(REPORTS.id, input.ids))
+        .returning()
+      ctx.audit.set({ target: reportsTarget(input.ids), before, after })
+      return after
     }),
 
   dismiss: policy(dashboard("web:reports:manage"))
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
-    .mutation(async ({ input }) => {
-      return await DB.update(REPORTS).set({ status: "dismissed" }).where(inArray(REPORTS.id, input.ids)).returning()
+    .mutation(async ({ input, ctx }) => {
+      const before = await DB.select().from(REPORTS).where(inArray(REPORTS.id, input.ids))
+      const after = await DB.update(REPORTS)
+        .set({ status: "dismissed" })
+        .where(inArray(REPORTS.id, input.ids))
+        .returning()
+      ctx.audit.set({ target: reportsTarget(input.ids), before, after })
+      return after
     }),
 })

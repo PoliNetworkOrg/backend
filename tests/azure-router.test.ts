@@ -5,6 +5,8 @@ import type { Context } from "@/trpc"
 vi.mock("@/emails/mailer", () => ({
   sendWelcomeEmail: vi.fn().mockResolvedValue(true),
 }))
+const audited = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("@/audit/store", () => ({ writeAuditEvent: async (event: Record<string, unknown>) => audited.push(event) }))
 
 const REQUIRED_ENV: Record<string, string> = {
   NODE_ENV: "test",
@@ -78,6 +80,15 @@ describe("Azure tRPC routes without credentials", () => {
       displayName: "Katherine Johnson",
       employeeId: "2043",
       isMember: true,
+    })
+    expect(audited.at(-1)).toMatchObject({
+      action: "members.create",
+      actorKind: "legacy",
+      outcome: "success",
+      targetType: "azure.member",
+      targetId: result.id,
+      targetLabel: "Katherine Johnson",
+      after: { id: result.id, email: "katherine.johnson@polinetwork.org", assocNumber: 2043 },
     })
   })
 

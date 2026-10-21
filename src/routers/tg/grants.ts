@@ -87,6 +87,11 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
+      ctx.audit.set({
+        target: { type: "tg.user", id: input.userId },
+        after: { validSince: input.since, validUntil: input.until },
+        reason: input.reason,
+      })
       if (actor && actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
       if (!actor && input.adderId === undefined)
         throw new TRPCError({ code: "BAD_REQUEST", message: "Missing adderId" })
@@ -164,6 +169,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId } })
       if (actor?.kind === "service") throw new TRPCError({ code: "FORBIDDEN" })
       if (!actor && input.interruptedById === undefined)
         throw new TRPCError({ code: "BAD_REQUEST", message: "Missing interruptedById" })
@@ -188,7 +194,7 @@ export default createTRPCRouter({
                   isNull(s.grants.interruptedAt)
                 )
               )
-              .returning({ id: s.grants.id }),
+              .returning(),
             tx
               .update(s.grantsV2)
               .set({
@@ -203,10 +209,11 @@ export default createTRPCRouter({
                   isNull(s.grantsV2.interruptedAt)
                 )
               )
-              .returning({ id: s.grantsV2.id }),
+              .returning(),
           ])
         )
 
+        ctx.audit.set({ after: [...legacy, ...current] })
         if (legacy.length + current.length === 0)
           return {
             success: false,

@@ -22,11 +22,13 @@ export const authRouter = createTRPCRouter({
           })
         )
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      ctx.audit.set({ target: { type: "auth.user", id: input.userId } })
       try {
         const buffer = Buffer.from(await input.image.arrayBuffer())
         const file = await uploadBlob(buffer, input.image.type.includes("png") ? "png" : "jpeg", input.image.type)
         await DB.update(SCHEMA.AUTH.user).set({ image: file.url }).where(eq(SCHEMA.AUTH.user.id, input.userId))
+        ctx.audit.set({ after: { image: file.url } })
         return { success: true }
       } catch (err) {
         logger.error({ err }, "authRouter updateProfilePic error")

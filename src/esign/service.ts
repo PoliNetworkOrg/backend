@@ -625,6 +625,11 @@ export function createEsignService(options: ServiceOptions) {
         })
     },
 
+    /** For the audit log: the request's title, whoever asks. */
+    async requestTitle(id: string) {
+      return (await store.getRequest(id))?.title ?? null
+    },
+
     async resetIdentity(sub: string) {
       await store.setProfileIdentity(sub, null)
     },

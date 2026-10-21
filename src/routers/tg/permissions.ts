@@ -126,7 +126,8 @@ export default createTRPCRouter({
         }),
       ])
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId } })
       try {
         // get current permissions of adder and target
         const q = await DB.select()
@@ -151,6 +152,7 @@ export default createTRPCRouter({
           return { error: "UNAUTHORIZED" }
 
         const existingRoles = q.find((e) => e.userId === input.userId)?.roles ?? []
+        ctx.audit.set({ before: { roles: existingRoles } })
 
         // concat is the superpowered push
         const roles = Array.from(
@@ -193,6 +195,7 @@ export default createTRPCRouter({
             },
           })
 
+        ctx.audit.set({ after: { roles } })
         return { roles, error: null }
       } catch (error) {
         logger.error({ error }, "Error while executing addRole in tg.permissions router")
@@ -223,7 +226,8 @@ export default createTRPCRouter({
         }),
       ])
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId } })
       try {
         // get current permissions of remover and target
         const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.removerId))
@@ -246,6 +250,11 @@ export default createTRPCRouter({
         )
           return { error: "UNAUTHORIZED" }
 
+        const [target] = await DB.select({ roles: s.permissions.roles })
+          .from(s.permissions)
+          .where(eq(s.permissions.userId, input.userId))
+          .limit(1)
+        ctx.audit.set({ before: target })
         const affected = await DB.update(s.permissions)
           .set({ roles: sql`array_remove(${s.permissions.roles}, ${input.role})` })
           .where(eq(s.permissions.userId, input.userId))
@@ -263,6 +272,7 @@ export default createTRPCRouter({
           if (presAffected.length !== 0) roles = presAffected[0].roles
         }
 
+        ctx.audit.set({ after: { roles } })
         return { roles, error: null }
       } catch (error) {
         logger.error({ error }, "Error while executing removeRole in tg.permissions router")
@@ -287,7 +297,8 @@ export default createTRPCRouter({
         groupId: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId }, after: { groupAdminOf: input.groupId } })
       await DB.insert(s.groupAdmins)
         .values({
           userId: input.userId,
@@ -313,7 +324,8 @@ export default createTRPCRouter({
         ]),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId }, before: { groupAdminOf: input.groupId } })
       try {
         // get current permissions of remover and target
         const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.removerId))

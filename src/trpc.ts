@@ -2,6 +2,7 @@ import type { AccessSnapshotClient, Actor } from "@polinetwork/auth-kit"
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
 import { ZodError, z } from "zod/v4"
+import { auditEvent, auditRecorder, noAudit, UNAUDITED } from "./audit"
 import type { RequestAuth } from "./idp/auth"
 import { logger } from "./logger"
 
@@ -71,6 +72,33 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
   return result
 })
 
+/**
+ * Records every mutation in `common_audit_events` (see `src/audit`): who called it, with what input, and whether it
+ * succeeded, failed or was denied. It runs before the policy so that denied calls are kept too. Handlers add the
+ * target and the state before and after through `ctx.audit`. A failed write is logged and does not fail the call,
+ * whose change has already happened.
+ */
+const auditMiddleware = t.middleware(async ({ ctx, path, type, getRawInput, next }) => {
+  if (type !== "mutation" || UNAUDITED.has(path)) return next({ ctx: { audit: noAudit } })
+
+  const { recorder, note, skipped } = auditRecorder()
+  const result = await next({ ctx: { audit: recorder } })
+  if (skipped()) return result
+
+  try {
+    const rawInput = await getRawInput().catch(() => undefined)
+    const event = auditEvent({ path, auth: ctx.auth, rawInput, note, result })
+    if (event) {
+      // Imported here so that loading the router does not open the database.
+      const { writeAuditEvent } = await import("./audit/store")
+      await writeAuditEvent(event)
+    }
+  } catch (error) {
+    logger.error({ err: error, procedure: path }, "[AUDIT] cannot record the event")
+  }
+  return result
+})
+
 /** Mounts that RFC v3 §8 removes; their procedures stay reachable only on the legacy path. */
 const LEGACY_ONLY_MOUNTS = ["tg.groupLabels."]
 
@@ -124,7 +152,7 @@ const enforcePolicy = t.middleware(async ({ ctx, meta, path, next }) => {
   return next({ ctx: enforced })
 })
 
-const baseProcedure = t.procedure.use(timingMiddleware)
+const baseProcedure = t.procedure.use(timingMiddleware).use(auditMiddleware)
 
 /** A procedure with its RFC v3 §8 policy. Every procedure must be built from this or `legacyProcedure`. */
 export function policy(rules: Policy, options: { tokenOnly?: boolean } = {}) {

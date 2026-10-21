@@ -25,7 +25,8 @@ export default createTRPCRouter({
       })
     )
     .output(z.object({ error: z.nullable(z.string()) }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      ctx.audit.set({ target: { type: "azure.member", id: input.userId }, after: { assocNumber: input.assocNumber } })
       const { error } = await azureDirectory.setMemberNumber(input.userId, input.assocNumber)
       return { error }
     }),
@@ -55,6 +56,8 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const by = ctx.actor?.kind === "user" ? { sub: ctx.actor.sub, client: ctx.actor.client } : { legacy: true }
+      const name = `${input.firstName} ${input.lastName}`
+      ctx.audit.set({ target: { type: "azure.member", id: input.assocNumber, label: name } })
       try {
         const member = await azureDirectory.createMember({
           firstName: input.firstName,
@@ -62,6 +65,10 @@ export default createTRPCRouter({
           assocNumber: input.assocNumber,
         })
         logger.info({ by, memberId: member.id, assocNumber: input.assocNumber }, "[AZURE] member created")
+        ctx.audit.set({
+          target: { type: "azure.member", id: member.id, label: name },
+          after: { id: member.id, email: member.mail, assocNumber: input.assocNumber },
+        })
 
         const mailOk = await sendWelcomeEmail(
           input.sendEmailTo,

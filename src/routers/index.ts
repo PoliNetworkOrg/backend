@@ -1,4 +1,5 @@
 import { createTRPCRouter } from "@/trpc"
+import { auditRouter } from "./audit"
 import { authRouter } from "./auth"
 import { azureRouter } from "./azure"
 import { esignRouter } from "./esign"
@@ -15,6 +16,7 @@ import { webRouter } from "./web"
  * All routers added in /api/routers should be manually added here.
  */
 export const appRouter = createTRPCRouter({
+  audit: auditRouter,
   auth: authRouter,
   azure: azureRouter,
   esign: esignRouter,
