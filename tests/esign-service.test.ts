@@ -8,6 +8,7 @@ import { signedBytes } from "@/esign/pdf/incremental"
 import { inspectPdf } from "@/esign/pdf/inspect"
 import { finalizeSignature, prepareSignature } from "@/esign/pdf/pades"
 import { type Access, type Caller, createEsignService, type Mailer } from "@/esign/service"
+import type { EsignStore } from "@/esign/store"
 import { createMemoryStore } from "@/esign/store-memory"
 import { appendRevision, cardSign, createTestCa, samplePdf, type TestSigner } from "./esign-fixtures"
 
@@ -27,10 +28,12 @@ function setup(
     revocation?: "good" | "revoked" | "unknown"
     policy?: "require" | "prefer" | "off"
     directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
+    /** Another service instance's store: a replica, or the service after a restart. */
+    store?: EsignStore
   } = {}
 ) {
   let clock = new Date("2026-10-17T10:00:00Z").getTime()
-  const store = createMemoryStore()
+  const store = opts.store ?? createMemoryStore()
   const drive = createMockDrive()
   const archive = createMockDrive({ id: "archive", label: "Archive" })
   /** Roles and permissions by subject, for drive access rules. */
@@ -1057,6 +1060,33 @@ describe("e-signing service", () => {
     const { request: declined } = await env.service.getRequest(manager, request.id)
     expect(declined.status).toBe("declined")
     expect(declined.signers[0]).toMatchObject({ status: "declined", declineReason: "Errore nel testo" })
+  })
+
+  it("reads a document's bytes for its pages and signatures only when they weren't inspected yet", async () => {
+    const request = await prepareRequest(env)
+    const documentId = (await env.service.getRequest(manager, request.id)).currentDocumentId ?? ""
+    const getDocument = vi.spyOn(env.store, "getDocument")
+    // The upload inspected it.
+    const { meta, pdf } = await env.service.documentInfo(secretary, documentId)
+    expect(meta).toMatchObject({ id: documentId, fileName: "verbale.pdf", version: 0, pages: 2 })
+    expect(meta).not.toHaveProperty("content")
+    expect(pdf.pages).toHaveLength(2)
+    expect(getDocument).not.toHaveBeenCalled()
+    // A replica reads and inspects it once.
+    const replica = setup({ store: env.store })
+    await expect(replica.service.documentInfo(secretary, documentId)).resolves.toEqual({ meta, pdf })
+    await replica.service.documentInfo(president, documentId)
+    expect(getDocument).toHaveBeenCalledTimes(1)
+    const stranger: Caller = { sub: "sub-stranger", canManage: false }
+    await expect(replica.service.documentInfo(stranger, documentId)).rejects.toMatchObject({ code: "not_found" })
+    await expect(env.service.document(stranger, documentId)).rejects.toMatchObject({ code: "not_found" })
+    const { meta: same, content } = await env.service.document(secretary, documentId)
+    expect(same).toEqual(meta)
+    expect(content).toHaveLength(meta.size)
+    // A staged upload is its creator's and the managers'.
+    const { document: staged } = await env.service.stageUpload(manager, "bozza.pdf", await samplePdf(1))
+    expect((await env.service.documentInfo(manager, staged.id)).pdf.pages).toHaveLength(1)
+    await expect(env.service.documentInfo(secretary, staged.id)).rejects.toMatchObject({ code: "not_found" })
   })
 
   it("hides requests from people who are not involved", async () => {

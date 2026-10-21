@@ -152,7 +152,7 @@ export const esignRouter = createTRPCRouter({
       }),
     /** The document's metadata, pages and existing signatures. */
     get: user.input(z.object({ documentId: z.uuid() })).query(async ({ ctx, input }) => {
-      const { meta, pdf } = await run(() => esign.document(callerOf(ctx), input.documentId))
+      const { meta, pdf } = await run(() => esign.documentInfo(callerOf(ctx), input.documentId))
       return { document: meta, pdf: publicPdf(pdf) }
     }),
     /** The PDF itself, base64-encoded. */

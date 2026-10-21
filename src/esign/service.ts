@@ -225,10 +225,11 @@ export function createEsignService(options: ServiceOptions) {
     return result
   }
 
-  async function info(sha256: string, content: Uint8Array): Promise<PdfInfo> {
+  /** What is in a PDF, inspected once per content: a `content` loader runs only when it isn't cached. */
+  async function info(sha256: string, content: Uint8Array | (() => Promise<Uint8Array>)): Promise<PdfInfo> {
     const cached = infoCache.get(sha256)
     if (cached) return cached
-    const result = await inspectPdf(content)
+    const result = await inspectPdf(typeof content === "function" ? await content() : content)
     if (infoCache.size > 100) infoCache.delete(infoCache.keys().next().value as string)
     infoCache.set(sha256, result)
     return result
@@ -292,6 +293,15 @@ export function createEsignService(options: ServiceOptions) {
       completed: "is already signed by everyone",
     }[request.status]
     throw new EsignError("conflict", `“${request.title}” ${ended}.`)
+  }
+
+  /** A version of a request the caller can see, or a staged upload of theirs (any, for a manager). */
+  async function readable<T extends DocumentMeta>(caller: Caller, document: T | null): Promise<T> {
+    if (!document) throw new EsignError("not_found", "Document not found")
+    if (document.requestId) await requestFor(caller, document.requestId)
+    else if (document.createdBySub !== caller.sub && !caller.canManage)
+      throw new EsignError("not_found", "Document not found")
+    return document
   }
 
   async function profileName(sub: string) {
@@ -795,15 +805,24 @@ export function createEsignService(options: ServiceOptions) {
       }
     },
 
-    /** A document version's bytes and what is in it, for the viewer. */
+    /**
+     * A document version and its pages and signatures. Pages reload it every few seconds while a co-signer signs: its
+     * bytes are read only when they weren't inspected yet.
+     */
+    async documentInfo(caller: Caller, documentId: string) {
+      const meta = await readable(caller, await store.getDocumentMeta(documentId))
+      const pdf = await info(meta.sha256, async () => {
+        const document = await store.getDocument(documentId)
+        if (!document) throw new EsignError("not_found", "Document not found")
+        return document.content
+      })
+      return { meta, pdf }
+    },
+
+    /** A document version's bytes, for the viewer and downloads. */
     async document(caller: Caller, documentId: string) {
-      const document = await store.getDocument(documentId)
-      if (!document) throw new EsignError("not_found", "Document not found")
-      if (document.requestId) await requestFor(caller, document.requestId)
-      else if (document.createdBySub !== caller.sub && !caller.canManage)
-        throw new EsignError("not_found", "Document not found")
-      const { content, ...meta } = document
-      return { meta, content, pdf: await info(document.sha256, content) }
+      const { content, ...meta } = await readable(caller, await store.getDocument(documentId))
+      return { meta, content }
     },
 
     async createRequest(caller: Caller, input: CreateRequestInput): Promise<RequestView> {
