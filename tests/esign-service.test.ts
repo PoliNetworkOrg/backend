@@ -220,7 +220,35 @@ describe("e-signing service", () => {
     const [to, props, attachment] = env.mailer.signedDocument.mock.calls[0]
     expect(to).toEqual(["archivio@example.org"])
     expect(props.signers.map((s) => s.name)).toEqual(["Mario Rossi", "Anna Bianchi"])
+    expect(props.sentBy).toEqual({ name: "Luca Verdi", email: "luca@example.org" })
     expect(attachment?.filename).toBe("verbale.pdf")
+  })
+
+  it("links a signed PDF too large to attach from OneDrive instead", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const upload = env.drive.upload
+    vi.spyOn(env.drive, "upload").mockImplementation(async (...args) => ({
+      ...(await upload(...args)),
+      webUrl: "https://drive.example.org/big.pdf",
+    }))
+    const doc = await PDFDocument.create()
+    doc.addPage([595, 842])
+    doc.context.register(doc.context.stream(new Uint8Array(randomBytes(2_200_000))))
+    const { document } = await env.service.stageUpload(manager, "big.pdf", await doc.save())
+    const request = await env.service.createRequest(manager, {
+      title: "Big",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+      output: { driveId: "dev", folderId: "mock-firmati", fileName: "big" },
+      email: { to: ["archivio@example.org"], message: "In allegato il contratto." },
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    await vi.waitFor(() => expect(env.mailer.signedDocument).toHaveBeenCalledOnce())
+    const [, props, attachment] = env.mailer.signedDocument.mock.calls[0]
+    expect(props).toMatchObject({ link: "https://drive.example.org/big.pdf", message: "In allegato il contratto." })
+    expect(attachment).toBeNull()
   })
 
   it("emails every signer of an unordered request once, when it is created", async () => {

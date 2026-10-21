@@ -47,6 +47,7 @@ export type Mailer = {
       setupUrl: string
     }
   ): Promise<boolean>
+  /** Replies go to `sentBy`'s email. */
   signedDocument(
     to: string[],
     props: {
@@ -54,6 +55,7 @@ export type Mailer = {
       signers: { name: string; role: string | null }[]
       message: string | null
       link: string | null
+      sentBy: { name: string; email: string | null } | null
     },
     attachment: { filename: string; content: Uint8Array; contentType: string } | null
   ): Promise<boolean>
@@ -594,6 +596,7 @@ export function createEsignService(options: ServiceOptions) {
         const attach = document.size <= MAX_ATTACHMENT_BYTES
         if (!attach && !delivery.driveItem?.webUrl)
           throw new Error("The PDF is too large to email and there is no OneDrive link to send instead")
+        const creator = await store.getProfile(request.createdBySub)
         const sent = await mailer.signedDocument(
           request.email.to,
           {
@@ -601,6 +604,7 @@ export function createEsignService(options: ServiceOptions) {
             signers: request.signers.map((s) => ({ name: s.name, role: s.role })),
             message: request.email.message,
             link: attach ? null : (delivery.driveItem?.webUrl ?? null),
+            sentBy: creator ? { name: creator.name, email: creator.email } : null,
           },
           attach ? { filename: document.fileName, content: document.content, contentType: "application/pdf" } : null
         )
