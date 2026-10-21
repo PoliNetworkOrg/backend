@@ -17,12 +17,10 @@ import { Footer } from "../components/footer"
 import { Logo } from "../components/logo"
 import type { EmailTemplate } from "../types"
 
-export type RequestUpdateProps = RequestUpdate
-
-export const requestUpdateSubject = (props: RequestUpdateProps) =>
+export const requestUpdateSubject = (props: RequestUpdate) =>
   `${{ declined: "Declined", completed: "Signed by everyone", delivery_failed: "Not delivered" }[props.outcome]}: ${props.title}`
 
-function Summary(props: RequestUpdateProps) {
+function Summary(props: RequestUpdate) {
   const title = <strong>{props.title}</strong>
   switch (props.outcome) {
     case "declined":
@@ -71,7 +69,7 @@ function Summary(props: RequestUpdateProps) {
 }
 
 /** Tells a request's creator, and for a failed delivery its managers, how it ended. */
-const RequestUpdateEmail: EmailTemplate<RequestUpdateProps> = (props) => {
+const RequestUpdateEmail: EmailTemplate<RequestUpdate> = (props) => {
   const heading = {
     declined: "Request declined",
     completed: "Everyone signed",

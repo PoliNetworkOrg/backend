@@ -3,9 +3,10 @@ import { createTestAccount, createTransport, getTestMessageUrl } from "nodemaile
 import type { JSX } from "react"
 import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } from "@/azure/functions/emails"
 import { env } from "@/env"
+import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import OtpEmail from "./templates/otp"
-import RequestUpdateEmail, { type RequestUpdateProps, requestUpdateSubject } from "./templates/request-update"
+import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
 import Welcome from "./templates/welcome"
@@ -82,7 +83,7 @@ export async function sendSignatureRequestEmail(
   return sendEmail(toAddress, makeSubject(`Signature needed: ${props.title}`), <SignatureRequestEmail {...props} />)
 }
 
-export async function sendRequestUpdateEmail(toAddress: string, props: RequestUpdateProps) {
+export async function sendRequestUpdateEmail(toAddress: string, props: RequestUpdate) {
   return sendEmail(toAddress, makeSubject(requestUpdateSubject(props)), <RequestUpdateEmail {...props} />)
 }
 
