@@ -3,7 +3,7 @@ import { and, eq, exists, ilike, ne, not, notExists, or, type SQL, sql } from "d
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { describeActor } from "@/idp/actor-info"
-import { botReadOrDashboard, dashboard, SCOPE } from "@/idp/policies"
+import { botReadOrDashboard, dashboard, SCOPE, seesHiddenGroups } from "@/idp/policies"
 import { logger } from "@/logger"
 import { WSS } from "@/server"
 import { createTRPCRouter, policy } from "@/trpc"
@@ -82,8 +82,7 @@ export default createTRPCRouter({
         if (queryWhere) conditions.push(queryWhere) // or(...) returns undefined? idk
       }
 
-      // Hidden groups are dashboard data (RFC v3 §8); legacy callers keep the old behaviour.
-      const showHidden = input.showHidden && (ctx.actor === null || ctx.actor.kind === "user")
+      const showHidden = input.showHidden && seesHiddenGroups(ctx.actor)
       if (showHidden === false) {
         conditions.push(not(GROUPS.hide))
       }

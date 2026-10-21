@@ -41,8 +41,9 @@ async function query(sql: string): Promise<Record<string, unknown>[]> {
 
 // The port opts into a disposable PostgreSQL database with the fixed test credentials above.
 describe.skipIf(!testPort)("database seed", () => {
+  // Only the schema has to exist: every test truncates the tables first. Importing the DB applies the migrations.
   beforeAll(async () => {
-    await seed()
+    await exec("bun", ["-e", 'await import("@/db"); process.exit(0)'], { env: seedEnv })
   }, 30_000)
 
   beforeEach(async () => {
