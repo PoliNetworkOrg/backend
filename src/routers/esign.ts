@@ -17,7 +17,7 @@ const MANAGE = "esign:requests:manage"
 /** Who may use each drive. */
 const MANAGE_DRIVES = "esign:drives:manage"
 
-/** The dashboard's agent-mode user, on the legacy anonymous path in development only. */
+/** The dashboard's agent-mode user, on the anonymous path (`LEGACY_ANONYMOUS=allow`) in development only. */
 const DEV_SUB = "agent-preview-user"
 
 const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {

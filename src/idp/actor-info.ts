@@ -23,16 +23,10 @@ async function telegramName(telegramId: string): Promise<string | null> {
   }
 }
 
-/** The enforced actor, or on the legacy path the Telegram ID the caller sent. */
-export async function describeActor(actor: Actor | null, legacyTelegramId?: number): Promise<ActorInfo> {
-  const sub = actor && actor.kind !== "service" ? actor.sub : null
-  const telegramId = actor
-    ? actor.kind === "service"
-      ? null
-      : actor.telegramId
-    : legacyTelegramId !== undefined
-      ? String(legacyTelegramId)
-      : null
+/** The enforced actor, as the bot shows it. */
+export async function describeActor(actor: Actor): Promise<ActorInfo> {
+  const sub = actor.kind !== "service" ? actor.sub : null
+  const telegramId = actor.kind !== "service" ? actor.telegramId : null
   const name = telegramId ? await telegramName(telegramId) : null
-  return { sub, telegramId, displayName: name ?? telegramId ?? sub ?? actor?.client ?? "unknown" }
+  return { sub, telegramId, displayName: name ?? telegramId ?? sub ?? actor.client }
 }

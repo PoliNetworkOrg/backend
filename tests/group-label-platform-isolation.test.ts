@@ -74,7 +74,6 @@ vi.mock("@/trpc", () => {
   return {
     createTRPCRouter: <T>(router: T) => router,
     policy: () => publicProcedure,
-    legacyProcedure: publicProcedure,
   }
 })
 

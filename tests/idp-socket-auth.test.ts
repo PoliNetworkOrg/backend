@@ -22,8 +22,10 @@ const verifier = (result: VerifiedToken | Error) => async () => {
 }
 
 describe("authenticateSocket", () => {
-  it("leaves a handshake without a token to the legacy path", async () => {
-    expect(await authenticateSocket(undefined, verifier(token()), botClientId)).toEqual({ kind: "anonymous" })
+  it("refuses a handshake without a token, including the old query-type identification", async () => {
+    const missing = { kind: "rejected", reason: "Missing token" }
+    expect(await authenticateSocket(undefined, verifier(token()), botClientId)).toEqual(missing)
+    expect(await authenticateSocket(null, verifier(token()), botClientId)).toEqual(missing)
   })
 
   it("accepts the bot with backend:tg:events until its token expires", async () => {
@@ -57,7 +59,7 @@ describe("authenticateSocket", () => {
       kind: "rejected",
       reason: "Telegram bot client is not configured",
     })
-    expect(await authenticateSocket(undefined, verifier(token()), undefined)).toEqual({ kind: "anonymous" })
+    expect(await authenticateSocket(undefined, verifier(token()), undefined)).toMatchObject({ kind: "rejected" })
   })
 
   it("does not accept the display name as a substitute for the registered client ID", async () => {

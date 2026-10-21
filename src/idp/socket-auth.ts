@@ -2,11 +2,8 @@ import { AuthKitError, type VerifiedToken } from "@polinetwork/auth-kit"
 import { SCOPE } from "./policies"
 
 export type SocketAuth =
-  /** No token: the legacy query-type identification, while `LEGACY_ANONYMOUS=allow`. */
-  | { kind: "anonymous" }
   /** The bot, until its token expires (epoch ms). */
-  | { kind: "token"; client: string; expiresAt: number }
-  | { kind: "rejected"; reason: string }
+  { kind: "token"; client: string; expiresAt: number } | { kind: "rejected"; reason: string }
 
 /** Checks the bearer token the bot sends in the socket.io handshake's `auth.token`. */
 export async function authenticateSocket(
@@ -14,7 +11,7 @@ export async function authenticateSocket(
   verify: ((token: string) => Promise<VerifiedToken>) | null,
   botClientId: string | undefined
 ): Promise<SocketAuth> {
-  if (token === undefined || token === null) return { kind: "anonymous" }
+  if (token === undefined || token === null) return { kind: "rejected", reason: "Missing token" }
   if (typeof token !== "string" || token.length === 0) return { kind: "rejected", reason: "Malformed token" }
   if (!verify) return { kind: "rejected", reason: "Token authentication is not configured" }
   if (!botClientId) return { kind: "rejected", reason: "Telegram bot client is not configured" }

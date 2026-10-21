@@ -19,7 +19,7 @@ vi.mock("@/trpc", () => {
     input: () => ({ mutation: (handler: unknown) => ({ handler }) }),
     output: () => ({ query: (handler: () => unknown) => ({ handler }) }),
   }
-  return { createTRPCRouter: <T>(router: T) => router, policy: () => procedure, legacyProcedure: procedure }
+  return { createTRPCRouter: <T>(router: T) => router, policy: () => procedure }
 })
 
 const { default: guidesRouter } = await import("@/routers/web/guides_matricole")
