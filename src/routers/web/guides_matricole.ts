@@ -41,7 +41,7 @@ export default createTRPCRouter({
       return res[0] || null
     }),
 
-  addGuide: policy(dashboard("web:content:write"))
+  addGuide: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
@@ -49,12 +49,11 @@ export default createTRPCRouter({
         .pipe(
           guideFormSchema.extend({
             file: guideFileSchema,
-            createdBy: z.coerce.number<string>().optional(),
           })
         )
     )
     .mutation(async ({ input, ctx }) => {
-      const { version, date, file, createdBy } = input
+      const { version, date, file } = input
 
       const [existing] = await DB.select({ id: GUIDES_MATRICOLE.id })
         .from(GUIDES_MATRICOLE)
@@ -68,7 +67,7 @@ export default createTRPCRouter({
           version,
           date,
           file: uploadedFile.url,
-          ...createdByColumns(authorOf(ctx.actor, createdBy)),
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 

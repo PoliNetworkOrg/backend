@@ -78,14 +78,6 @@ export function createMockAzureDirectory(): AzureDirectory {
       return cloneMembers(members)
     },
 
-    async setMemberNumber(userId, assocNumber) {
-      const member = members.find((candidate) => candidate.id === userId)
-      if (!member) return { error: `Azure member ${userId} was not found in the local directory` }
-
-      member.employeeId = assocNumber.toString()
-      return { error: null }
-    },
-
     async createMember({ firstName, lastName, assocNumber }) {
       const mailNickname = `${firstName.replaceAll(" ", "")}.${lastName.replaceAll(" ", "")}`.toLowerCase()
       const mail = `${mailNickname}@polinetwork.org`
