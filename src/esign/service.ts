@@ -283,27 +283,31 @@ export function createEsignService(options: ServiceOptions) {
     return { document, pdf }
   }
 
-  async function notifyTurn(request: SigningRequest, except: string | null) {
+  /** Emails these signers that it is their turn, all at once, and records who was emailed in signer order. */
+  async function notifyTurn(request: SigningRequest, signers: Signer[]) {
     const requestedBy = await profileName(request.createdBySub)
-    for (const signer of turnOf(request)) {
-      if (signer.sub === except) continue
-      const profile = await store.getProfile(signer.sub)
-      if (!profile?.email) continue
-      const sent = await mailer
-        .signatureRequest(profile.email, {
-          signerName: profile.name.split(" ")[0] ?? profile.name,
-          requestedBy,
-          title: request.title,
-          role: signer.role,
-          url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
-        })
-        .catch((error) => {
-          logger.error({ error, requestId: request.id }, "[ESIGN] cannot send the signature request email")
-          return false
-        })
+    const results = await Promise.all(
+      signers.map(async (signer) => {
+        const profile = await store.getProfile(signer.sub)
+        if (!profile?.email) return { signer, sent: false }
+        const sent = await mailer
+          .signatureRequest(profile.email, {
+            signerName: profile.name.split(" ")[0] ?? profile.name,
+            requestedBy,
+            title: request.title,
+            role: signer.role,
+            url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
+          })
+          .catch((error) => {
+            logger.error({ error, requestId: request.id }, "[ESIGN] cannot send the signature request email")
+            return false
+          })
+        return { signer, sent }
+      })
+    )
+    for (const { signer, sent } of results)
       if (sent)
         await store.addEvent({ requestId: request.id, actorSub: null, type: "notified", data: { sub: signer.sub } })
-    }
   }
 
   const signaturePlaces = (places: PlaceJson[]) => places.filter((p) => p.kind === "signature")
@@ -498,6 +502,7 @@ export function createEsignService(options: ServiceOptions) {
   }) {
     const { request, signer, current, job, signed, sha256, identity, final } = input
     const remaining = request.signers.filter((s) => s.status === "pending" && (s.id !== signer.id || !final)).length
+    const inTurnBefore = new Set(turnOf(request).map((s) => s.sub))
     const result = await store.commitSignature({
       jobId: job.id,
       requestId: request.id,
@@ -546,7 +551,10 @@ export function createEsignService(options: ServiceOptions) {
     if (updated?.status === "completed") {
       void deliver(request.id).catch((error) => logger.error({ error }, "[ESIGN] delivery crashed"))
     } else if (updated) {
-      void notifyTurn(updated, null).catch((error) => logger.error({ error }, "[ESIGN] notification crashed"))
+      // Only signers whose turn this signature started: an unordered request emailed everyone when it was created.
+      const entered = turnOf(updated).filter((s) => !inTurnBefore.has(s.sub))
+      if (entered.length > 0)
+        void notifyTurn(updated, entered).catch((error) => logger.error({ error }, "[ESIGN] notification crashed"))
     }
     logger.info(
       { requestId: request.id, version: job.baseVersion + 1, remaining, method: input.method },
@@ -768,7 +776,7 @@ export function createEsignService(options: ServiceOptions) {
         type: "created",
         data: { signers: signers.length },
       })
-      await notifyTurn(request, caller.sub)
+      await notifyTurn(request, turnOf(request).filter((s) => s.sub !== caller.sub))
       return view(caller, request)
     },
 

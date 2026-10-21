@@ -195,6 +195,7 @@ describe("e-signing service", () => {
       const { request: done } = await env.service.getRequest(manager, request.id)
       expect(done.delivery?.status).toBe("delivered")
     })
+    expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
     const { request: done, versions, events } = await env.service.getRequest(manager, request.id)
     expect(versions.map((v) => v.version)).toEqual([0, 1, 2])
     expect(done.signers.map((s) => s.fiscalCode)).toEqual(["RSSMRA80A01F205X", "BNCNNA85B41F205Y"])
@@ -213,6 +214,34 @@ describe("e-signing service", () => {
     expect(to).toEqual(["archivio@example.org"])
     expect(props.signers.map((s) => s.name)).toEqual(["Mario Rossi", "Anna Bianchi"])
     expect(attachment?.filename).toBe("verbale.pdf")
+  })
+
+  it("emails every signer of an unordered request once, when it is created", async () => {
+    const request = await prepareRequest(env, false)
+    expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
+    await sign(env, secretary, secretarySigner, request.id)
+    expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
+    const { events } = await env.service.getRequest(manager, request.id)
+    expect(events.filter((e) => e.type === "notified")).toHaveLength(2)
+  })
+
+  it("doesn't email the creator who signs an unordered request", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+    const request = await env.service.createRequest(manager, {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: false,
+      signers: [
+        { sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+        { sub: secretary.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+      ],
+      output: null,
+      email: null,
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    expect(env.mailer.signatureRequest.mock.calls.map(([to]) => to)).toEqual(["mario@example.org"])
   })
 
   it("binds a signer to the CIE of their first signature", async () => {
