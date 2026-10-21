@@ -16,6 +16,7 @@ import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
 import { redis } from "./redis"
 import { appRouter } from "./routers"
+import { withRequestBodyLimit } from "./serve-options"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
 
 export const WSS = new WebSocketServer({
@@ -25,7 +26,7 @@ const app = new Hono()
 
 const server = Bun.serve({
   port: env.PORT,
-  ...wssEngine.handler(),
+  ...withRequestBodyLimit(wssEngine.handler()),
   fetch: app.fetch,
 })
 
