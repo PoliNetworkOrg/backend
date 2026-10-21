@@ -36,7 +36,15 @@ export type AccessCatalog = { roles: { key: string; name: string }[]; permission
 export type Mailer = {
   signatureRequest(
     to: string,
-    props: { signerName: string; requestedBy: string; title: string; role: string | null; url: string }
+    props: {
+      signerName: string
+      requestedBy: string
+      title: string
+      role: string | null
+      ordered: boolean
+      url: string
+      setupUrl: string
+    }
   ): Promise<boolean>
   signedDocument(
     to: string[],
@@ -302,7 +310,9 @@ export function createEsignService(options: ServiceOptions) {
             requestedBy,
             title: request.title,
             role: signer.role,
+            ordered: request.ordered,
             url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
+            setupUrl: `${options.dashboardUrl}/dashboard/esign/setup`,
           })
           .catch((error) => {
             logger.error({ error, requestId: request.id }, "[ESIGN] cannot send the signature request email")
@@ -915,7 +925,8 @@ export function createEsignService(options: ServiceOptions) {
     async agentPrepare(ticket: string, certificateB64: string, chainB64: string[] = [], protocol = 1) {
       const job = await resolveTicket(ticket, ["pending", "prepared"])
       if (protocol < 2) {
-        const message = "Update the PoliNetwork Sign Agent from the setup guide, then sign again."
+        const message =
+          "This version of the signing app is too old. Install the latest PoliNetwork eSign from the setup guide, then sign again."
         await store.transitionJob(job.id, ["pending", "prepared"], {
           errorCode: "agent_outdated",
           errorMessage: message,

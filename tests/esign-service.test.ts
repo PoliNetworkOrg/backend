@@ -174,7 +174,11 @@ describe("e-signing service", () => {
     expect(request.turn).toEqual([secretary.sub])
     expect(env.mailer.signatureRequest).toHaveBeenCalledWith(
       "mario@example.org",
-      expect.objectContaining({ role: "segretario" })
+      expect.objectContaining({
+        role: "segretario",
+        ordered: true,
+        setupUrl: "https://admin.example.org/dashboard/esign/setup",
+      })
     )
 
     expect(await env.service.listRequests(secretary, "inbox")).toHaveLength(1)
@@ -219,6 +223,10 @@ describe("e-signing service", () => {
   it("emails every signer of an unordered request once, when it is created", async () => {
     const request = await prepareRequest(env, false)
     expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
+    expect(env.mailer.signatureRequest).toHaveBeenCalledWith(
+      "anna@example.org",
+      expect.objectContaining({ ordered: false })
+    )
     await sign(env, secretary, secretarySigner, request.id)
     expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
     const { events } = await env.service.getRequest(manager, request.id)
