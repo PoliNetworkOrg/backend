@@ -1,11 +1,8 @@
-import { azureCredentials } from "@/azure/config"
-import { azureDirectory } from "@/azure/directory"
-import { standardLocalPart } from "@/azure/mailbox"
 import { DB, SCHEMA } from "@/db"
-import { sendPeopleEmail, sendWelcomeEmail } from "@/emails/mailer"
-import { env } from "@/env"
+import { sendPeopleEmail } from "@/emails/mailer"
 import { idp } from "@/idp"
 import { decryptUser } from "@/utils/users"
+import { provisionMember, setMemberNumber } from "./azure-members"
 import { peopleConfig } from "./config"
 import { transferType } from "./files"
 import { fail, receiptEligible } from "./model"
@@ -60,39 +57,8 @@ export const people = createPeopleService({
       })
     )
   },
-  async provisionMember(person, number) {
-    if (!azureCredentials && env.NODE_ENV === "production")
-      fail("PRECONDITION_FAILED", "Microsoft 365 provisioning is not configured")
-    const members = await azureDirectory.getMembers()
-    const prior = members.find((m) => Number(m.employeeId) === Number(number))
-    if (prior) {
-      if (prior.givenName !== person.profile.firstName || prior.surname !== person.profile.lastName || !prior.mail)
-        fail("CONFLICT", "Member number already belongs to a different Microsoft 365 account")
-      return { id: prior.id, email: prior.mail }
-    }
-    const localPart = standardLocalPart(person.profile.firstName, person.profile.lastName)
-    if (!localPart) fail("BAD_REQUEST", "This name cannot form a standard Microsoft 365 address")
-    const created = await azureDirectory.createMember({
-      firstName: person.profile.firstName,
-      lastName: person.profile.lastName,
-      assocNumber: Number(number),
-      localPart,
-    })
-    if (person.profile.personalEmail)
-      await sendWelcomeEmail(
-        person.profile.personalEmail,
-        { email: created.mail, password: created.password },
-        { firstName: person.profile.firstName, assocNumber: Number(number) }
-      )
-    return { id: created.id, email: created.mail }
-  },
-  async setMemberNumber(person, number) {
-    if (!person.azureId) fail("PRECONDITION_FAILED", "Microsoft 365 account is missing")
-    if (!azureCredentials && env.NODE_ENV === "production")
-      fail("PRECONDITION_FAILED", "Microsoft 365 is not configured")
-    const result = await azureDirectory.setMemberNumber(person.azureId, Number(number))
-    if (result.error) fail("PRECONDITION_FAILED", result.error)
-  },
+  provisionMember,
+  setMemberNumber,
   sendMail: sendPeopleEmail,
   async inspectSigned(sub, bytes) {
     const { esign } = await import("@/esign")
