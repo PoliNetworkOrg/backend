@@ -1,24 +1,50 @@
+import type { AccessSnapshotClient, Actor } from "@polinetwork/auth-kit"
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
 import { ZodError, z } from "zod/v4"
+import { env } from "./env"
+import type { RequestAuth } from "./idp/auth"
 import { logger } from "./logger"
 
-type Context = {
-  userId?: string
+export type Context = {
+  /** Set by the HTTP adapter. Direct callers (tests, scripts) are anonymous. */
+  auth?: RequestAuth
+  /** Permission source for token callers; null denies every permission. */
+  access?: Pick<AccessSnapshotClient, "has" | "current" | "subjectBySub" | "subjectByTelegramId" | "status"> | null
+  /** RFC v3 §13: whether requests without a token may take the anonymous path. Default "deny". */
+  legacyAnonymous?: "allow" | "deny"
 }
 
-const t = initTRPC.context<Context>().create({
-  transformer: superjson,
-  errorFormatter({ shape, error }) {
-    return {
-      ...shape,
-      data: {
-        ...shape.data,
-        zodError: error.cause instanceof ZodError ? z.treeifyError(error.cause) : null,
-      },
-    }
-  },
-})
+/**
+ * What one actor kind needs to call a procedure (RFC v3 §8): the client's scope (any of the
+ * listed ones), and for people also a permission from the access snapshot.
+ */
+export type PolicyRule = { scope: string | readonly string[]; permission?: string }
+
+/** Actor kinds a procedure accepts. A kind that is not listed is denied. */
+export type Policy = { service?: PolicyRule; telegram?: PolicyRule; user?: PolicyRule }
+
+type Meta = {
+  policy?: Policy
+  /** Procedures with no anonymous behaviour, such as writes that record their actor, refuse anonymous callers. */
+  tokenOnly?: boolean
+}
+
+const t = initTRPC
+  .context<Context>()
+  .meta<Meta>()
+  .create({
+    transformer: superjson,
+    errorFormatter({ shape, error }) {
+      return {
+        ...shape,
+        data: {
+          ...shape.data,
+          zodError: error.cause instanceof ZodError ? z.treeifyError(error.cause) : null,
+        },
+      }
+    },
+  })
 
 export const createTRPCRouter = t.router
 
@@ -31,7 +57,8 @@ export const createTRPCRouter = t.router
 const timingMiddleware = t.middleware(async ({ next, path }) => {
   const start = Date.now()
 
-  if (t._config.isDev) {
+  // tRPC's isDev is true for any NODE_ENV but production, which would also slow down every test call.
+  if (env.NODE_ENV === "development") {
     // artificial delay in dev
     const waitMs = Math.floor(Math.random() * 100) + 100
     await new Promise((resolve) => setTimeout(resolve, waitMs))
@@ -45,27 +72,75 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
   return result
 })
 
-/**
- * Public (unauthenticated) procedure
- *
- * This is the base piece you use to build new queries and mutations on your tRPC API. It does not
- * guarantee that a user querying is authorized, but you can still access user session data if they
- * are logged in.
- */
-export const publicProcedure = t.procedure.use(timingMiddleware)
+/** What handlers see: the enforced actor, or null on the anonymous path. */
+type ActorContext = { actor: Actor | null; can: (permission: string) => boolean }
 
-const enforceUserIsAuthed = t.middleware(async ({ ctx, next }) => {
-  if (!ctx.userId || ctx.userId === "anonymous") {
-    throw new TRPCError({
-      code: "UNAUTHORIZED",
-    })
+const REJECTION_CODES = { 401: "UNAUTHORIZED", 403: "FORBIDDEN", 503: "SERVICE_UNAVAILABLE" } as const
+
+function deny(path: string, actor: Actor, reason: string, permission?: string): never {
+  logger.warn(
+    { procedure: path, actorKind: actor.kind, client: actor.client, permission, reason },
+    "[AUTH] authorization denied"
+  )
+  throw new TRPCError({ code: "FORBIDDEN", message: reason })
+}
+
+/**
+ * Deny-by-default enforcement (RFC v3 §8). A procedure without a policy is refused at runtime,
+ * and a test walks the router so it never ships. Token callers are fully enforced, and the actor
+ * comes only from the token. Anonymous callers reach procedures that are not token-only, with a
+ * null actor and no permissions, only while `LEGACY_ANONYMOUS=allow` (the RFC v3 §13 rollback
+ * switch); every such call is logged.
+ */
+const enforcePolicy = t.middleware(async ({ ctx, meta, path, next }) => {
+  const policy = meta?.policy
+  if (!policy) {
+    logger.error({ procedure: path }, "[AUTH] procedure without a policy")
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Procedure without a policy" })
+  }
+  const auth = ctx.auth ?? { kind: "anonymous" }
+
+  if (auth.kind === "rejected") throw new TRPCError({ code: REJECTION_CODES[auth.status], message: auth.reason })
+
+  if (auth.kind === "anonymous") {
+    if (meta.tokenOnly || (ctx.legacyAnonymous ?? "deny") !== "allow") throw new TRPCError({ code: "UNAUTHORIZED" })
+    logger.info({ procedure: path }, "[AUTH] legacy anonymous call")
+    const legacy: ActorContext = { actor: null, can: () => false }
+    return next({ ctx: legacy })
   }
 
-  return next({
-    ctx: {
-      userId: ctx.userId,
-    },
-  })
+  const { actor, scopes } = auth
+  const rule = policy[actor.kind]
+  if (!rule) deny(path, actor, `Not available to ${actor.kind} callers`)
+  const accepted = typeof rule.scope === "string" ? [rule.scope] : rule.scope
+  if (!accepted.some((scope) => scopes.has(scope))) deny(path, actor, "Missing scope")
+  const can = (permission: string) => ctx.access?.has(actor, permission) ?? false
+  if (rule.permission && !can(rule.permission)) deny(path, actor, "Missing permission", rule.permission)
+
+  const enforced: ActorContext = { actor, can }
+  return next({ ctx: enforced })
 })
 
-export const protectedProcedure = t.procedure.use(enforceUserIsAuthed)
+const baseProcedure = t.procedure.use(timingMiddleware)
+
+const enforced = (rules: Policy, tokenOnly: boolean) =>
+  baseProcedure.meta({ policy: rules, tokenOnly }).use(enforcePolicy)
+
+/** Refuses anonymous callers, so handlers always have the token's actor. */
+const tokenOnlyProcedure = (rules: Policy) =>
+  enforced(rules, true).use(({ ctx, next }) => {
+    // Unreachable: enforcePolicy refuses anonymous calls to token-only procedures.
+    if (!ctx.actor) throw new TRPCError({ code: "UNAUTHORIZED" })
+    return next({ ctx: { actor: ctx.actor } })
+  })
+
+/**
+ * A procedure with its RFC v3 §8 policy. Every procedure must be built from this. `tokenOnly`
+ * refuses anonymous callers even while `LEGACY_ANONYMOUS=allow`, and gives the handler a non-null
+ * actor: use it for every procedure that records who acted.
+ */
+export function policy(rules: Policy, options: { tokenOnly: true }): ReturnType<typeof tokenOnlyProcedure>
+export function policy(rules: Policy, options?: { tokenOnly?: false }): ReturnType<typeof enforced>
+export function policy(rules: Policy, options: { tokenOnly?: boolean } = {}) {
+  return options.tokenOnly ? tokenOnlyProcedure(rules) : enforced(rules, false)
+}

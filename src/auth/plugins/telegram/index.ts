@@ -83,7 +83,7 @@ export const telegramPlugin = () => {
           const res = await DB.select()
             .from(SCHEMA.TG.link)
             .where((t) => eq(t.code, code))
-          if (!res || res.length !== 1)
+          if (res?.length !== 1)
             throw new APIError("NOT_FOUND", {
               message: "No link session with this code found",
             })

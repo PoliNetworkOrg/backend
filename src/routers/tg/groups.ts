@@ -1,33 +1,101 @@
-import { eq, ilike, sql } from "drizzle-orm"
+import { and, eq, exists, ilike, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { describeActor } from "@/idp/actor-info"
+import { botReadOrDashboard, dashboard, SCOPE, seesHiddenGroups } from "@/idp/policies"
+import { logger } from "@/logger"
+import { WSS } from "@/server"
+import { createTRPCRouter, policy } from "@/trpc"
+import { lower } from "@/utils/db"
 
 const GROUPS = SCHEMA.TG.groups
+const LABELS = SCHEMA.COMMON.groupLabels
+const LABEL_RELATIONS = SCHEMA.TG.tgGroupLabelRelations
+
 export default createTRPCRouter({
-  getAll: publicProcedure.query(async () => {
+  // TODO: this is performance HEAVY, make it more safe eventually
+  // At the moment, this query is used by banall flowProducer in the telegram bot.
+  // We may consider moving the flowProducer and ensure connection through the same Redis
+  // instance or some other way of bridging the two parts together.
+  getAll: policy(botReadOrDashboard("admin:access")).query(async () => {
+    const beforeMs = performance.now()
     const results = await DB.select().from(GROUPS)
+    const afterMs = performance.now()
+
+    logger.warn({ queryMs: afterMs - beforeMs }, "Call to trpc.tg.groups.getAll, performance monitoring...")
     return results
   }),
 
-  search: publicProcedure
+  search: policy({ service: { scope: [SCOPE.tgRead, SCOPE.publicRead] }, ...dashboard("admin:access") })
     .input(
       z.object({
-        query: z.string().min(1).max(100),
+        query: z.string().min(1).max(100).optional(),
         limit: z.number().min(1).max(20).default(6),
+        requiredLabels: z.array(z.string()).optional(),
+        excludedLabels: z.array(z.string()).optional(),
+        showHidden: z.boolean().default(false),
       })
     )
-    .query(async ({ input }) => {
-      const { query, limit } = input
+    .query(async ({ input, ctx }) => {
+      // TODO: implement some kind of recommender system to promote groups that are more relevant
+      // raw string search is weird, we should boost more used groups
 
-      const likeQuery = query.split(" ").join("%")
+      const { query, limit, requiredLabels, excludedLabels } = input
+      const conditions: SQL[] = []
+
+      if (requiredLabels && requiredLabels.length > 0) {
+        conditions.push(
+          exists(
+            DB.select()
+              .from(LABEL_RELATIONS)
+              .innerJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
+              .where(
+                and(
+                  eq(LABEL_RELATIONS.groupId, GROUPS.telegramId),
+                  or(...requiredLabels.map((label) => eq(LABELS.label, label)))
+                )
+              )
+          )
+        )
+      }
+
+      if (excludedLabels && excludedLabels.length > 0) {
+        conditions.push(
+          notExists(
+            DB.select()
+              .from(LABEL_RELATIONS)
+              .innerJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
+              .where(
+                and(
+                  eq(LABEL_RELATIONS.groupId, GROUPS.telegramId),
+                  or(...excludedLabels.map((label) => eq(LABELS.label, label)))
+                )
+              )
+          )
+        )
+      }
+
+      if (query && query.length > 0) {
+        const likeQuery = query.split(" ").join("%")
+        const queryWhere = or(ilike(GROUPS.title, `%${likeQuery}%`), ilike(GROUPS.tag, `%${likeQuery}%`))
+        if (queryWhere) conditions.push(queryWhere) // or(...) returns undefined? idk
+      }
+
+      const showHidden = input.showHidden && seesHiddenGroups(ctx.actor)
+      if (showHidden === false) {
+        conditions.push(not(GROUPS.hide))
+      }
+
       const results = await DB.select({
         telegramId: GROUPS.telegramId,
         title: GROUPS.title,
+        tag: GROUPS.tag,
         link: GROUPS.link,
+        hide: GROUPS.hide,
       })
         .from(GROUPS)
-        .where((t) => ilike(t.title, `%${likeQuery}%`))
+        .where(and(...conditions))
+        .orderBy((t) => sql`${t.tag} ASC NULLS LAST`)
         .limit(limit)
 
       return {
@@ -36,37 +104,79 @@ export default createTRPCRouter({
       }
     }),
 
-  getById: publicProcedure
+  getById: policy(botReadOrDashboard("admin:access"))
     .input(
       z.object({
         telegramId: z.number(),
       })
     )
     .query(async ({ input }) => {
-      return await DB.select()
+      const res = await DB.select()
         .from(GROUPS)
         .limit(1)
         .where((t) => eq(t.telegramId, input.telegramId))
+
+      if (res.length === 0) return null
+      return res[0]
     }),
 
-  create: publicProcedure
+  getByInviteLink: policy(botReadOrDashboard("admin:access"))
+    .input(
+      z.object({
+        inviteLink: z.url(),
+      })
+    )
+    .query(async ({ input }) => {
+      const res = await DB.select()
+        .from(GROUPS)
+        .limit(1)
+        .where((t) => eq(t.link, input.inviteLink))
+
+      if (res.length === 0) return null
+      return res[0]
+    }),
+
+  getByTag: policy(botReadOrDashboard("admin:access"))
+    .input(
+      z.object({
+        tag: z.string(),
+      })
+    )
+    .query(async ({ input }) => {
+      const res = await DB.select()
+        .from(GROUPS)
+        .limit(1)
+        .where((t) => eq(lower(t.tag), input.tag.toLowerCase().replace("@", "")))
+
+      if (res.length === 0) return null
+      return res[0]
+    }),
+
+  create: policy({ service: { scope: SCOPE.tgGroupsSync } })
     .input(
       z.array(
         z.object({
           title: z.string(),
           telegramId: z.number(),
+          tag: z.string().optional(),
           link: z.url({ hostname: /^t\.me$/ }),
         })
       )
     )
     .output(z.array(z.number()))
     .mutation(async ({ input }) => {
+      for (const group of input) {
+        await DB.delete(GROUPS).where(and(eq(GROUPS.link, group.link), ne(GROUPS.telegramId, group.telegramId)))
+      }
+
       const rows = await DB.insert(GROUPS)
         .values(input)
         .onConflictDoUpdate({
           target: GROUPS.telegramId,
           set: {
+            // this means: use the new value
             title: sql.raw(`excluded.${GROUPS.title.name}`),
+            tag: sql.raw(`excluded.${GROUPS.tag.name}`),
             link: sql.raw(`excluded.${GROUPS.link.name}`),
           },
         })
@@ -74,7 +184,7 @@ export default createTRPCRouter({
       return rows.map((r) => r.telegramId)
     }),
 
-  delete: publicProcedure
+  delete: policy({ service: { scope: SCOPE.tgGroupsSync } })
     .input(
       z.object({
         telegramId: z.number(),
@@ -84,5 +194,43 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.telegramId)).returning()
       return rows.length === 1
+    }),
+
+  setHide: policy(dashboard("tg:groups:manage"))
+    .input(
+      z.object({
+        telegramId: z.number(),
+        hide: z.boolean(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const rows = await DB.update(GROUPS)
+        .set({ hide: input.hide })
+        .where(eq(GROUPS.telegramId, input.telegramId))
+        .returning()
+
+      return rows.length === 1
+    }),
+
+  /** The performer is the token's user. */
+  leaveChat: policy(dashboard("tg:groups:manage"), { tokenOnly: true })
+    .input(
+      z.object({
+        chatId: z.number(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const performer = await describeActor(ctx.actor)
+      const left = await WSS.leaveChat({
+        chatId: input.chatId,
+        performerId: performer.telegramId ? Number(performer.telegramId) : null,
+        performer,
+      })
+      if (!left) return { error: "BOT_ERROR" }
+
+      const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.chatId)).returning()
+      if (rows.length === 0) return { error: "NOT_FOUND" }
+
+      return { error: null }
     }),
 })

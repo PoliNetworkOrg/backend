@@ -15,3 +15,16 @@ export async function verifyTgLink(link: string): Promise<boolean> {
     root.querySelector(".tgme_page_action")?.querySelector("a")?.classList.contains("tgme_action_button_new") ?? false
   )
 }
+
+export function getImageExtension(file: File) {
+  switch (file.type) {
+    case "image/png":
+      return "png"
+    case "image/jpeg":
+      return "jpeg"
+    case "image/svg+xml":
+      return "svg"
+    default:
+      throw new Error("Unsupported image type")
+  }
+}

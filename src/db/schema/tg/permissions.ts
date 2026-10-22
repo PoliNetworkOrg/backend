@@ -1,15 +1,7 @@
 import { bigint, index, primaryKey, text } from "drizzle-orm/pg-core"
+import { USER_ROLE } from "@/constants"
 import { timeColumns } from "@/db/columns"
 import { createTable } from "../create-table"
-
-export const USER_ROLE = {
-  ADMIN: "admin",
-  HR: "hr",
-  PRESIDENT: "president",
-  DIRETTIVO: "direttivo",
-  CREATOR: "creator",
-  OWNER: "owner",
-} as const
 
 export const ARRAY_USER_ROLE = [
   USER_ROLE.ADMIN,
@@ -18,6 +10,7 @@ export const ARRAY_USER_ROLE = [
   USER_ROLE.DIRETTIVO,
   USER_ROLE.OWNER,
   USER_ROLE.CREATOR,
+  USER_ROLE.WEB,
 ] as const
 export type TUserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE]
 

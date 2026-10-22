@@ -1,0 +1,1 @@
+ALTER TABLE "tg_groups" ADD CONSTRAINT "tg_groups_link_unique" UNIQUE("link");

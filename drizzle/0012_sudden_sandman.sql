@@ -1,0 +1,1 @@
+ALTER TABLE "tg_grants" ALTER COLUMN "user_id" SET NOT NULL;

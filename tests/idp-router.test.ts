@@ -1,0 +1,398 @@
+import type { Actor } from "@polinetwork/auth-kit"
+import type { SQL } from "drizzle-orm"
+import { PgDialect } from "drizzle-orm/pg-core"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import type { Context } from "@/trpc"
+
+const REQUIRED_ENV: Record<string, string> = {
+  NODE_ENV: "test",
+  BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
+  ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  DB_HOST: "localhost",
+  DB_PORT: "5432",
+  DB_USER: "postgres",
+  DB_PASS: "postgres",
+  DB_NAME: "polinetwork_backend_test",
+}
+for (const [key, value] of Object.entries(REQUIRED_ENV)) process.env[key] = value
+
+const db = vi.hoisted(() => ({
+  /** Rows each table returns, by SQL name. */
+  rows: {} as Record<string, unknown[]>,
+  inserted: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  /** The `where` condition of each select, in order. */
+  wheres: [] as unknown[],
+  /** Whether an insert hits the idempotency key. */
+  conflict: false,
+}))
+
+// The real schema, without a connection: importing "@/db" would run migrations.
+vi.mock("@/db", async () => {
+  const [auth, common, tg, wa, web, views] = await Promise.all([
+    import("@/db/schema/auth"),
+    import("@/db/schema/common"),
+    import("@/db/schema/tg"),
+    import("@/db/schema/wa"),
+    import("@/db/schema/web"),
+    import("@/db/schema/views"),
+  ])
+  const { getTableName } = await import("drizzle-orm")
+  // Every builder method chains; awaiting the query returns the rows of the table it reads.
+  const select = () => ({
+    from: (table: Parameters<typeof getTableName>[0]) => {
+      const rows = db.rows[getTableName(table)] ?? []
+      const query: Record<string, unknown> = {
+        // biome-ignore lint/suspicious/noThenProperty: the query builder is awaited like a promise
+        then: (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      }
+      for (const method of ["leftJoin", "innerJoin", "groupBy", "orderBy", "limit"]) query[method] = () => query
+      query.where = (condition: unknown) => {
+        db.wheres.push(condition)
+        return query
+      }
+      return query
+    },
+  })
+  const insert = (table: Parameters<typeof getTableName>[0]) => ({
+    values: (values: Record<string, unknown>) => {
+      db.inserted.push({ table: getTableName(table), values })
+      return {
+        onConflictDoNothing: () => ({ returning: async () => (db.conflict ? [] : [{ id: db.inserted.length }]) }),
+        returning: async () => [values],
+      }
+    },
+  })
+  return {
+    DB: { select, insert },
+    SCHEMA: { AUTH: auth.schema, COMMON: common.schema, TG: tg.schema, WA: wa.schema, WEB: web.schema },
+    VIEWS: { GROUPS: views.views },
+  }
+})
+vi.mock("@/server", () => ({ WSS: {} }))
+
+let appRouter: typeof import("@/routers").appRouter
+
+beforeAll(async () => {
+  ;({ appRouter } = await import("@/routers"))
+})
+
+type ProcedureDef = { _def: { meta?: { policy?: unknown; tokenOnly?: boolean } } }
+
+function procedures(): Array<[string, ProcedureDef]> {
+  return Object.entries(
+    (appRouter as unknown as { _def: { procedures: Record<string, ProcedureDef> } })._def.procedures
+  )
+}
+
+describe("app router", () => {
+  it("gives every procedure a policy", () => {
+    const missing = procedures()
+      .filter(([, procedure]) => !procedure._def.meta?.policy)
+      .map(([path]) => path)
+    expect(procedures().length).toBeGreaterThan(70)
+    expect(missing).toEqual([])
+  })
+
+  it("gives the migrated writes their RFC v3 §8 policies", () => {
+    const policyOf = (path: string) => procedures().find(([name]) => name === path)?.[1]._def.meta
+    expect(policyOf("tg.auditLog.record")).toMatchObject({
+      policy: { service: { scope: "backend:tg:audit" } },
+      tokenOnly: true,
+    })
+    expect(policyOf("tg.users.getCreationHistory")).toMatchObject({
+      policy: { user: { scope: "backend:admin", permission: "tg:users:read" } },
+      tokenOnly: true,
+    })
+    expect(policyOf("tg.grants.create")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "tg:grants:manage" },
+    })
+    expect(policyOf("tg.grants.interrupt")?.policy).toEqual({
+      telegram: { scope: "backend:tg:act-as", permission: "tg:grants:manage" },
+      user: { scope: "backend:admin", permission: "tg:grants:manage" },
+    })
+    expect(policyOf("azure.members.getAll")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "azure:members:read" },
+    })
+    expect(policyOf("azure.members.create")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "azure:members:create" },
+    })
+    expect(policyOf("azure.groups.getAll")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "azure:groups:read" },
+    })
+    for (const path of ["azure.groups.addMember", "azure.groups.removeMember"])
+      expect(policyOf(path)?.policy).toEqual({ user: { scope: "backend:admin", permission: "azure:groups:write" } })
+    expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
+      user: { scope: "backend:admin", permission: "tg:groups:manage" },
+    })
+  })
+
+  it("refuses anonymous callers on every write that records its actor, whatever LEGACY_ANONYMOUS says", () => {
+    const tokenOnly = new Set(
+      procedures()
+        .filter(([, procedure]) => procedure._def.meta?.tokenOnly)
+        .map(([path]) => path)
+    )
+    for (const path of [
+      "tg.grants.create",
+      "tg.grants.interrupt",
+      "tg.groups.leaveChat",
+      "groups.labels.create",
+      "groups.labels.modify",
+      "web.associations.addAssociation",
+      "web.associations.editAssociation",
+      "web.associations.editAssociationLinks",
+      "web.faqs.addFaqs",
+      "web.faqs.addFaqsCategory",
+      "web.faqs.editFaqs",
+      "web.faqs.editFaqsCategory",
+      "web.projects.addProject",
+      "web.projects.editProject",
+      "web.guides_matricole.addGuide",
+    ])
+      expect(tokenOnly).toContain(path)
+  })
+
+  it("no longer has the procedures RFC v3 Phase 5 removes", () => {
+    const paths = procedures().map(([path]) => path)
+    const removed = paths.filter((path) =>
+      /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$|^azure\.members\.setAssocNumber$/.test(
+        path
+      )
+    )
+    expect(removed).toEqual([])
+    expect(paths).toContain("groups.labels.getAll")
+  })
+
+  it("takes a label's author from the token and drops an actor field the caller still sends", async () => {
+    db.inserted = []
+    const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
+    const caller = appRouter.createCaller({
+      auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) },
+      access: {
+        has: () => true,
+        current: () => null,
+        subjectBySub: () => undefined,
+        subjectByTelegramId: () => undefined,
+        status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+      },
+    })
+    // An old client still sending `createdBy`: zod strips the unknown key instead of rejecting it.
+    await caller.groups.labels.create({ label: "students", color: "#3b82f6", createdBy: 99 } as never)
+    expect(db.inserted).toEqual([
+      {
+        table: "common_group_labels",
+        values: {
+          label: "students",
+          description: undefined,
+          color: "#3b82f6",
+          createdBy: null,
+          createdBySub: "usr_admin",
+        },
+      },
+    ])
+  })
+
+  it("refuses anonymous label writes even while LEGACY_ANONYMOUS allows anonymous reads", async () => {
+    const caller = appRouter.createCaller({ legacyAnonymous: "allow" })
+    await expect(caller.groups.labels.create({ label: "students", color: "#3b82f6" })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    })
+  })
+})
+
+describe("groups.search", () => {
+  const website: Actor = { kind: "service", client: "website" }
+  const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
+  const access: NonNullable<Context["access"]> = {
+    has: () => true,
+    current: () => null,
+    subjectBySub: () => undefined,
+    subjectByTelegramId: () => undefined,
+    status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+  }
+  const callers = {
+    website: () =>
+      appRouter.createCaller({ auth: { kind: "token", actor: website, scopes: new Set(["backend:public:read"]) } })
+        .groups.search,
+    dashboard: () =>
+      appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access })
+        .groups.search,
+    anonymous: () => appRouter.createCaller({ legacyAnonymous: "allow" }).groups.search,
+  }
+  /** Whether the last query filtered out hidden groups. */
+  const hidesHidden = () => {
+    const condition = db.wheres.at(-1)
+    return condition !== undefined && /\bnot "\w+"\."hide"/.test(new PgDialect().sqlToQuery(condition as SQL).sql)
+  }
+
+  beforeEach(() => {
+    db.rows = {}
+    db.wheres = []
+  })
+
+  it("opens both reads to the website's token", async () => {
+    await expect(callers.website().getAll()).resolves.toEqual([])
+    await expect(callers.website().search({ query: "poli" })).resolves.toEqual({ groups: [], count: 0 })
+  })
+
+  it("never gives the website hidden groups", async () => {
+    await callers.website().getAll()
+    expect(hidesHidden()).toBe(true)
+    await callers.website().search({ showHidden: true })
+    expect(hidesHidden()).toBe(true)
+  })
+
+  it("still gives hidden groups to the dashboard and to anonymous callers while allowed", async () => {
+    for (const caller of [callers.dashboard(), callers.anonymous()]) {
+      await caller.getAll()
+      expect(hidesHidden()).toBe(false)
+      await caller.search({ showHidden: true })
+      expect(hidesHidden()).toBe(false)
+      await caller.search({})
+      expect(hidesHidden()).toBe(true)
+    }
+  })
+
+  it("refuses service tokens without backend:public:read", async () => {
+    const bot = appRouter.createCaller({
+      auth: { kind: "token", actor: { kind: "service", client: "telegram-bot" }, scopes: new Set(["backend:tg:read"]) },
+    })
+    await expect(bot.groups.search.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+})
+
+describe("tg.access.resolve and me.access", () => {
+  const index = {
+    permissions: (subject: { sub: string }) => (subject.sub === "usr_mod" ? ["tg:moderate"] : []),
+  }
+  const access = (fresh: boolean): NonNullable<Context["access"]> => ({
+    has: () => fresh,
+    current: () => index as never,
+    subjectBySub: (sub) => (fresh && sub === "usr_mod" ? ({ sub, telegramId: "123" } as never) : undefined),
+    subjectByTelegramId: (id) =>
+      fresh && String(id) === "123" ? ({ sub: "usr_mod", telegramId: "123" } as never) : undefined,
+    status: () => ({ lastSyncAt: 1, fresh, generation: 1, subjects: 1 }),
+  })
+  const bot: Actor = { kind: "service", client: "telegram-bot" }
+
+  it("resolves Telegram users to their subject, permissions and active grant", async () => {
+    const validUntil = new Date(Date.now() + 3_600_000)
+    db.rows = { tg_grants: [{ userId: 456, validUntil }], tg_grants_v2: [] }
+    const caller = appRouter.createCaller({
+      auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:read"]) },
+      access: access(true),
+    })
+    expect(await caller.tg.access.resolve({ telegramIds: [123, "456", "123"] })).toEqual({
+      "123": { sub: "usr_mod", permissions: ["tg:moderate"], grant: null },
+      "456": { sub: null, permissions: [], grant: { validUntil } },
+    })
+  })
+
+  it("rejects IDs outside the safe-integer range as bad input", async () => {
+    const caller = appRouter.createCaller({
+      auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:read"]) },
+      access: access(true),
+    })
+    await expect(caller.tg.access.resolve({ telegramIds: ["99999999999999999999"] })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+  })
+
+  it("returns no permissions from a stale snapshot", async () => {
+    db.rows = {}
+    const caller = appRouter.createCaller({
+      auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:read"]) },
+      access: access(false),
+    })
+    expect(await caller.tg.access.resolve({ telegramIds: ["123"] })).toEqual({
+      "123": { sub: null, permissions: [], grant: null },
+    })
+  })
+
+  it("refuses anonymous callers on the new procedures", async () => {
+    const caller = appRouter.createCaller({})
+    await expect(caller.tg.access.resolve({ telegramIds: ["123"] })).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+    await expect(caller.me.access()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+  })
+
+  it("tells a dashboard user their own permissions", async () => {
+    const user: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_mod", telegramId: "123" }
+    const caller = appRouter.createCaller({
+      auth: { kind: "token", actor: user, scopes: new Set(["backend:admin"]) },
+      access: access(true),
+    })
+    expect(await caller.me.access()).toEqual({
+      sub: "usr_mod",
+      telegramId: "123",
+      permissions: ["tg:moderate"],
+      stale: false,
+    })
+  })
+})
+
+describe("tg.auditLog.record", () => {
+  const bot: Actor = { kind: "service", client: "telegram-bot" }
+  const access = (fresh: boolean, moderators: string[]): NonNullable<Context["access"]> => ({
+    has: (actor, permission) =>
+      fresh &&
+      actor.kind !== "service" &&
+      actor.sub !== null &&
+      moderators.includes(actor.sub) &&
+      permission === "tg:moderate",
+    current: () => null,
+    subjectBySub: () => undefined,
+    subjectByTelegramId: (id) => (fresh ? ({ sub: `usr_${id}`, telegramId: String(id) } as never) : undefined),
+    status: () => ({ lastSyncAt: 1, fresh, generation: 1, subjects: 1 }),
+  })
+  const record = (ctxAccess: NonNullable<Context["access"]>, input: Record<string, unknown>) =>
+    appRouter
+      .createCaller({ auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:audit"]) }, access: ctxAccess })
+      .tg.auditLog.record({
+        idempotencyKey: "key-1",
+        type: "ban",
+        targetId: 777,
+        groupId: -100,
+        until: null,
+        basis: "idp_permission",
+        actorTelegramId: 10,
+        ...input,
+      } as never)
+
+  beforeEach(() => {
+    db.inserted = []
+    db.conflict = false
+    db.rows = {}
+  })
+
+  it("stores the actor's subject and the executing client", async () => {
+    expect(await record(access(true, ["usr_10"]), {})).toEqual({ id: 1, duplicate: false })
+    expect(db.inserted[0]).toMatchObject({
+      table: "tg_audit_log",
+      values: { actorTgId: 10, actorSub: "usr_10", client: "telegram-bot", basis: "idp_permission", review: null },
+    })
+  })
+
+  it("stores an action the snapshot does not back, flagged for review", async () => {
+    await record(access(true, []), {})
+    expect(db.inserted[0]?.values.review).toBe("permission_missing")
+    await record(access(false, ["usr_10"]), { idempotencyKey: "key-2" })
+    expect(db.inserted[1]?.values.review).toBe("unverified")
+  })
+
+  it("does not check the chat-admin shortcut or automatic actions against the IdP", async () => {
+    await record(access(true, []), { basis: "telegram_chat_admin" })
+    await record(access(true, []), { basis: "automatic", actorTelegramId: null, idempotencyKey: "key-2" })
+    expect(db.inserted.map((entry) => entry.values.review)).toEqual([null, null])
+  })
+
+  it("returns the first record for a repeated idempotency key", async () => {
+    db.conflict = true
+    db.rows = { tg_audit_log: [{ id: 41 }] }
+    expect(await record(access(true, ["usr_10"]), {})).toEqual({ id: 41, duplicate: true })
+  })
+
+  it("needs an actor unless the action was automatic or made in Telegram's UI", async () => {
+    await expect(record(access(true, []), { actorTelegramId: null })).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+})

@@ -1,11 +1,12 @@
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
+import { botReadOrDashboard, SCOPE } from "@/idp/policies"
 import { logger } from "@/logger"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 import { Cipher, DecryptError } from "@/utils/cipher"
 
-const cipher = new Cipher("tg.messages")
+export const tgMessagesCipher = new Cipher("tg.messages")
 
 const s = SCHEMA.TG
 const message = z.object({
@@ -14,6 +15,12 @@ const message = z.object({
   authorId: z.number(),
   message: z.string(),
   timestamp: z.date(),
+  group: z
+    .object({
+      title: z.string(),
+      inviteLink: z.string().nullable(),
+    })
+    .optional(),
 })
 type Message = z.infer<typeof message>
 
@@ -30,7 +37,7 @@ function padChatId(chatId: number): number {
 }
 
 export default createTRPCRouter({
-  get: publicProcedure
+  get: policy(botReadOrDashboard("tg:messages:read"))
     .input(z.object({ chatId: z.number(), messageId: z.number() }))
     .output(
       z.union([
@@ -50,7 +57,7 @@ export default createTRPCRouter({
       if (!res) return { message: null, error: "NOT_FOUND" }
 
       try {
-        const encryptedMessage = await cipher.decrypt(res.message)
+        const encryptedMessage = tgMessagesCipher.decrypt(res.message)
         const message: Message = {
           message: encryptedMessage,
           timestamp: res.timestamp,
@@ -70,14 +77,14 @@ export default createTRPCRouter({
       }
     }),
 
-  add: publicProcedure
+  add: policy({ service: { scope: SCOPE.tgIngest } })
     .input(z.object({ messages: z.array(message) }))
     .output(z.object({ error: z.union([z.null(), z.enum(["ENCRYPT_ERROR"])]) }))
     .mutation(async ({ input }) => {
       try {
         const messages = input.messages.map(async (m) => ({
           ...m,
-          message: await cipher.encrypt(m.message),
+          message: tgMessagesCipher.encrypt(m.message),
         }))
         const awaitedMessages = await Promise.all(messages)
         await DB.insert(s.messages).values(awaitedMessages).onConflictDoNothing()
@@ -88,6 +95,63 @@ export default createTRPCRouter({
           `error while encrypting ${input.messages.length > 1 ? "some telegram messages" : "a telegam message"}`
         )
         return { error: "ENCRYPT_ERROR" }
+      }
+    }),
+
+  getLastByUser: policy(botReadOrDashboard("tg:messages:read"))
+    .input(
+      z.object({ userId: z.number(), limit: z.number().min(1).max(100).default(12), chatId: z.number().optional() })
+    )
+    .output(
+      z.union([
+        z.object({ messages: z.array(message), error: z.null() }),
+        z.object({
+          messages: z.null().optional(),
+          error: z.enum(["NOT_FOUND", "DECRYPT_ERROR", "INTERNAL_SERVER_ERROR"]),
+        }),
+      ])
+    )
+    .query(async ({ input }) => {
+      const res = await DB.select()
+        .from(s.messages)
+        .where(
+          input.chatId
+            ? and(eq(s.messages.authorId, input.userId), eq(s.messages.chatId, input.chatId))
+            : eq(s.messages.authorId, input.userId)
+        )
+        .leftJoin(SCHEMA.TG.groups, eq(s.messages.chatId, SCHEMA.TG.groups.telegramId))
+        .orderBy(desc(s.messages.timestamp))
+        .limit(input.limit)
+
+      if (!res) return { messages: null, error: "NOT_FOUND" }
+
+      try {
+        const messages = res.map(({ messages: e, groups: group }) => {
+          const decryptedMessage = tgMessagesCipher.decrypt(e.message)
+          const message: Message = {
+            message: decryptedMessage,
+            timestamp: e.timestamp,
+            authorId: e.authorId,
+            chatId: e.chatId,
+            messageId: e.messageId,
+            group: group
+              ? {
+                  title: group.title,
+                  inviteLink: group.link,
+                }
+              : undefined,
+          }
+          return message
+        })
+
+        return { messages, error: null }
+      } catch (error) {
+        if (error instanceof DecryptError) {
+          logger.error(error, "error while decrypting a telegram message")
+          return { message: null, error: "DECRYPT_ERROR" }
+        }
+
+        return { error: "INTERNAL_SERVER_ERROR" }
       }
     }),
 })

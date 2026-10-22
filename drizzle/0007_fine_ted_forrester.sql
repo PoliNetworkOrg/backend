@@ -1,0 +1,1 @@
+ALTER TABLE "tg_groups" ADD COLUMN "tag" varchar;

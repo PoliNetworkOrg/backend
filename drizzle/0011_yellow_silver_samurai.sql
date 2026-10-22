@@ -1,0 +1,1 @@
+ALTER TABLE "tg_groups" ALTER COLUMN "hide" SET NOT NULL;

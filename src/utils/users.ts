@@ -2,7 +2,7 @@ import z from "zod"
 import type { SCHEMA } from "@/db"
 import { Cipher } from "./cipher"
 
-const userCipher = new Cipher("tg.users")
+export const userCipher = new Cipher("tg.users")
 
 export const TgUserSchema = z.object({
   id: z.number(),
@@ -34,7 +34,7 @@ export async function encryptUser(tgUser: z.infer<typeof TgUserSchema>): Promise
   const [firstName, lastName, username] = await Promise.all([
     userCipher.encrypt(tgUser.firstName),
     tgUser.lastName ? userCipher.encrypt(tgUser.lastName) : undefined,
-    tgUser.username ? userCipher.encrypt(tgUser.username) : undefined,
+    tgUser.username ? userCipher.encrypt(tgUser.username.toLowerCase().replace("@", "")) : undefined,
   ])
 
   return {

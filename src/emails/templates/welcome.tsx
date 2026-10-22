@@ -57,7 +57,7 @@ const WelcomeEmail: EmailTemplate<Props> = (props) => {
 
               <Section className="p-4 bg-blue-100 rounded-md">
                 <Row>
-                  <EmailWithoutHref email={props.email} />
+                  <CodeInline className="text-xs sm:text-sm">{props.email}</CodeInline>
                 </Row>
                 <Row>
                   <CodeInline className="text-xs sm:text-sm">{props.password}</CodeInline>
@@ -81,7 +81,9 @@ const WelcomeEmail: EmailTemplate<Props> = (props) => {
                 </Link>
               </Text>
 
-              <Text className="my-2 text-sm leading-normal text-gray-700">~ Lorenzo Corallo</Text>
+              <Text className="my-2 text-sm leading-normal text-gray-700">
+                ~ Lorenzo Corallo, Gestione Progetti Innovativi e Supporto Tecnico (IT)
+              </Text>
             </Section>
           </Container>
 
@@ -89,20 +91,6 @@ const WelcomeEmail: EmailTemplate<Props> = (props) => {
         </Body>
       </Tailwind>
     </Html>
-  )
-}
-
-const EmailWithoutHref = ({ email }: { email: string }) => {
-  const [user, domain] = email.split("@")
-  const [domainName, ...domainTldParts] = domain?.split(".") ?? []
-  const domainTld = domainTldParts.join(".")
-  if (!domainName || !domainTld) return <CodeInline className="break-all text-xs sm:text-sm">{email}</CodeInline> // fallback if something goes wrong
-  return (
-    <CodeInline className="break-all text-xs sm:text-sm">
-      {user}
-      {"\u200C"}@{domainName}
-      {"\u200C"}.{domainTld}
-    </CodeInline>
   )
 }
 

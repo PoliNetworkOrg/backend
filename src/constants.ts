@@ -12,3 +12,13 @@ export const TRUSTED_ORIGINS = [
 ]
 
 export const MESSAGES_RETENTION_DAYS = 7
+
+export const USER_ROLE = {
+  ADMIN: "admin",
+  HR: "hr",
+  PRESIDENT: "president",
+  DIRETTIVO: "direttivo",
+  CREATOR: "creator",
+  OWNER: "owner",
+  WEB: "web",
+} as const
