@@ -125,6 +125,14 @@ describe("app router", () => {
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })
+    expect(policyOf("web.projects.getProject")?.policy).toEqual(policyOf("web.projects.getAllProjects")?.policy)
+    for (const path of [
+      "web.projects.addProjectResource",
+      "web.projects.editProjectResource",
+      "web.projects.reorderProjectResources",
+      "web.projects.deleteProjectResource",
+    ])
+      expect(policyOf(path)?.policy).toEqual(policyOf("web.projects.editProject")?.policy)
   })
 
   it("refuses anonymous callers on every write that records its actor, whatever LEGACY_ANONYMOUS says", () => {
@@ -148,6 +156,8 @@ describe("app router", () => {
       "web.faqs.editFaqsCategory",
       "web.projects.addProject",
       "web.projects.editProject",
+      "web.projects.addProjectResource",
+      "web.projects.editProjectResource",
       "web.guides_matricole.addGuide",
     ])
       expect(tokenOnly).toContain(path)
