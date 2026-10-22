@@ -433,6 +433,24 @@ it("retains deselected census groups as pending HR work until Telegram confirms 
     })
   )
   expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(1)
+  await h.store.transaction(async ({ state }) => {
+    state.persons["P-0003"].discrepancies.push({
+      kind: "needs-review",
+      message: "HR-only identity review",
+      suggestedTelegram: null,
+    })
+  })
+  const ownArea = await h.service.getMyArea(viewer("member", ["people:self"], "103"))
+  expect(ownArea).toMatchObject({
+    state: "linked",
+    person: {
+      discrepancies: [
+        expect.objectContaining({
+          message: expect.stringContaining("Telegram admin removal pending:"),
+        }),
+      ],
+    },
+  })
   groups[0].admins = []
   person = await h.service.getPerson(master, { id: "P-0003" })
   expect(person.admin?.groups).toHaveLength(0)
@@ -440,4 +458,8 @@ it("retains deselected census groups as pending HR work until Telegram confirms 
     expect.objectContaining({ message: expect.stringContaining("Telegram admin removal pending:") })
   )
   expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(0)
+  expect(await h.service.getMyArea(viewer("member", ["people:self"], "103"))).toMatchObject({
+    state: "linked",
+    person: { discrepancies: [] },
+  })
 })

@@ -103,7 +103,11 @@ export function record(s: PeopleState, p: Person, v: Viewer, config: PeopleConfi
   return C.personRecordSchema.parse({
     ...row(s, p, v, config, date),
     notes: read ? p.notes : null,
-    discrepancies: read ? p.discrepancies : [],
+    discrepancies: read
+      ? p.discrepancies
+      : self
+        ? p.discrepancies.filter((d) => p.pendingGroupRemovals?.some((pending) => pending.message === d.message))
+        : [],
     activity: read
       ? p.activity
       : self
