@@ -1,8 +1,9 @@
 import { and, desc, eq } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
+import { botReadOrDashboard, SCOPE } from "@/idp/policies"
 import { logger } from "@/logger"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 import { Cipher, DecryptError } from "@/utils/cipher"
 
 export const tgMessagesCipher = new Cipher("tg.messages")
@@ -36,7 +37,7 @@ function padChatId(chatId: number): number {
 }
 
 export default createTRPCRouter({
-  get: publicProcedure
+  get: policy(botReadOrDashboard("tg:messages:read"))
     .input(z.object({ chatId: z.number(), messageId: z.number() }))
     .output(
       z.union([
@@ -76,7 +77,7 @@ export default createTRPCRouter({
       }
     }),
 
-  add: publicProcedure
+  add: policy({ service: { scope: SCOPE.tgIngest } })
     .input(z.object({ messages: z.array(message) }))
     .output(z.object({ error: z.union([z.null(), z.enum(["ENCRYPT_ERROR"])]) }))
     .mutation(async ({ input }) => {
@@ -97,7 +98,7 @@ export default createTRPCRouter({
       }
     }),
 
-  getLastByUser: publicProcedure
+  getLastByUser: policy(botReadOrDashboard("tg:messages:read"))
     .input(
       z.object({ userId: z.number(), limit: z.number().min(1).max(100).default(12), chatId: z.number().optional() })
     )

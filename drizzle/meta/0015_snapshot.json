@@ -1,6 +1,6 @@
 {
-  "id": "df326f48-6efe-4f60-bd16-b3211b457a6f",
-  "prevId": "89bf3898-1916-4fec-986f-938f3fc9e1a2",
+  "id": "05f26ac1-37d9-4140-a0a4-dd430d289abe",
+  "prevId": "56e8765c-3576-4aba-b8b9-958d2faf16ca",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -488,6 +488,115 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.common_group_labels": {
+      "name": "common_group_labels",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "common_group_labels_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "label": {
+          "name": "label",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "color": {
+          "name": "color",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'#ffffff'"
+        },
+        "granted_by_id": {
+          "name": "granted_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modified_by_id": {
+          "name": "modified_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "common_group_labels_granted_by_id_tg_permissions_user_id_fk": {
+          "name": "common_group_labels_granted_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "common_group_labels",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "granted_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "common_group_labels_modified_by_id_tg_permissions_user_id_fk": {
+          "name": "common_group_labels_modified_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "common_group_labels",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "modified_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "common_group_labels_label_unique": {
+          "name": "common_group_labels_label_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "label"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.tg_audit_log": {
       "name": "tg_audit_log",
       "schema": "",
@@ -766,6 +875,79 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tg_group_label_relations": {
+      "name": "tg_group_label_relations",
+      "schema": "",
+      "columns": {
+        "group_id": {
+          "name": "group_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label_id": {
+          "name": "label_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tg_group_label_relations_group_id_tg_groups_telegram_id_fk": {
+          "name": "tg_group_label_relations_group_id_tg_groups_telegram_id_fk",
+          "tableFrom": "tg_group_label_relations",
+          "tableTo": "tg_groups",
+          "columnsFrom": [
+            "group_id"
+          ],
+          "columnsTo": [
+            "telegram_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tg_group_label_relations_label_id_common_group_labels_id_fk": {
+          "name": "tg_group_label_relations_label_id_common_group_labels_id_fk",
+          "tableFrom": "tg_group_label_relations",
+          "tableTo": "common_group_labels",
+          "columnsFrom": [
+            "label_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "tg_group_label_relations_group_id_label_id_pk": {
+          "name": "tg_group_label_relations_group_id_label_id_pk",
+          "columns": [
+            "group_id",
+            "label_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1123,60 +1305,24 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.tg_warnings": {
-      "name": "tg_warnings",
+    "public.wa_group_label_relations": {
+      "name": "wa_group_label_relations",
       "schema": "",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "tg_warnings_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "admin_id": {
-          "name": "admin_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
         "group_id": {
           "name": "group_id",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true
         },
-        "reason": {
-          "name": "reason",
-          "type": "varchar(256)",
+        "label_id": {
+          "name": "label_id",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "is_expired": {
-          "name": "is_expired",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "deleted_at": {
-          "name": "deleted_at",
+        "updated_at": {
+          "name": "updated_at",
           "type": "timestamp (0) with time zone",
           "primaryKey": false,
           "notNull": false
@@ -1189,26 +1335,115 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "warnings_target_idx": {
-          "name": "warnings_target_idx",
-          "columns": [
-            {
-              "expression": "target_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+      "indexes": {},
+      "foreignKeys": {
+        "wa_group_label_relations_group_id_wa_groups_group_id_fk": {
+          "name": "wa_group_label_relations_group_id_wa_groups_group_id_fk",
+          "tableFrom": "wa_group_label_relations",
+          "tableTo": "wa_groups",
+          "columnsFrom": [
+            "group_id"
           ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "columnsTo": [
+            "group_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "wa_group_label_relations_label_id_common_group_labels_id_fk": {
+          "name": "wa_group_label_relations_label_id_common_group_labels_id_fk",
+          "tableFrom": "wa_group_label_relations",
+          "tableTo": "common_group_labels",
+          "columnsFrom": [
+            "label_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {
+        "wa_group_label_relations_group_id_label_id_pk": {
+          "name": "wa_group_label_relations_group_id_label_id_pk",
+          "columns": [
+            "group_id",
+            "label_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.wa_groups": {
+      "name": "wa_groups",
+      "schema": "",
+      "columns": {
+        "group_id": {
+          "name": "group_id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "wa_groups_group_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "link": {
+          "name": "link",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hide": {
+          "name": "hide",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "wa_groups_link_unique": {
+          "name": "wa_groups_link_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "link"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1604,6 +1839,114 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.web_guides_matricole": {
+      "name": "web_guides_matricole",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "web_guides_matricole_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "version": {
+          "name": "version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file": {
+          "name": "file",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_id": {
+          "name": "created_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modified_by_id": {
+          "name": "modified_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "web_guides_matricole_created_by_id_tg_permissions_user_id_fk": {
+          "name": "web_guides_matricole_created_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_guides_matricole",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "created_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "web_guides_matricole_modified_by_id_tg_permissions_user_id_fk": {
+          "name": "web_guides_matricole_modified_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_guides_matricole",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "modified_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "web_guides_matricole_version_unique": {
+          "name": "web_guides_matricole_version_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "version"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.web_projects": {
       "name": "web_projects",
       "schema": "",
@@ -1772,7 +2115,63 @@
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
+  "views": {
+    "public.groups_view": {
+      "columns": {
+        "telegram_id": {
+          "name": "telegram_id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "link": {
+          "name": "link",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hide": {
+          "name": "hide",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "definition": "(select \"telegram_id\", \"title\", \"link\", \"hide\", 'tg' as \"type\" from \"tg_groups\") union all (select \"group_id\", \"title\", \"link\", \"hide\", 'wa' as \"type\" from \"wa_groups\")",
+      "name": "groups_view",
+      "schema": "public",
+      "isExisting": false,
+      "materialized": false
+    },
+    "public.group_label_relations_view": {
+      "columns": {
+        "group_id": {
+          "name": "group_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label_id": {
+          "name": "label_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "definition": "(select \"group_id\", \"label_id\", 'tg' as \"type\" from \"tg_group_label_relations\") union all (select \"group_id\", \"label_id\", 'wa' as \"type\" from \"wa_group_label_relations\")",
+      "name": "group_label_relations_view",
+      "schema": "public",
+      "isExisting": false,
+      "materialized": false
+    }
+  },
   "_meta": {
     "columns": {},
     "schemas": {},

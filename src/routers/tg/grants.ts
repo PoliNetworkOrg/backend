@@ -1,26 +1,41 @@
-import { and, eq, gt, gte, isNull, lte } from "drizzle-orm"
+import { TRPCError } from "@trpc/server"
+import { and, eq, gt, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
-import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
-import type { TUserRole } from "@/db/schema/tg/permissions"
+import { describeActor } from "@/idp/actor-info"
+import { ACT_AS_SCOPE } from "@/idp/auth"
+import { botReadOrDashboard, dashboard } from "@/idp/policies"
 import { logger } from "@/logger"
 import { WSS } from "@/server"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
+import { activeGrantByUser, type Grant, listGrants } from "@/utils/grants"
 import { decryptUser } from "@/utils/users"
 
 const s = SCHEMA.TG
 
-const CAN_MANAGE_GRANTS: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER, USER_ROLE.DIRETTIVO] as const
+async function withUsers(grants: Grant[]) {
+  const ids = [...new Set(grants.map((grant) => grant.userId))]
+  const users = ids.length ? await DB.select().from(s.users).where(inArray(s.users.userId, ids)) : []
+  const byId = new Map(users.map((user) => [user.userId, user]))
+  return Promise.all(
+    grants.map(async (grant) => {
+      const user = byId.get(grant.userId)
+      return { grant, user: user ? await decryptUser(user).catch(() => null) : null }
+    })
+  )
+}
 
 export default createTRPCRouter({
-  checkUser: publicProcedure
+  checkUser: policy(botReadOrDashboard("tg:grants:read"))
     .input(z.object({ userId: z.number() }))
     .output(
       z.object({
         isGranted: z.boolean(),
         grant: z.nullable(
           z.object({
-            grantedBy: z.number(),
+            /** Telegram ID of a legacy grantor; null for grants made through the IdP. */
+            grantedBy: z.number().nullable(),
+            grantedBySub: z.string().nullable(),
             validSince: z.date(),
             validUntil: z.date(),
           })
@@ -28,36 +43,21 @@ export default createTRPCRouter({
       })
     )
     .query(async ({ input }) => {
-      const now = new Date()
-      const res = await DB.select({
-        grantedBy: s.grants.grantedBy,
-        validSince: s.grants.validSince,
-        validUntil: s.grants.validUntil,
-      })
-        .from(s.grants)
-        .where(
-          and(
-            eq(s.grants.userId, input.userId),
-            lte(s.grants.validSince, now),
-            gte(s.grants.validUntil, now),
-            isNull(s.grants.interruptedBy)
-          )
-        )
-        .limit(1)
+      const grant = (await activeGrantByUser([input.userId])).get(input.userId)
+      if (!grant) return { isGranted: false, grant: null }
 
-      if (res.length === 0) return { isGranted: false, grant: null }
-
-      return {
-        isGranted: true,
-        grant: res[0],
-      }
+      const { grantedBy, grantedBySub, validSince, validUntil } = grant
+      return { isGranted: true, grant: { grantedBy, grantedBySub, validSince, validUntil } }
     }),
 
-  create: publicProcedure
+  /**
+   * Escalating write: dashboard users only, never the bot acting for someone (RFC v3 §8.1). The
+   * grantor is the token's user.
+   */
+  create: policy(dashboard("tg:grants:manage"), { tokenOnly: true })
     .input(
       z.object({
         userId: z.number(),
-        adderId: z.number(),
         since: z.date(),
         until: z.date(),
         reason: z.string().optional(),
@@ -72,53 +72,39 @@ export default createTRPCRouter({
         }),
         z.object({
           success: z.literal(false),
-          error: z.enum(["ALREADY_EXISTING", "UNAUTHORIZED", "INTERNAL_SERVER_ERROR"]),
+          error: z.enum(["ALREADY_EXISTING", "UNAUTHORIZED", "INVALID_PERIOD", "INTERNAL_SERVER_ERROR"]),
         }),
       ])
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const { actor } = ctx
+      if (actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
+
       try {
-        // get current permissions of adder and target
-        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.adderId)).limit(1)
+        if (input.since >= input.until) return { success: false, error: "INVALID_PERIOD" }
 
-        // check if adder is not in permission table or doesn't have permissions
-        if (!q || q.length !== 1 || q[0].roles.every((a) => !CAN_MANAGE_GRANTS.includes(a)))
-          return { success: false, error: "UNAUTHORIZED" }
+        if ((await activeGrantByUser([input.userId])).has(input.userId))
+          return { success: false, error: "ALREADY_EXISTING" }
 
-        const now = new Date()
-        const existing = await DB.select({
-          grantedBy: s.grants.grantedBy,
-          validSince: s.grants.validSince,
-          validUntil: s.grants.validUntil,
-        })
-          .from(s.grants)
-          .where(
-            and(
-              eq(s.grants.userId, input.userId),
-              lte(s.grants.validSince, now),
-              gte(s.grants.validUntil, now),
-              isNull(s.grants.interruptedBy)
-            )
-          )
-          .limit(1)
-
-        if (existing?.length === 1)
-          return {
-            success: false,
-            error: "ALREADY_EXISTING",
-          }
-
-        // then we upsert the DB entry with the updated roles array
-        await DB.insert(s.grants).values({
-          userId: input.userId,
-          grantedBy: input.adderId,
-          validUntil: input.until,
+        await DB.insert(s.grantsV2).values({
+          telegramUserId: input.userId,
           validSince: input.since,
+          validUntil: input.until,
           reason: input.reason,
+          grantedBySub: actor.sub,
+          grantedViaClient: actor.client,
         })
 
         if (input.sendTgLog) {
-          await WSS.logGrantCreate(input.userId, input.adderId, input.since, input.until, input.reason)
+          const author = await describeActor(actor)
+          await WSS.logGrantCreate({
+            userId: input.userId,
+            adminId: author.telegramId ? Number(author.telegramId) : null,
+            actor: author,
+            validSince: input.since,
+            validUntil: input.until,
+            reason: input.reason,
+          })
         }
 
         return { success: true, error: null }
@@ -128,11 +114,20 @@ export default createTRPCRouter({
       }
     }),
 
-  interrupt: publicProcedure
+  /**
+   * De-escalating write: the bot's 🛑 button acting for a Telegram user, or the dashboard. Who
+   * interrupted is the token's actor.
+   */
+  interrupt: policy(
+    {
+      telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
+      ...dashboard("tg:grants:manage"),
+    },
+    { tokenOnly: true }
+  )
     .input(
       z.object({
         userId: z.number(),
-        interruptedById: z.number(),
         sendTgLog: z.boolean().default(false),
       })
     )
@@ -148,67 +143,72 @@ export default createTRPCRouter({
         }),
       ])
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const { actor } = ctx
+      if (actor.kind === "service") throw new TRPCError({ code: "FORBIDDEN" })
+
       try {
-        // get current permissions of adder
-        const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, input.interruptedById)).limit(1)
-
-        // check if adder is not in permission table or doesn't have permissions
-        if (!q || q.length !== 1 || q[0].roles.every((a) => !CAN_MANAGE_GRANTS.includes(a)))
-          return { success: false, error: "UNAUTHORIZED" }
-
         const now = new Date()
-        const affected = await DB.update(s.grants)
-          .set({ interruptedBy: input.interruptedById })
-          .where(and(eq(s.grants.userId, input.userId), gte(s.grants.validUntil, now), isNull(s.grants.interruptedBy)))
-          .returning({ id: s.grants.id })
+        // Ends every unexpired grant of the user, in both tables.
+        const [legacy, current] = await DB.transaction(async (tx) =>
+          Promise.all([
+            tx
+              .update(s.grants)
+              .set({ interruptedAt: now })
+              .where(
+                and(
+                  eq(s.grants.userId, input.userId),
+                  gt(s.grants.validUntil, now),
+                  isNull(s.grants.interruptedBy),
+                  isNull(s.grants.interruptedAt)
+                )
+              )
+              .returning({ id: s.grants.id }),
+            tx
+              .update(s.grantsV2)
+              .set({
+                interruptedAt: now,
+                interruptedBySub: actor.sub,
+                interruptedByTgId: actor.telegramId === null ? null : Number(actor.telegramId),
+              })
+              .where(
+                and(
+                  eq(s.grantsV2.telegramUserId, input.userId),
+                  gt(s.grantsV2.validUntil, now),
+                  isNull(s.grantsV2.interruptedAt)
+                )
+              )
+              .returning({ id: s.grantsV2.id }),
+          ])
+        )
 
-        if (affected?.length === 0)
+        if (legacy.length + current.length === 0)
           return {
             success: false,
             error: "NOT_FOUND",
           }
 
         if (input.sendTgLog) {
-          await WSS.logGrantInterrupt(input.userId, input.interruptedById)
+          const author = await describeActor(actor)
+          await WSS.logGrantInterrupt({
+            userId: input.userId,
+            adminId: author.telegramId ? Number(author.telegramId) : null,
+            actor: author,
+          })
         }
 
         return { success: true, error: null }
       } catch (error) {
-        logger.error({ error }, "Error while executing create in tg.grants router")
+        logger.error({ error }, "Error while executing interrupt in tg.grants router")
         return { success: false, error: "INTERNAL_SERVER_ERROR" }
       }
     }),
 
-  getOngoing: publicProcedure.query(async () => {
-    const now = new Date()
-    const res = await DB.select()
-      .from(s.grants)
-      .where(and(lte(s.grants.validSince, now), gte(s.grants.validUntil, now), isNull(s.grants.interruptedBy)))
-      .leftJoin(s.users, eq(s.grants.userId, s.users.userId))
-
-    const grants = await Promise.all(
-      res.map(async (r) => ({ grant: r.grants, user: r.users ? await decryptUser(r.users).catch(() => null) : null }))
-    )
-
-    return {
-      grants,
-    }
+  getOngoing: policy(dashboard("tg:grants:read")).query(async () => {
+    return { grants: await withUsers(await listGrants("active")) }
   }),
 
-  getScheduled: publicProcedure.query(async () => {
-    const now = new Date()
-    const res = await DB.select()
-      .from(s.grants)
-      .where(and(gt(s.grants.validSince, now), isNull(s.grants.interruptedBy)))
-      .leftJoin(s.users, eq(s.grants.userId, s.users.userId))
-
-    const grants = await Promise.all(
-      res.map(async (r) => ({ grant: r.grants, user: r.users ? await decryptUser(r.users).catch(() => null) : null }))
-    )
-
-    return {
-      grants,
-    }
+  getScheduled: policy(dashboard("tg:grants:read")).query(async () => {
+    return { grants: await withUsers(await listGrants("scheduled")) }
   }),
 })

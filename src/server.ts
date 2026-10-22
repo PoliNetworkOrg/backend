@@ -1,27 +1,32 @@
 import { trpcServer } from "@hono/trpc-server"
-import { zValidator } from "@hono/zod-validator"
+import { ACTOR_HEADER } from "@polinetwork/auth-kit"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { logger as loggerMiddlware } from "hono/logger"
-import z from "zod"
 import { auth } from "./auth"
 import "./azure/blob"
-import { azureDirectory } from "./azure/directory"
 import { AUTH_PATH, TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
-import { sendWelcomeEmail } from "./emails/mailer"
 import { env } from "./env"
+import { esign } from "./esign"
+import { agentRoutes } from "./esign/agent-routes"
+import { authenticateRequest, idp, startIdp, stopIdp } from "./idp"
+import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
+import { redis } from "./redis"
 import { appRouter } from "./routers"
+import { limitRequestBody, withRequestBodyLimit } from "./serve-options"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
 
-export const WSS = new WebSocketServer()
+export const WSS = new WebSocketServer({
+  authenticate: (token) => authenticateSocket(token, idp?.verify ?? null, env.OAUTH_BOT_CLIENT_ID),
+})
 const app = new Hono()
 
 const server = Bun.serve({
   port: env.PORT,
-  ...wssEngine.handler(),
+  ...withRequestBodyLimit(wssEngine.handler()),
   fetch: app.fetch,
 })
 
@@ -37,7 +42,14 @@ app.use(
   trpcServer({
     router: appRouter,
     endpoint: TRPC_PATH,
-    createContext: (_opts, c) => ({ userId: c.req.header("userId") }),
+    createContext: async (_opts, c) => ({
+      auth: await authenticateRequest({
+        authorization: c.req.header("authorization"),
+        actor: c.req.header(ACTOR_HEADER),
+      }),
+      access: idp?.snapshot ?? null,
+      legacyAnonymous: env.LEGACY_ANONYMOUS,
+    }),
   })
 )
 
@@ -57,60 +69,14 @@ app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
 
-app.post(
-  "/test/welcome-email",
-  zValidator(
-    "json",
-    z.object({ toAddress: z.email(), firstName: z.string(), lastName: z.string(), assocNumber: z.number() })
-  ),
-  async (c) => {
-    if (env.NODE_ENV === "production") return c.status(500)
+app.route("/esign/agent", agentRoutes(esign))
 
-    const { toAddress, firstName, lastName, assocNumber } = c.req.valid("json")
-    const sent = await sendWelcomeEmail(
-      toAddress,
-      {
-        // temporary, just for test
-        email: `${firstName.split(" ").join("").toLowerCase()}.${lastName.split(" ").join("").toLowerCase()}@polinetwork.org`,
-        password: "R@123123123123as",
-      },
-      { firstName, assocNumber }
-    )
-    return c.json({ sent })
-  }
-)
+// Access-changed events from the IdP (RFC v3 §5.6). Authenticated by the event's own signature.
+app.post("/internal/events", (c) => (idp?.events ? idp.events(c.req.raw) : c.body(null, 404)))
 
-app.get("/test/members", async (c) => {
-  if (env.NODE_ENV === "production") return c.status(500)
-
-  const users = await azureDirectory.getMembers()
-  return c.json({ users })
-})
-
-app.get("/test/azure-groups", async (c) => {
-  if (env.NODE_ENV === "production") return c.status(500)
-
-  const groups = await azureDirectory.getAllGroups()
-  return c.json({ groups })
-})
-
-app.post(
-  "/test/azure-group-member",
-  zValidator("json", z.object({ groupId: z.string(), userId: z.string(), mode: z.enum(["add", "remove"]) })),
-  async (c) => {
-    if (env.NODE_ENV === "production") return c.status(500)
-    const { userId, groupId, mode } = c.req.valid("json")
-
-    const ok =
-      mode === "add"
-        ? await azureDirectory.addGroupMember(groupId, userId)
-        : await azureDirectory.removeGroupMember(groupId, userId)
-    return c.json({ ok })
-  }
-)
-
-app.all(`${WS_PATH}/`, (c) => {
-  return wssEngine.handleRequest(c.req.raw, server)
+app.all(`${WS_PATH}/`, async (c) => {
+  const req = await limitRequestBody(c.req.raw, wssEngine.opts.maxHttpBufferSize)
+  return req instanceof Response ? req : wssEngine.handleRequest(req, server)
 })
 
 // Graceful shutdown for hot-reloading
@@ -120,6 +86,9 @@ const shutdown = async () => {
 
   isShuttingDown = true
   logger.info("[SERVER] Received shutdown signal, shutting down...")
+
+  redis.quit()
+  stopIdp()
 
   const err = await WSS.close()
   if (err) {
@@ -151,3 +120,5 @@ await Promise.race([
   .catch(() => logger.error("DB not working!"))
 
 cron()
+
+startIdp().catch((err) => logger.error({ err }, "[IDP] start failed"))

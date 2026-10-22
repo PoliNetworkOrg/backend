@@ -10,6 +10,7 @@ export const ARRAY_USER_ROLE = [
   USER_ROLE.DIRETTIVO,
   USER_ROLE.OWNER,
   USER_ROLE.CREATOR,
+  USER_ROLE.WEB,
 ] as const
 export type TUserRole = (typeof USER_ROLE)[keyof typeof USER_ROLE]
 

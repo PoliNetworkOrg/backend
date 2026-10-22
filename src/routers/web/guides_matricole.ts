@@ -2,7 +2,9 @@ import { desc, eq } from "drizzle-orm"
 import z from "zod"
 import { deleteBlob, uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { authorOf, createdByColumns } from "@/idp/author"
+import { dashboard, publicData } from "@/idp/policies"
+import { createTRPCRouter, policy } from "@/trpc"
 
 const GUIDES_MATRICOLE = SCHEMA.WEB.guidesMatricole
 
@@ -25,18 +27,21 @@ const guideSchema = z.object({
 })
 
 export default createTRPCRouter({
-  getAllGuides: publicProcedure.output(z.array(guideSchema)).query(async () => {
-    return await DB.select().from(GUIDES_MATRICOLE).orderBy(desc(GUIDES_MATRICOLE.date))
-  }),
+  getAllGuides: policy(publicData)
+    .output(z.array(guideSchema))
+    .query(async () => {
+      return await DB.select().from(GUIDES_MATRICOLE).orderBy(desc(GUIDES_MATRICOLE.date))
+    }),
 
-  getLatestGuide: publicProcedure.output(guideSchema.nullable()).query(async () => {
-    const res = await DB.select().from(GUIDES_MATRICOLE).orderBy(desc(GUIDES_MATRICOLE.date)).limit(1)
-    console.log(res, res[0])
+  getLatestGuide: policy(publicData)
+    .output(guideSchema.nullable())
+    .query(async () => {
+      const res = await DB.select().from(GUIDES_MATRICOLE).orderBy(desc(GUIDES_MATRICOLE.date)).limit(1)
 
-    return res[0] || null
-  }),
+      return res[0] || null
+    }),
 
-  addGuide: publicProcedure
+  addGuide: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
@@ -44,12 +49,11 @@ export default createTRPCRouter({
         .pipe(
           guideFormSchema.extend({
             file: guideFileSchema,
-            createdBy: z.coerce.number<string>(),
           })
         )
     )
-    .mutation(async ({ input }) => {
-      const { version, date, file, createdBy } = input
+    .mutation(async ({ input, ctx }) => {
+      const { version, date, file } = input
 
       const [existing] = await DB.select({ id: GUIDES_MATRICOLE.id })
         .from(GUIDES_MATRICOLE)
@@ -63,14 +67,14 @@ export default createTRPCRouter({
           version,
           date,
           file: uploadedFile.url,
-          createdBy,
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 
       return res
     }),
 
-  deleteGuide: publicProcedure
+  deleteGuide: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),

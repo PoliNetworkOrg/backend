@@ -2,8 +2,8 @@ import { and, count, desc, eq, isNull } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
-import { createTRPCRouter } from "@/trpc"
-import { loggerProcedure } from "@/utils/loggerProc"
+import { botReadOrDashboard, SCOPE } from "@/idp/policies"
+import { createTRPCRouter, policy } from "@/trpc"
 import { decryptUser } from "@/utils/users"
 
 /**
@@ -25,7 +25,7 @@ export default createTRPCRouter({
    *
    * Used by: /warn command handler.
    */
-  create: loggerProcedure
+  create: policy({ service: { scope: SCOPE.tgAudit } }, { tokenOnly: true })
     .input(
       z.object({
         targetId: z.number(),
@@ -47,7 +47,7 @@ export default createTRPCRouter({
    *
    * Used by: /warns command handler.
    */
-  getByTarget: loggerProcedure
+  getByTarget: policy(botReadOrDashboard("tg:audit:read"))
     .input(
       z.object({
         targetId: z.number(),
@@ -87,7 +87,7 @@ export default createTRPCRouter({
    *
    * Used by: /unwarn command handler.
    */
-  deleteById: loggerProcedure
+  deleteById: policy({ service: { scope: SCOPE.tgAudit } }, { tokenOnly: true })
     .input(
       z.object({
         id: z.number(),
@@ -116,7 +116,7 @@ export default createTRPCRouter({
    * Used by: /warn command handler to trigger the global auto-ban-all
    * threshold (4+ active warnings).
    */
-  getTotalActiveCount: loggerProcedure
+  getTotalActiveCount: policy(botReadOrDashboard("tg:audit:read"))
     .input(
       z.object({
         targetId: z.number(),
@@ -141,7 +141,7 @@ export default createTRPCRouter({
    * Used by: /warn command handler to trigger the group-level auto-kick
    * threshold (3+ active warnings in the same group).
    */
-  getActiveCountInGroup: loggerProcedure
+  getActiveCountInGroup: policy(botReadOrDashboard("tg:audit:read"))
     .input(
       z.object({
         targetId: z.number(),

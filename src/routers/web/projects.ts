@@ -3,7 +3,9 @@ import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { projectsCategories } from "@/db/schema/web/projects"
-import { createTRPCRouter, publicProcedure } from "@/trpc"
+import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
+import { dashboard, publicData } from "@/idp/policies"
+import { createTRPCRouter, policy } from "@/trpc"
 import { getImageExtension } from "@/utils/web"
 
 const PROJECTS = SCHEMA.WEB.projects
@@ -34,23 +36,21 @@ const projectSchema = z.object({
 })
 
 export default createTRPCRouter({
-  getAllProjects: publicProcedure.output(z.array(projectSchema)).query(async () => {
-    return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
-  }),
+  getAllProjects: policy(publicData)
+    .output(z.array(projectSchema))
+    .query(async () => {
+      return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
+    }),
 
-  addProject: publicProcedure
+  addProject: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
         .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
-        .pipe(
-          projectFormSchema.extend({
-            createdBy: z.coerce.number<string>(),
-          })
-        )
+        .pipe(projectFormSchema)
     )
-    .mutation(async ({ input }) => {
-      const { title, descriptionIt, descriptionEn, logo, link, category, createdBy } = input
+    .mutation(async ({ input, ctx }) => {
+      const { title, descriptionIt, descriptionEn, logo, link, category } = input
 
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
@@ -64,14 +64,14 @@ export default createTRPCRouter({
           logo: uploadedLogo?.url ?? null,
           link,
           category,
-          createdBy,
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 
       return res
     }),
 
-  editProject: publicProcedure
+  editProject: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
@@ -79,12 +79,11 @@ export default createTRPCRouter({
         .pipe(
           projectFormSchema.extend({
             id: z.coerce.number<string>(),
-            modifiedBy: z.coerce.number<string>(),
           })
         )
     )
-    .mutation(async ({ input }) => {
-      const { title, descriptionIt, descriptionEn, logo, link, category, modifiedBy } = input
+    .mutation(async ({ input, ctx }) => {
+      const { title, descriptionIt, descriptionEn, logo, link, category } = input
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
@@ -97,7 +96,7 @@ export default createTRPCRouter({
           ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
           link,
           category,
-          modifiedBy,
+          ...modifiedByColumns(authorOf(ctx.actor)),
         })
         .where(eq(PROJECTS.id, input.id))
         .returning()
@@ -106,7 +105,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  reorderProjects: publicProcedure
+  reorderProjects: policy(dashboard("web:content:write"))
     .input(
       z.object({
         projectIds: z
@@ -125,7 +124,7 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  deleteProject: publicProcedure
+  deleteProject: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),
