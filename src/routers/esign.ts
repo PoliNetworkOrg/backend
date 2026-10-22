@@ -17,7 +17,7 @@ const MANAGE = "esign:requests:manage"
 /** Who may use each drive. */
 const MANAGE_DRIVES = "esign:drives:manage"
 
-/** The dashboard's agent-mode user, on the legacy anonymous path in development only. */
+/** The dashboard's agent-mode user, on the anonymous path (`LEGACY_ANONYMOUS=allow`) in development only. */
 const DEV_SUB = "agent-preview-user"
 
 const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {
@@ -31,6 +31,7 @@ const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {
   job_expired: "CONFLICT",
   job_done: "CONFLICT",
   job_cancelled: "CONFLICT",
+  job_failed: "CONFLICT",
   document_changed: "CONFLICT",
   certificate_invalid: "BAD_REQUEST",
   signer_mismatch: "FORBIDDEN",
@@ -114,6 +115,10 @@ export const esignRouter = createTRPCRouter({
       }),
     /** Every drive's access rules and the roles and permissions they can name. */
     access: user.query(({ ctx }) => run(() => esign.driveAccess(callerOf(ctx)))),
+    /** The in-progress requests and signers a new "be asked to sign" rule would strand, before saving it. */
+    accessImpact: user
+      .input(z.object({ driveId: z.string().min(1), sign: driveRule }))
+      .query(({ ctx, input }) => run(() => esign.driveAccessImpact(callerOf(ctx), input.driveId, input.sign))),
     setAccess: user
       .input(z.object({ driveId: z.string().min(1), request: driveRule, sign: driveRule }))
       .mutation(({ ctx, input }) =>
@@ -147,7 +152,7 @@ export const esignRouter = createTRPCRouter({
       }),
     /** The document's metadata, pages and existing signatures. */
     get: user.input(z.object({ documentId: z.uuid() })).query(async ({ ctx, input }) => {
-      const { meta, pdf } = await run(() => esign.document(callerOf(ctx), input.documentId))
+      const { meta, pdf } = await run(() => esign.documentInfo(callerOf(ctx), input.documentId))
       return { document: meta, pdf: publicPdf(pdf) }
     }),
     /** The PDF itself, base64-encoded. */
@@ -203,7 +208,10 @@ export const esignRouter = createTRPCRouter({
     decline: user
       .input(z.object({ id: z.uuid(), reason: z.string().max(500).nullable() }))
       .mutation(({ ctx, input }) => run(() => esign.declineRequest(callerOf(ctx), input.id, input.reason))),
-    /** The fallback: a PDF signed with the official CIE app, uploaded by its signer. */
+    /**
+     * The fallback: a PDF signed with the official CIE app, uploaded by its signer. The dashboard no longer offers it;
+     * once no deployed dashboard calls it, this and the service's `uploadSigned` can be removed.
+     */
     uploadSigned: user
       .input(
         z

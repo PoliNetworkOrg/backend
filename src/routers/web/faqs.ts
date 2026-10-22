@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm"
+import { asc, eq, sql } from "drizzle-orm"
 import z from "zod"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
@@ -8,6 +8,7 @@ import { createTRPCRouter, policy } from "@/trpc"
 const FAQS = SCHEMA.WEB.faqs
 
 const FAQ_CATEGORIES = SCHEMA.WEB.faqCategories
+const FEATURED = SCHEMA.WEB.freshmanFaqs
 
 export default createTRPCRouter({
   getAllFaqs: policy(publicData)
@@ -53,7 +54,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  addFaqs: policy(dashboard("web:content:write"))
+  addFaqs: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z.object({
         titleIt: z.string(),
@@ -61,11 +62,10 @@ export default createTRPCRouter({
         descriptionIt: z.string(),
         descriptionEn: z.string(),
         categoryId: z.number(),
-        createdBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { titleIt, titleEn, descriptionIt, descriptionEn, categoryId, createdBy } = input
+      const { titleIt, titleEn, descriptionIt, descriptionEn, categoryId } = input
 
       const [res] = await DB.insert(FAQS)
         .values({
@@ -74,38 +74,37 @@ export default createTRPCRouter({
           descriptionIt,
           descriptionEn,
           categoryId,
-          ...createdByColumns(authorOf(ctx.actor, createdBy)),
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 
       return res
     }),
 
-  addFaqsCategory: policy(dashboard("web:content:write"))
+  addFaqsCategory: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z.object({
         titleIt: z.string(),
         titleEn: z.string(),
         icon: z.string().nullable(),
-        createdBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { titleIt, titleEn, icon, createdBy } = input
+      const { titleIt, titleEn, icon } = input
 
       const [res] = await DB.insert(FAQ_CATEGORIES)
         .values({
           titleIt,
           titleEn,
           icon,
-          ...createdByColumns(authorOf(ctx.actor, createdBy)),
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 
       return res
     }),
 
-  editFaqs: policy(dashboard("web:content:write"))
+  editFaqs: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z.object({
         id: z.number(),
@@ -114,11 +113,10 @@ export default createTRPCRouter({
         descriptionIt: z.string(),
         descriptionEn: z.string(),
         categoryId: z.number(),
-        modifiedBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { id, titleIt, titleEn, descriptionIt, descriptionEn, categoryId, modifiedBy } = input
+      const { id, titleIt, titleEn, descriptionIt, descriptionEn, categoryId } = input
 
       const [res] = await DB.update(FAQS)
         .set({
@@ -127,7 +125,7 @@ export default createTRPCRouter({
           descriptionIt,
           descriptionEn,
           categoryId,
-          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
+          ...modifiedByColumns(authorOf(ctx.actor)),
         })
         .where(eq(FAQS.id, id))
         .returning()
@@ -136,25 +134,24 @@ export default createTRPCRouter({
       return res
     }),
 
-  editFaqsCategory: policy(dashboard("web:content:write"))
+  editFaqsCategory: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z.object({
         id: z.number(),
         titleIt: z.string(),
         titleEn: z.string(),
         icon: z.string().nullable(),
-        modifiedBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { id, titleIt, titleEn, icon, modifiedBy } = input
+      const { id, titleIt, titleEn, icon } = input
 
       const [res] = await DB.update(FAQ_CATEGORIES)
         .set({
           titleIt,
           titleEn,
           icon,
-          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
+          ...modifiedByColumns(authorOf(ctx.actor)),
         })
         .where(eq(FAQ_CATEGORIES.id, id))
         .returning()
@@ -171,10 +168,20 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       const { id } = input
-      const deleted = await DB.delete(FAQS).where(eq(FAQS.id, id)).returning()
+      return DB.transaction(async (tx) => {
+        // Match selectFaq's lock order so a FAQ cannot become selected between this check and deletion.
+        await tx.execute(sql`LOCK TABLE ${FEATURED} IN SHARE ROW EXCLUSIVE MODE`)
+        const [featured] = await tx
+          .select({ position: FEATURED.position })
+          .from(FEATURED)
+          .where(eq(FEATURED.faqId, id))
+          .limit(1)
+        if (featured) return { error: "FEATURED_FAQ" }
+        const deleted = await tx.delete(FAQS).where(eq(FAQS.id, id)).returning()
 
-      if (deleted.length === 0) return { error: "NOT_FOUND" }
-      return { error: null }
+        if (deleted.length === 0) return { error: "NOT_FOUND" }
+        return { error: null }
+      })
     }),
 
   deleteFaqsCategory: policy(dashboard("web:content:write"))
@@ -185,9 +192,19 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       const { id } = input
-      const deleted = await DB.delete(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).returning()
+      return DB.transaction(async (tx) => {
+        await tx.execute(sql`LOCK TABLE ${FEATURED} IN SHARE ROW EXCLUSIVE MODE`)
+        const [featured] = await tx
+          .select({ position: FEATURED.position })
+          .from(FEATURED)
+          .innerJoin(FAQS, eq(FEATURED.faqId, FAQS.id))
+          .where(eq(FAQS.categoryId, id))
+          .limit(1)
+        if (featured) return { error: "FEATURED_FAQ" }
+        const deleted = await tx.delete(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).returning()
 
-      if (deleted.length === 0) return { error: "NOT_FOUND" }
-      return { error: null }
+        if (deleted.length === 0) return { error: "NOT_FOUND" }
+        return { error: null }
+      })
     }),
 })

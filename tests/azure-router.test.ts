@@ -48,9 +48,12 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+/** A dashboard user holding every Azure permission the routers check. */
+const ALL_AZURE = ["azure:members:read", "azure:members:create", "azure:groups:read", "azure:groups:write"]
+
 describe("Azure tRPC routes without credentials", () => {
   it("reserves the number of an incomplete account while directory searches are stale", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
     const { azureDirectory } = await import("@/azure/directory")
     const { IncompleteMemberError } = await import("@/azure/errors")
     const create = azureDirectory.createMember
@@ -87,7 +90,7 @@ describe("Azure tRPC routes without credentials", () => {
     expect(mailer.sendWelcomeEmail).not.toHaveBeenCalled()
   })
   it("returns linked seed data for members and groups", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const members = await caller.members.getAll()
     const groups = await caller.groups.getAll()
@@ -101,7 +104,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("creates a member and exposes it in later reads", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const result = await caller.members.create({
       firstName: "Katherine",
@@ -125,7 +128,7 @@ describe("Azure tRPC routes without credentials", () => {
 
   it("returns the created member when sending the welcome email throws", async () => {
     mailer.sendWelcomeEmail.mockRejectedValueOnce(new Error("Email rendering failed"))
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const result = await caller.members.create({
       firstName: "Katherine",
@@ -147,7 +150,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("creates a member at a custom address", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const result = await caller.members.create({
       firstName: "Katherine",
@@ -161,7 +164,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("builds the standard address without accents, apostrophes or spaces", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const result = await caller.members.create({
       firstName: "Maria Chiara",
@@ -196,7 +199,7 @@ describe("Azure tRPC routes without credentials", () => {
       "This name cannot form a standard address: choose a custom one.",
     ],
   ] as const)("refuses to create a member with %s", async (_, override, error) => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const result = await caller.members.create({
       firstName: "Katherine",
@@ -211,7 +214,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("lets only one of two concurrent creations take the same number", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
     await slowNumberLookups()
     const member = (firstName: string) => ({
       firstName,
@@ -232,7 +235,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("reports an address Entra refuses as already in use", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
     const { azureDirectory } = await import("@/azure/directory")
     vi.spyOn(azureDirectory, "createMember").mockRejectedValueOnce(
       new Error("Another object with the same value for property proxyAddresses already exists.")
@@ -249,7 +252,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("refuses an invalid custom address", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     await expect(
       caller.members.create({
@@ -271,7 +274,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("adds and removes group memberships", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
     const input = { groupId: "mock-group-empty", userId: "mock-member-grace" }
 
     await expect(caller.groups.addMember(input)).resolves.toBe(true)
@@ -344,9 +347,12 @@ describe("Azure directory token authorization", () => {
     await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("refuses anonymous reads when legacy access is disabled", async () => {
-    const caller = await createCaller({ legacyAnonymous: "deny" })
-    await expect(caller.members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+  it("refuses anonymous reads unless LEGACY_ANONYMOUS allows them", async () => {
+    for (const context of [{}, { legacyAnonymous: "deny" } as const]) {
+      const caller = await createCaller(context)
+      await expect(caller.members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+    }
+    expect(await (await createCaller({ legacyAnonymous: "allow" })).members.getAll()).toHaveLength(3)
   })
 })
 

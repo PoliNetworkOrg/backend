@@ -59,6 +59,7 @@ vi.mock("@/db", async () => {
       db.inserted.push({ table: getTableName(table), values })
       return {
         onConflictDoNothing: () => ({ returning: async () => (db.conflict ? [] : [{ id: db.inserted.length }]) }),
+        returning: async () => [values],
       }
     },
   })
@@ -89,7 +90,7 @@ describe("app router", () => {
     const missing = procedures()
       .filter(([, procedure]) => !procedure._def.meta?.policy)
       .map(([path]) => path)
-    expect(procedures().length).toBeGreaterThan(90)
+    expect(procedures().length).toBeGreaterThan(70)
     expect(missing).toEqual([])
   })
 
@@ -128,23 +129,48 @@ describe("app router", () => {
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })
-    for (const path of ["web.faqs.addFaqs", "web.projects.editProject", "groups.labels.create"])
-      expect(policyOf(path)?.policy).not.toBe("legacy")
   })
 
-  it("keeps procedures that RFC v3 removes on the legacy path only", () => {
-    const legacy = new Set(
+  it("refuses anonymous callers on every write that records its actor, whatever LEGACY_ANONYMOUS says", () => {
+    const tokenOnly = new Set(
       procedures()
-        .filter(([, procedure]) => procedure._def.meta?.policy === "legacy")
+        .filter(([, procedure]) => procedure._def.meta?.tokenOnly)
         .map(([path]) => path)
     )
-    for (const path of ["auth.updateProfilePic", "test.dbQuery", "tg.permissions.addRole", "tg.link.link"])
-      expect(legacy).toContain(path)
+    for (const path of [
+      "tg.grants.create",
+      "tg.grants.interrupt",
+      "tg.groups.leaveChat",
+      "groups.labels.create",
+      "groups.labels.modify",
+      "web.associations.addAssociation",
+      "web.associations.editAssociation",
+      "web.associations.editAssociationLinks",
+      "web.faqs.addFaqs",
+      "web.faqs.addFaqsCategory",
+      "web.faqs.editFaqs",
+      "web.faqs.editFaqsCategory",
+      "web.projects.addProject",
+      "web.projects.editProject",
+      "web.guides_matricole.addGuide",
+    ])
+      expect(tokenOnly).toContain(path)
   })
 
-  it("refuses the removed tg.groupLabels mount to token callers", async () => {
+  it("no longer has the procedures RFC v3 Phase 5 removes", () => {
+    const paths = procedures().map(([path]) => path)
+    // azure.members.setAssocNumber is back as a token-only `dashboard` procedure, asserted above.
+    const removed = paths.filter((path) =>
+      /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$/.test(path)
+    )
+    expect(removed).toEqual([])
+    expect(paths).toContain("groups.labels.getAll")
+  })
+
+  it("takes a label's author from the token and drops an actor field the caller still sends", async () => {
+    db.inserted = []
     const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
-    const ctx: Context = {
+    const caller = appRouter.createCaller({
       auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) },
       access: {
         has: () => true,
@@ -153,8 +179,28 @@ describe("app router", () => {
         subjectByTelegramId: () => undefined,
         status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
       },
-    }
-    await expect(appRouter.createCaller(ctx).tg.groupLabels.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
+    })
+    // An old client still sending `createdBy`: zod strips the unknown key instead of rejecting it.
+    await caller.groups.labels.create({ label: "students", color: "#3b82f6", createdBy: 99 } as never)
+    expect(db.inserted).toEqual([
+      {
+        table: "common_group_labels",
+        values: {
+          label: "students",
+          description: undefined,
+          color: "#3b82f6",
+          createdBy: null,
+          createdBySub: "usr_admin",
+        },
+      },
+    ])
+  })
+
+  it("refuses anonymous label writes even while LEGACY_ANONYMOUS allows anonymous reads", async () => {
+    const caller = appRouter.createCaller({ legacyAnonymous: "allow" })
+    await expect(caller.groups.labels.create({ label: "students", color: "#3b82f6" })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    })
   })
 })
 
@@ -175,7 +221,7 @@ describe("groups.search", () => {
     dashboard: () =>
       appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access })
         .groups.search,
-    anonymous: () => appRouter.createCaller({}).groups.search,
+    anonymous: () => appRouter.createCaller({ legacyAnonymous: "allow" }).groups.search,
   }
   /** Whether the last query filtered out hidden groups. */
   const hidesHidden = () => {
@@ -200,7 +246,7 @@ describe("groups.search", () => {
     expect(hidesHidden()).toBe(true)
   })
 
-  it("still gives hidden groups to the dashboard and to legacy callers", async () => {
+  it("still gives hidden groups to the dashboard and to anonymous callers while allowed", async () => {
     for (const caller of [callers.dashboard(), callers.anonymous()]) {
       await caller.getAll()
       expect(hidesHidden()).toBe(false)

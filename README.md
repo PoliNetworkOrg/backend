@@ -49,16 +49,16 @@ Requirements:
 
 ## Authentication
 
-The backend is moving to the PoliNetwork IdP ([RFC v3](https://github.com/PoliNetworkOrg/auth/blob/main/docs/idp-telegram-integration-rfc-v3.md), Phase 3). Both paths run side by side until every caller sends a token:
+Every caller authenticates with a PoliNetwork IdP token ([RFC v3](https://github.com/PoliNetworkOrg/auth/blob/main/docs/idp-telegram-integration-rfc-v3.md), Phase 5):
 
-- **With a token** (`Authorization: Bearer <IdP access token>`): the token is verified with [`@polinetwork/auth-kit`](https://github.com/PoliNetworkOrg/auth-kit), and the call is fully enforced. Every procedure declares, per actor kind, the scope it needs and, for people, the permission they must hold in the IdP's access snapshot. A token that fails verification is rejected; it never falls back to the legacy path. The bot acts for a Telegram user with `X-PN-Actor: telegram:<id>`, which only a service token with `backend:tg:act-as` may send.
-- **Without a token**: the legacy behaviour, while `LEGACY_ANONYMOUS=allow`. Each call is logged as `[AUTH] legacy anonymous call` with its procedure, so callers still on this path can be found. Procedures added for the IdP refuse anonymous calls.
+- **With a token** (`Authorization: Bearer <IdP access token>`): the token is verified with [`@polinetwork/auth-kit`](https://github.com/PoliNetworkOrg/auth-kit), and the call is fully enforced. Every procedure declares, per actor kind, the scope it needs and, for people, the permission they must hold in the IdP's access snapshot. A token that fails verification is rejected. The bot acts for a Telegram user with `X-PN-Actor: telegram:<id>`, which only a service token with `backend:tg:act-as` may send.
+- **Without a token**: refused (`UNAUTHORIZED`). `LEGACY_ANONYMOUS=allow` is only a rollback switch: it lets anonymous requests run procedures that do not record who acted, with a null actor and no permissions, and logs each call as `[AUTH] legacy anonymous call`. Writes that record their actor (grants, `tg.groups.leaveChat`, label and web content writes) and the IdP procedures are token-only and refuse anonymous calls either way.
 
-Procedures are built with `policy(...)` or `legacyProcedure` from `src/trpc.ts`; the bare tRPC procedure is not exported, and `tests/idp-router.test.ts` fails if any procedure lacks a policy. `legacyProcedure` marks procedures that the RFC removes, which token callers cannot use.
+Procedures are built with `policy(...)` from `src/trpc.ts`; the bare tRPC procedure is not exported, and `tests/idp-router.test.ts` fails if any procedure lacks a policy. `policy(rules, { tokenOnly: true })` refuses anonymous calls and gives the handler a non-null `ctx.actor`.
 
-Actor fields such as `createdBy`, `adderId` or `performerId` are read only from legacy callers. For token callers the author comes from the token: content tables record it in `*_by_sub` columns, and grants made with a token go to `tg_grants_v2`. Until Phase 6 a grant counts as active if it is active in either `tg_grants` or `tg_grants_v2`. The bot records moderation actions with `tg.auditLog.record`, which takes an idempotency key and flags `idp_permission` actions the snapshot does not back.
+Who acted always comes from the token, never from the input: procedures take no actor fields (`createdBy`, `modifiedBy`, `updatedBy`, `adderId`, `interruptedById`, `performerId`, `adminId`). Inputs are plain zod objects, so a key an older client still sends is stripped, not rejected. Content tables record the author in `*_by_sub` columns, and grants go to `tg_grants_v2`. Until Phase 6 a grant counts as active if it is active in either `tg_grants` or `tg_grants_v2`. The bot records moderation actions with `tg.auditLog.record`, which takes an idempotency key and flags `idp_permission` actions the snapshot does not back.
 
-The bot's socket.io client authenticates with its service token in `auth.token` (scope `backend:tg:events`) and is disconnected when the token expires. Set `OAUTH_BOT_CLIENT_ID` on the backend to the same registered OAuth client ID used by the bot. This is the actual client ID, not its display name. Token sockets are rejected if this setting is absent, the client ID differs, the token is not a service token or the scope is missing. Without a token the socket is identified by its `type` query, while `LEGACY_ANONYMOUS=allow`.
+The bot's socket.io client authenticates with its service token in `auth.token` (scope `backend:tg:events`) and is disconnected when the token expires; a socket without a token is refused. Set `OAUTH_BOT_CLIENT_ID` on the backend to the same registered OAuth client ID used by the bot. This is the actual client ID, not its display name. Sockets are rejected if this setting is absent, the client ID differs, the token is not a service token or the scope is missing.
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
 
@@ -92,6 +92,30 @@ Requirements:
   consent, for the drive; emails use the existing `Mail.Send` sender.
 - The dashboard proxies `/api/esign/agent/*` to this backend's `/esign/agent/*`; the agent never calls the backend
   directly. Those endpoints are authenticated only by the job's single-use ticket.
+- The proxy passes on the agent's `User-Agent: PoliNetwork-eSign/<version>` (`PoliNetwork-Sign-Agent/<version>` for
+  0.1.x, released before the rename). An agent older than `MIN_AGENT_VERSION` (`src/esign/agent-version.ts`) gets 426
+  `agent_outdated` when it loads a job, before the PIN, and the job fails so the dashboard can say why. No User-Agent,
+  a development or source build (`dev`, `v0.1.1-6-g0cb0f7b`) or an unreadable version passes; preparing a signature
+  still refuses an agent without protocol 2.
+
+Emails (`src/emails/templates`, preview with `bun run email`):
+
+- "Signature needed" tells signers their turn started.
+- "Documento firmato" sends the signed PDF to the addresses the request names, in Italian since they are often outside
+  PoliNetwork. The PDF is attached up to 2 MB, otherwise linked from OneDrive; replies go to whoever sent the request.
+- "Request update" tells a request's creator that a signer declined, with the reason, or that everyone signed, unless
+  the creator saw it by signing last or retrying the delivery. When saving or emailing the signed PDF fails, it tells
+  the creator and every manager who may retry (`esign:sign` and `esign:requests:manage`, allowed on the request's
+  drives), the last signer included: the delivery runs once they have signed. Nobody is emailed about what they just
+  did, each outcome is emailed once, and an email that fails is only logged.
 
 Signatures are checked against the CIE certification authorities of the Ministero dell'Interno bundled in
 `src/esign/trust`. Tests: `bunx vitest run tests/esign-*.test.ts` (validated with poppler `pdfsig` when installed).
+
+## Freshman content
+
+`web.freshman` exposes fixed-slot content for the website and authorized admin editors. Migration
+`0026_freshman_content` initializes 10 resources, 8 Telegram links and 5 existing/new FAQs, preserving matching
+catalog entries. Selected FAQs/categories must be replaced in Freshman before deleting them from the catalog.
+The development seed also initializes the card slots and selections; `--force` clears those selections before
+replacing the sample FAQ catalog.

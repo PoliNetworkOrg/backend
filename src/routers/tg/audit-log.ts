@@ -11,7 +11,7 @@ import {
   type TAuditType,
 } from "@/db/schema/tg/audit-log"
 import { dashboard, SCOPE } from "@/idp/policies"
-import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 import { decryptUser } from "@/utils/users"
 
 const AUDIT_LOG = SCHEMA.TG.auditLog
@@ -36,24 +36,6 @@ const RECORDED_BASES = [
 ] as const
 
 export default createTRPCRouter({
-  /** Legacy path; replaced by `record`. */
-  create: legacyProcedure
-    .input(
-      z.object({
-        adminId: z.number(),
-        targetId: z.number(),
-        type: z.enum(ARRAY_AUDIT_TYPE),
-        groupId: z.number().nullable(), // NULL in "*_ALL" audit types
-        until: z.date().nullable(),
-        reason: z.string().optional(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      await DB.insert(AUDIT_LOG)
-        .values({ ...input, actorTgId: input.adminId, basis: AUDIT_BASIS.LEGACY })
-        .onConflictDoNothing()
-    }),
-
   /**
    * Records a moderation action that already happened on Telegram (RFC v3 §9.2). It is never
    * rejected for the actor's permissions, which would only lose history: an `idp_permission`
@@ -85,7 +67,6 @@ export default createTRPCRouter({
     .output(z.object({ id: z.number(), duplicate: z.boolean() }))
     .mutation(async ({ input, ctx }) => {
       const { actor, access } = ctx
-      if (!actor) throw new TRPCError({ code: "UNAUTHORIZED" })
 
       const telegramId = input.actorTelegramId === null ? null : String(input.actorTelegramId)
       const subject = telegramId ? access?.subjectByTelegramId(telegramId) : undefined
