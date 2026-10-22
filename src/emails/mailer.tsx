@@ -6,7 +6,6 @@ import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import MemberNumberChanged from "./templates/member-number-changed"
-import OtpEmail from "./templates/otp"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
@@ -45,11 +44,6 @@ async function devSendMail(
 }
 
 const sendEmail = env.NODE_ENV === "development" && env.USE_DEV_MAILER ? devSendMail : azureSendEmail
-
-export async function sendLoginOtpEmail(toAddress: string, otp: string, expiresInMinutes?: number) {
-  const subject = makeSubject("Your login code for PoliNetwork")
-  return sendEmail(toAddress, subject, <OtpEmail otp={otp} expiresInMinutes={expiresInMinutes} />)
-}
 
 export async function sendWelcomeEmail(
   toAddress: string,

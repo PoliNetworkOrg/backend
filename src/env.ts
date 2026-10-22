@@ -1,6 +1,5 @@
 import { createEnv } from "@t3-oss/env-core"
 import { z } from "zod"
-import { TRUSTED_ORIGINS } from "./constants"
 
 const PORT = 3000
 const NODE_ENV = z.enum(["development", "production", "test"])
@@ -13,15 +12,8 @@ export const env = createEnv({
   server: {
     // server config
     PORT: z.coerce.number().min(1).max(65535).default(PORT),
-    PUBLIC_URL: z.string().default(`http://localhost:${PORT}`),
-    TRUSTED_ORIGINS: z
-      .string()
-      .default(TRUSTED_ORIGINS.join(","))
-      .transform((s) => s.split(","))
-      .pipe(z.array(z.string())),
 
     // secrets/encryption
-    BETTER_AUTH_SECRET: z.string().min(32),
     ENCRYPTION_KEY: z
       .string()
       .regex(/^[A-Fa-f0-9]+$/, "The string must be a valid hex string")

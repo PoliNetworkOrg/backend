@@ -9,7 +9,6 @@ export function cron() {
   new Cron("0 23 4 * * *", async () => {
     logger.info("[CRON] start")
     await cleanMessages()
-    await cleanLinkCodes()
     logger.info("[CRON] end")
   })
 
@@ -24,20 +23,6 @@ export function cron() {
   })
 
   logger.info("[CRON] scheduled")
-}
-
-export async function cleanLinkCodes() {
-  logger.info(`[CRON] START(cleanLinkCodes)`)
-
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-
-  try {
-    const deleted = await DB.delete(SCHEMA.TG.link).where(lt(SCHEMA.TG.link.createdAt, yesterday)).returning()
-    logger.info(`[CRON] END(cleanLinkCodes) deleted ${deleted.length} link code(s).`)
-  } catch (err) {
-    logger.error(err, "[CRON] cleanLinkCodes")
-  }
 }
 
 async function cleanMessages() {
