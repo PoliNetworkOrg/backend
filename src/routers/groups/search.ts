@@ -1,7 +1,7 @@
 import { and, asc, eq, exists, ilike, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA, VIEWS } from "@/db"
-import { dashboard } from "@/idp/policies"
+import { dashboard, publicData, seesHiddenGroups } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 
 const GROUPS = VIEWS.GROUPS.groupsView
@@ -10,7 +10,8 @@ const LABEL_RELATIONS = VIEWS.GROUPS.labelsRelationsView
 const samePlatform = sql`${LABEL_RELATIONS}.type = ${GROUPS}.type`
 
 export const search = createTRPCRouter({
-  getAll: policy(dashboard("admin:access")).query(async () => {
+  /** The website reads it too, without hidden groups. */
+  getAll: policy(publicData).query(async ({ ctx }) => {
     const results = await DB.select({
       id: GROUPS.id,
       title: GROUPS.title,
@@ -24,12 +25,14 @@ export const search = createTRPCRouter({
       .from(GROUPS)
       .leftJoin(LABEL_RELATIONS, and(eq(LABEL_RELATIONS.groupId, GROUPS.id), samePlatform))
       .leftJoin(LABELS, eq(LABEL_RELATIONS.labelId, LABELS.id))
+      .where(seesHiddenGroups(ctx.actor) ? undefined : not(GROUPS.hide))
       .groupBy(GROUPS.id, GROUPS.title, sql`${GROUPS}.type`, GROUPS.link, GROUPS.hide)
 
     return results
   }),
 
-  search: policy(dashboard("admin:access"))
+  /** The website searches too; `showHidden` applies only to dashboard users. */
+  search: policy(publicData)
     .input(
       z.object({
         query: z.string().min(1).max(100).optional(),
@@ -39,7 +42,7 @@ export const search = createTRPCRouter({
         showHidden: z.boolean().default(false),
       })
     )
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
       // TODO: implement some kind of recommender system to promote groups that are more relevant
       // raw string search is weird, we should boost more used groups
 
@@ -86,7 +89,7 @@ export const search = createTRPCRouter({
         if (queryWhere) conditions.push(queryWhere) // or(...) returns undefined? idk
       }
 
-      if (input.showHidden === false) {
+      if (!input.showHidden || !seesHiddenGroups(ctx.actor)) {
         conditions.push(not(GROUPS.hide))
       }
 

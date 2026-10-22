@@ -16,6 +16,16 @@ export function cron() {
     logger.info("[CRON] end")
   })
 
+  // Expired signing jobs drop their prepared PDFs; abandoned uploads go after a day.
+  new Cron("0 */10 * * * *", async () => {
+    try {
+      const { esign } = await import("./esign")
+      await esign.sweep()
+    } catch (err) {
+      logger.error(err, "[CRON] esign sweep")
+    }
+  })
+
   logger.info("[CRON] scheduled")
 }
 

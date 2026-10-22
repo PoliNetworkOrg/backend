@@ -49,6 +49,43 @@ export const env = createEnv({
     AZURE_BLOB_STORAGE_ACCOUNT: z.string().default("polinetworksa"),
     AZURE_BLOB_STORAGE_CONTAINER: z.string().default("file-blobs"),
 
+    // E-signing (CIE). The drives are the OneDrive/SharePoint libraries whose folders the dashboard browses; without
+    // Azure credentials in-memory development drives are used. Graph needs Files.ReadWrite.All (or Sites.Selected).
+    /** JSON array of `{ id, label, driveId, rootId? }`; `rootId` is the folder the dashboard may use (whole drive). */
+    ESIGN_DRIVES: z
+      .string()
+      .default("[]")
+      .transform((value, ctx) => {
+        try {
+          return JSON.parse(value)
+        } catch {
+          ctx.addIssue({ code: "custom", message: "ESIGN_DRIVES must be a JSON array" })
+          return z.NEVER
+        }
+      })
+      .pipe(
+        z
+          .array(
+            z.object({
+              id: z.string().regex(/^[a-z0-9-]{1,40}$/, "lowercase letters, digits and dashes"),
+              label: z.string().min(1).max(80),
+              driveId: z.string().min(1),
+              rootId: z.string().min(1).default("root"),
+            })
+          )
+          .refine((drives) => new Set(drives.map((d) => d.id)).size === drives.length, "Each drive needs its own id")
+      ),
+    /** Dashboard origin, for links in signature emails. */
+    ESIGN_DASHBOARD_URL: z.url().default("https://admin.polinetwork.org"),
+    /** Accept signing certificates not issued by the CIE CAs, e.g. the agent's development key. */
+    ESIGN_ALLOW_TEST_CERTIFICATES: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((v) => (v === undefined ? nodeEnv !== "production" : v === "true")),
+
+    /** OCSP for CIE certificates: require (refuse when unknown), prefer (refuse only revoked), off. */
+    ESIGN_REVOCATION: z.enum(["require", "prefer", "off"]).default("prefer"),
+
     // PoliNetwork IdP (RFC v3 §6, §12). Token authentication is enabled when IDP_PUBLIC_URL and
     // OAUTH_BACKEND_RESOURCE_URI are set; snapshot pulls also need the internal resource and the
     // backend client's credentials. Without them every permission check denies.
@@ -63,8 +100,11 @@ export const env = createEnv({
     /** The backend client's private signing key as a JWK (JSON), with `kid` and `alg`. */
     OAUTH_BACKEND_PRIVATE_JWK: z.string().min(1).optional(),
     IDP_SNAPSHOT_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
-    /** Requests without a token take the legacy path while "allow" (RFC §13). */
-    LEGACY_ANONYMOUS: z.enum(["allow", "deny"]).default("allow"),
+    /**
+     * RFC v3 §13 rollback switch. "deny" (Phase 5) refuses requests and sockets without a token;
+     * "allow" lets anonymous requests run procedures that do not record an actor, with no permissions.
+     */
+    LEGACY_ANONYMOUS: z.enum(["allow", "deny"]).default("deny"),
 
     // env config
     NODE_ENV: NODE_ENV.default(nodeEnv),

@@ -155,6 +155,41 @@
       "when": 1791589154604,
       "tag": "0021_idp_audit_grants_authors",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792198284200,
+      "tag": "0022_esign",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792231574103,
+      "tag": "0023_esign_places",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792231582549,
+      "tag": "0024_esign_drop_placement",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792237528329,
+      "tag": "0025_esign_drive_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792449139688,
+      "tag": "0026_freshman_content",
+      "breakpoints": true
     }
   ]
 }
