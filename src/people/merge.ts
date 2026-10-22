@@ -93,6 +93,7 @@ export function mergePeople(
   if (second.notes) first.notes = [first.notes, `${second.id}: ${second.notes}`].filter(Boolean).join("\n")
   first.activity = [...first.activity, ...second.activity].sort((a, b) => b.at.localeCompare(a.at))
   first.discrepancies.push(...second.discrepancies)
+  first.pendingGroupRemovals = [...(first.pendingGroupRemovals ?? []), ...(second.pendingGroupRemovals ?? [])]
   for (const p of Object.values(s.persons))
     if (p.admin?.capoOfReference?.id === second.id)
       p.admin.capoOfReference = { id: first.id, name: `${first.profile.firstName} ${first.profile.lastName}` }

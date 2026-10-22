@@ -8,6 +8,7 @@ export type Person = Omit<PersonRecord, "fees" | "isMember"> & {
   answers: Record<string, { question: string; answer: string }[]>
   reminders: Record<string, string>
   invite: { hash: string; expiresAt: string } | null
+  pendingGroupRemovals?: { chatId: string; message: string }[]
 }
 export type StoredReceipt = Receipt & {
   officerPersonId: string

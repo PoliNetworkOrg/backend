@@ -83,6 +83,12 @@ export function createPeopleService(options: PeopleOptions) {
         p.admin.groups = groups
           .filter((g) => g.admins.includes(telegramId))
           .map(({ chatId, title }) => ({ chatId, title }))
+        p.pendingGroupRemovals = p.pendingGroupRemovals?.filter((pending) => {
+          if (p.admin?.groups.some((g) => g.chatId === pending.chatId)) return true
+          p.discrepancies = p.discrepancies.filter((d) => d.message !== pending.message)
+          log(p, "system", `Telegram confirmed admin removal from ${pending.chatId}`, now())
+          return false
+        })
       }
   }
   function assertReceiptConfig(s: PeopleState) {
@@ -1259,6 +1265,16 @@ export function createPeopleService(options: PeopleOptions) {
         )
           fail("BAD_REQUEST", "You can only retain your own roles and groups")
         if (input.answer === "leaving" && !input.reason) fail("BAD_REQUEST", "A leaving reason is required")
+        for (const group of p.admin?.groups ?? []) {
+          if (input.answer === "continues" && input.keepGroups.includes(group.chatId)) continue
+          p.pendingGroupRemovals ??= []
+          const pending = p.pendingGroupRemovals
+          if (pending.some((g) => g.chatId === group.chatId)) continue
+          const message = `Telegram admin removal pending: ${group.title} (${group.chatId}). HR must remove the admin rights; requested in census ${c.year}.`
+          pending.push({ chatId: group.chatId, message })
+          p.discrepancies.push({ kind: "needs-review", message, suggestedTelegram: null })
+          log(p, v.sub, message, now())
+        }
         Object.assign(p.profile, { course: input.course, year: input.year, campus: input.campus })
         if (input.answer === "continues") {
           for (const t of p.teams)

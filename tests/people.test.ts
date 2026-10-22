@@ -408,3 +408,36 @@ describe("People payments, receipt ownership and delivery", () => {
     expect(h.state().persons["P-0003"].member?.number).toBe("0003")
   })
 })
+
+it("retains deselected census groups as pending HR work until Telegram confirms removal", async () => {
+  const groups = [{ chatId: "-1001", title: "Test group", admins: ["103"] }]
+  const h = harness({ telegramGroups: async () => groups })
+  await h.seed()
+  await h.service.listPeople(master)
+  await h.service.answerCensus(viewer("member", ["people:self"], "103"), {
+    answer: "continues",
+    course: "Computer science",
+    year: "2nd year",
+    campus: "Leonardo",
+    keepGroups: [],
+    keepTeams: [],
+    reason: "",
+    note: "",
+  })
+  let person = await h.service.getPerson(master, { id: "P-0003" })
+  expect(person.admin?.groups).toHaveLength(1)
+  expect(person.discrepancies).toContainEqual(
+    expect.objectContaining({
+      kind: "needs-review",
+      message: expect.stringContaining("Telegram admin removal pending: Test group (-1001)"),
+    })
+  )
+  expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(1)
+  groups[0].admins = []
+  person = await h.service.getPerson(master, { id: "P-0003" })
+  expect(person.admin?.groups).toHaveLength(0)
+  expect(person.discrepancies).not.toContainEqual(
+    expect.objectContaining({ message: expect.stringContaining("Telegram admin removal pending:") })
+  )
+  expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(0)
+})
