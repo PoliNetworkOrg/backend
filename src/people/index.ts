@@ -1,5 +1,6 @@
 import { azureCredentials } from "@/azure/config"
 import { azureDirectory } from "@/azure/directory"
+import { standardLocalPart } from "@/azure/mailbox"
 import { DB, SCHEMA } from "@/db"
 import { sendPeopleEmail, sendWelcomeEmail } from "@/emails/mailer"
 import { env } from "@/env"
@@ -69,10 +70,13 @@ export const people = createPeopleService({
         fail("CONFLICT", "Member number already belongs to a different Microsoft 365 account")
       return { id: prior.id, email: prior.mail }
     }
+    const localPart = standardLocalPart(person.profile.firstName, person.profile.lastName)
+    if (!localPart) fail("BAD_REQUEST", "This name cannot form a standard Microsoft 365 address")
     const created = await azureDirectory.createMember({
       firstName: person.profile.firstName,
       lastName: person.profile.lastName,
       assocNumber: Number(number),
+      localPart,
     })
     if (person.profile.personalEmail)
       await sendWelcomeEmail(

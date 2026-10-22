@@ -117,6 +117,10 @@ describe("app router", () => {
     expect(policyOf("azure.members.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:members:create" },
     })
+    expect(policyOf("azure.members.setAssocNumber")).toMatchObject({
+      policy: { user: { scope: "backend:admin", permission: "azure:members:write" } },
+      tokenOnly: true,
+    })
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
     })
@@ -155,10 +159,9 @@ describe("app router", () => {
 
   it("no longer has the procedures RFC v3 Phase 5 removes", () => {
     const paths = procedures().map(([path]) => path)
+    // azure.members.setAssocNumber is back as a token-only `dashboard` procedure, asserted above.
     const removed = paths.filter((path) =>
-      /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$|^azure\.members\.setAssocNumber$/.test(
-        path
-      )
+      /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$/.test(path)
     )
     expect(removed).toEqual([])
     expect(paths).toContain("groups.labels.getAll")

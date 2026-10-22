@@ -5,6 +5,7 @@ import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } 
 import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
+import MemberNumberChanged from "./templates/member-number-changed"
 import OtpEmail from "./templates/otp"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
@@ -64,6 +65,28 @@ export async function sendWelcomeEmail(
       password={accountCredentials.password}
       assocNum={memberInfo.assocNumber}
       firstName={memberInfo.firstName}
+    />
+  )
+}
+
+export async function sendMemberNumberChangedEmail(
+  toAddress: string,
+  memberInfo: {
+    firstName: string | null
+    assocNumber: number
+    previousAssocNumber: string | null
+    email: string | null
+  }
+) {
+  const subject = makeSubject("Your PoliNetwork member number has changed")
+  return sendEmail(
+    toAddress,
+    subject,
+    <MemberNumberChanged
+      firstName={memberInfo.firstName}
+      assocNum={memberInfo.assocNumber}
+      previousAssocNum={memberInfo.previousAssocNumber}
+      email={memberInfo.email}
     />
   )
 }
