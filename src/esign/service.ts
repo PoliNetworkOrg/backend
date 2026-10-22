@@ -1235,7 +1235,8 @@ export function createEsignService(options: ServiceOptions) {
           document: { title: request.title, fileName: current.fileName, pages: current.pages },
           signer: { name: signer.name, role: signer.role },
           placement: { page: signaturePlaces(job.places)[job.step]?.page ?? 0 },
-          requestedBy: await profileName(request.createdBySub),
+          /** The creator's name, when the signer isn't the creator. */
+          requestedBy: signer.sub === request.createdBySub ? null : await profileName(request.createdBySub),
           /** Signatures still to make, one after another with the same card session. */
           signatures: signaturesLeft(job),
           /** Extra marks the next signature draws. */

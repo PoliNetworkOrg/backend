@@ -285,6 +285,29 @@ describe("e-signing service", () => {
     expect(env.mailer.signatureRequest.mock.calls.map(([to]) => to)).toEqual(["mario@example.org"])
   })
 
+  it("tells the agent who requested the signature, except on the signer's own request", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+    const request = await env.service.createRequest(manager, {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: false,
+      signers: [
+        { sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+        { sub: secretary.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+      ],
+      output: null,
+      email: null,
+    })
+    // The signer's name is the one saved with the request, the requester's the current one: they no longer match.
+    await env.service.syncProfile(manager, { name: "Luca Verdi Neri", email: "luca@example.org" })
+    const { job } = await sign(env, secretary, secretarySigner, request.id)
+    expect(job.requestedBy).toBe("Luca Verdi Neri")
+    const { ticket } = await env.service.createJob(manager, request.id)
+    expect(await env.service.agentJob(ticket)).toMatchObject({ signer: { name: "Luca Verdi" }, requestedBy: null })
+  })
+
   it("records a signer who couldn't be emailed and why", async () => {
     env.mailer.signatureRequest.mockResolvedValueOnce(false)
     const request = await prepareRequest(env)
