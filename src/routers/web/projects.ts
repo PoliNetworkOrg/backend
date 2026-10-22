@@ -66,19 +66,15 @@ export default createTRPCRouter({
       return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
     }),
 
-  addProject: policy(dashboard("web:content:write"))
+  addProject: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
         .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
-        .pipe(
-          projectFormSchema.extend({
-            createdBy: z.coerce.number<string>().optional(),
-          })
-        )
+        .pipe(projectFormSchema)
     )
     .mutation(async ({ input, ctx }) => {
-      const { title, descriptionIt, descriptionEn, logo, link, category, createdBy } = input
+      const { title, descriptionIt, descriptionEn, logo, link, category } = input
 
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
@@ -92,14 +88,14 @@ export default createTRPCRouter({
           logo: uploadedLogo?.url ?? null,
           link,
           category,
-          ...createdByColumns(authorOf(ctx.actor, createdBy)),
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 
       return res
     }),
 
-  editProject: policy(dashboard("web:content:write"))
+  editProject: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
@@ -107,12 +103,11 @@ export default createTRPCRouter({
         .pipe(
           projectFormSchema.extend({
             id: z.coerce.number<string>(),
-            modifiedBy: z.coerce.number<string>().optional(),
           })
         )
     )
     .mutation(async ({ input, ctx }) => {
-      const { title, descriptionIt, descriptionEn, logo, link, category, modifiedBy } = input
+      const { title, descriptionIt, descriptionEn, logo, link, category } = input
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
@@ -125,7 +120,7 @@ export default createTRPCRouter({
           ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
           link,
           category,
-          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
+          ...modifiedByColumns(authorOf(ctx.actor)),
         })
         .where(eq(PROJECTS.id, input.id))
         .returning()
@@ -167,17 +162,16 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  addProjectResource: policy(dashboard("web:content:write"))
+  addProjectResource: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z.object({
         projectId: z.number().int(),
         kind: z.enum(projectResourceKinds),
         url: resourceUrlSchema,
-        createdBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { projectId, kind, url, createdBy } = input
+      const { projectId, kind, url } = input
 
       const [project] = await DB.select({ id: PROJECTS.id }).from(PROJECTS).where(eq(PROJECTS.id, projectId))
       if (!project) return { error: "NOT_FOUND" }
@@ -192,27 +186,26 @@ export default createTRPCRouter({
           kind,
           url,
           order: existing.length,
-          ...createdByColumns(authorOf(ctx.actor, createdBy)),
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 
       return res
     }),
 
-  editProjectResource: policy(dashboard("web:content:write"))
+  editProjectResource: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z.object({
         id: z.number().int(),
         kind: z.enum(projectResourceKinds),
         url: resourceUrlSchema,
-        modifiedBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { id, kind, url, modifiedBy } = input
+      const { id, kind, url } = input
 
       const [res] = await DB.update(PROJECT_RESOURCES)
-        .set({ kind, url, ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)) })
+        .set({ kind, url, ...modifiedByColumns(authorOf(ctx.actor)) })
         .where(eq(PROJECT_RESOURCES.id, id))
         .returning()
 

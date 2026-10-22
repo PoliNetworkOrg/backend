@@ -43,7 +43,7 @@ INSERT INTO web_freshman_cards (id, title, description, icon, href, created_by_s
 ('guides-3', 'Corsi a Scelta', 'Consigli su come comporre il Piano di Studi.', 'book', '', 'system:freshman-migration'),
 ('guides-4', 'News', 'Le ultime novità dagli studenti del Politecnico.', 'news', '', 'system:freshman-migration'),
 ('guides-5', 'Borsa di Studio', 'Requisiti e scadenze per le agevolazioni.', 'money', '', 'system:freshman-migration'),
-('materials-1', 'Materiali', 'Il più grande archivio didattico creato dagli studenti per gli studenti del Politecnico di Milano. Migliaia di appunti e temi d’esame.', 'folder', '/materials', 'system:freshman-migration'),
+('materials-1', 'Materiali', 'Il più grande archivio didattico creato dagli studenti per gli studenti del Politecnico di Milano. Migliaia di appunti e temi d’esame.', 'folder', 'https://polinetwork.org/it/materials/view/', 'system:freshman-migration'),
 ('tools-1', 'Sync Orario', '', 'repeat', 'https://bebora.github.io/polimi-schedule-js/', 'system:freshman-migration'),
 ('tools-2', 'WeBeep Sync', '', 'refresh', 'https://github.com/toto04/webeep-sync', 'system:freshman-migration'),
 ('telegram-1', 'Generale', '', 'bell', 'https://t.me/PoliGruppo', 'system:freshman-migration'),

@@ -1,4 +1,4 @@
-/** Initial website cards for the explicit development seed, matching migration 0023. */
+/** Initial website cards for the explicit development seed, matching migration 0026. */
 export const defaultFreshmanCards = [
   {
     id: "featured-1",
@@ -55,7 +55,7 @@ export const defaultFreshmanCards = [
     description:
       "Il più grande archivio didattico creato dagli studenti per gli studenti del Politecnico di Milano. Migliaia di appunti e temi d’esame.",
     icon: "folder",
-    href: "/materials",
+    href: "https://polinetwork.org/it/materials/view/",
   },
   {
     id: "tools-1",

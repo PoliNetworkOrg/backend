@@ -46,18 +46,6 @@ export async function getMembers(): Promise<ParsedUser[]> {
   }
 }
 
-export async function setMemberNumber(userId: string, assocNumber: number) {
-  try {
-    const client = getAzureClient()
-    await client.api(`/users/${userId}`).patch({
-      employeeId: assocNumber.toString(),
-    })
-    return { error: null }
-  } catch (err) {
-    return { error: JSON.stringify(err) }
-  }
-}
-
 export async function createMember({ firstName, lastName, assocNumber }: CreateMemberInput): Promise<CreatedMember> {
   const client = getAzureClient()
   // TODO: separate steps and add better error handling, maybe with neverthrow

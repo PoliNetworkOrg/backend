@@ -22,7 +22,7 @@ try {
   const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8")) as {
     entries: Array<{ tag: string }>
   }
-  const previous = { ...journal, entries: journal.entries.filter((entry) => entry.tag !== "0023_freshman_content") }
+  const previous = { ...journal, entries: journal.entries.filter((entry) => entry.tag !== "0026_freshman_content") }
   await import("node:fs/promises").then(({ mkdir }) => mkdir(join(previousMigrations, "meta")))
   await writeFile(join(previousMigrations, "meta/_journal.json"), JSON.stringify(previous))
   for (const entry of previous.entries)

@@ -1,4 +1,6 @@
 import type { Actor } from "@polinetwork/auth-kit"
+import type { SQL } from "drizzle-orm"
+import { PgDialect } from "drizzle-orm/pg-core"
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Context } from "@/trpc"
 
@@ -18,6 +20,8 @@ const db = vi.hoisted(() => ({
   /** Rows each table returns, by SQL name. */
   rows: {} as Record<string, unknown[]>,
   inserted: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  /** The `where` condition of each select, in order. */
+  wheres: [] as unknown[],
   /** Whether an insert hits the idempotency key. */
   conflict: false,
 }))
@@ -33,10 +37,21 @@ vi.mock("@/db", async () => {
     import("@/db/schema/views"),
   ])
   const { getTableName } = await import("drizzle-orm")
+  // Every builder method chains; awaiting the query returns the rows of the table it reads.
   const select = () => ({
     from: (table: Parameters<typeof getTableName>[0]) => {
-      const rows = () => db.rows[getTableName(table)] ?? []
-      return { where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }) }
+      const rows = db.rows[getTableName(table)] ?? []
+      const query: Record<string, unknown> = {
+        // biome-ignore lint/suspicious/noThenProperty: the query builder is awaited like a promise
+        then: (resolve: (value: unknown[]) => unknown, reject: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      }
+      for (const method of ["leftJoin", "innerJoin", "groupBy", "orderBy", "limit"]) query[method] = () => query
+      query.where = (condition: unknown) => {
+        db.wheres.push(condition)
+        return query
+      }
+      return query
     },
   })
   const insert = (table: Parameters<typeof getTableName>[0]) => ({
@@ -44,6 +59,7 @@ vi.mock("@/db", async () => {
       db.inserted.push({ table: getTableName(table), values })
       return {
         onConflictDoNothing: () => ({ returning: async () => (db.conflict ? [] : [{ id: db.inserted.length }]) }),
+        returning: async () => [values],
       }
     },
   })
@@ -74,7 +90,7 @@ describe("app router", () => {
     const missing = procedures()
       .filter(([, procedure]) => !procedure._def.meta?.policy)
       .map(([path]) => path)
-    expect(procedures().length).toBeGreaterThan(90)
+    expect(procedures().length).toBeGreaterThan(70)
     expect(missing).toEqual([])
   })
 
@@ -109,8 +125,6 @@ describe("app router", () => {
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })
-    for (const path of ["web.faqs.addFaqs", "web.projects.editProject", "groups.labels.create"])
-      expect(policyOf(path)?.policy).not.toBe("legacy")
     expect(policyOf("web.projects.getProject")?.policy).toEqual(policyOf("web.projects.getAllProjects")?.policy)
     for (const path of [
       "web.projects.addProjectResource",
@@ -121,25 +135,49 @@ describe("app router", () => {
       expect(policyOf(path)?.policy).toEqual(policyOf("web.projects.editProject")?.policy)
   })
 
-  it("keeps procedures that RFC v3 removes on the legacy path only", () => {
-    const legacy = new Set(
+  it("refuses anonymous callers on every write that records its actor, whatever LEGACY_ANONYMOUS says", () => {
+    const tokenOnly = new Set(
       procedures()
-        .filter(([, procedure]) => procedure._def.meta?.policy === "legacy")
+        .filter(([, procedure]) => procedure._def.meta?.tokenOnly)
         .map(([path]) => path)
     )
     for (const path of [
-      "auth.updateProfilePic",
-      "test.dbQuery",
-      "tg.permissions.addRole",
-      "tg.link.link",
-      "azure.members.setAssocNumber",
+      "tg.grants.create",
+      "tg.grants.interrupt",
+      "tg.groups.leaveChat",
+      "groups.labels.create",
+      "groups.labels.modify",
+      "web.associations.addAssociation",
+      "web.associations.editAssociation",
+      "web.associations.editAssociationLinks",
+      "web.faqs.addFaqs",
+      "web.faqs.addFaqsCategory",
+      "web.faqs.editFaqs",
+      "web.faqs.editFaqsCategory",
+      "web.projects.addProject",
+      "web.projects.editProject",
+      "web.projects.addProjectResource",
+      "web.projects.editProjectResource",
+      "web.guides_matricole.addGuide",
     ])
-      expect(legacy).toContain(path)
+      expect(tokenOnly).toContain(path)
   })
 
-  it("refuses the removed tg.groupLabels mount to token callers", async () => {
+  it("no longer has the procedures RFC v3 Phase 5 removes", () => {
+    const paths = procedures().map(([path]) => path)
+    const removed = paths.filter((path) =>
+      /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$|^azure\.members\.setAssocNumber$/.test(
+        path
+      )
+    )
+    expect(removed).toEqual([])
+    expect(paths).toContain("groups.labels.getAll")
+  })
+
+  it("takes a label's author from the token and drops an actor field the caller still sends", async () => {
+    db.inserted = []
     const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
-    const ctx: Context = {
+    const caller = appRouter.createCaller({
       auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) },
       access: {
         has: () => true,
@@ -148,8 +186,89 @@ describe("app router", () => {
         subjectByTelegramId: () => undefined,
         status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
       },
+    })
+    // An old client still sending `createdBy`: zod strips the unknown key instead of rejecting it.
+    await caller.groups.labels.create({ label: "students", color: "#3b82f6", createdBy: 99 } as never)
+    expect(db.inserted).toEqual([
+      {
+        table: "common_group_labels",
+        values: {
+          label: "students",
+          description: undefined,
+          color: "#3b82f6",
+          createdBy: null,
+          createdBySub: "usr_admin",
+        },
+      },
+    ])
+  })
+
+  it("refuses anonymous label writes even while LEGACY_ANONYMOUS allows anonymous reads", async () => {
+    const caller = appRouter.createCaller({ legacyAnonymous: "allow" })
+    await expect(caller.groups.labels.create({ label: "students", color: "#3b82f6" })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    })
+  })
+})
+
+describe("groups.search", () => {
+  const website: Actor = { kind: "service", client: "website" }
+  const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
+  const access: NonNullable<Context["access"]> = {
+    has: () => true,
+    current: () => null,
+    subjectBySub: () => undefined,
+    subjectByTelegramId: () => undefined,
+    status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+  }
+  const callers = {
+    website: () =>
+      appRouter.createCaller({ auth: { kind: "token", actor: website, scopes: new Set(["backend:public:read"]) } })
+        .groups.search,
+    dashboard: () =>
+      appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access })
+        .groups.search,
+    anonymous: () => appRouter.createCaller({ legacyAnonymous: "allow" }).groups.search,
+  }
+  /** Whether the last query filtered out hidden groups. */
+  const hidesHidden = () => {
+    const condition = db.wheres.at(-1)
+    return condition !== undefined && /\bnot "\w+"\."hide"/.test(new PgDialect().sqlToQuery(condition as SQL).sql)
+  }
+
+  beforeEach(() => {
+    db.rows = {}
+    db.wheres = []
+  })
+
+  it("opens both reads to the website's token", async () => {
+    await expect(callers.website().getAll()).resolves.toEqual([])
+    await expect(callers.website().search({ query: "poli" })).resolves.toEqual({ groups: [], count: 0 })
+  })
+
+  it("never gives the website hidden groups", async () => {
+    await callers.website().getAll()
+    expect(hidesHidden()).toBe(true)
+    await callers.website().search({ showHidden: true })
+    expect(hidesHidden()).toBe(true)
+  })
+
+  it("still gives hidden groups to the dashboard and to anonymous callers while allowed", async () => {
+    for (const caller of [callers.dashboard(), callers.anonymous()]) {
+      await caller.getAll()
+      expect(hidesHidden()).toBe(false)
+      await caller.search({ showHidden: true })
+      expect(hidesHidden()).toBe(false)
+      await caller.search({})
+      expect(hidesHidden()).toBe(true)
     }
-    await expect(appRouter.createCaller(ctx).tg.groupLabels.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+
+  it("refuses service tokens without backend:public:read", async () => {
+    const bot = appRouter.createCaller({
+      auth: { kind: "token", actor: { kind: "service", client: "telegram-bot" }, scopes: new Set(["backend:tg:read"]) },
+    })
+    await expect(bot.groups.search.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 })
 

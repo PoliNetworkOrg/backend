@@ -32,9 +32,12 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
+/** A dashboard user holding every Azure permission the routers check. */
+const ALL_AZURE = ["azure:members:read", "azure:members:create", "azure:groups:read", "azure:groups:write"]
+
 describe("Azure tRPC routes without credentials", () => {
   it("returns linked seed data for members and groups", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const members = await caller.members.getAll()
     const groups = await caller.groups.getAll()
@@ -47,19 +50,8 @@ describe("Azure tRPC routes without credentials", () => {
     )
   })
 
-  it("updates a member number", async () => {
-    const caller = await createCaller()
-
-    await expect(caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })).resolves.toEqual({
-      error: null,
-    })
-
-    const members = await caller.members.getAll()
-    expect(members.find((member) => member.id === "mock-member-grace")?.employeeId).toBe("2042")
-  })
-
   it("creates a member and exposes it in later reads", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
 
     const result = await caller.members.create({
       firstName: "Katherine",
@@ -82,7 +74,7 @@ describe("Azure tRPC routes without credentials", () => {
   })
 
   it("adds and removes group memberships", async () => {
-    const caller = await createCaller()
+    const caller = await createCaller(tokenContext(ALL_AZURE))
     const input = { groupId: "mock-group-empty", userId: "mock-member-grace" }
 
     await expect(caller.groups.addMember(input)).resolves.toBe(true)
@@ -99,17 +91,16 @@ describe("Azure tRPC routes without credentials", () => {
 function tokenContext(
   permissions: string[],
   actor: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_reader", telegramId: null },
-  scopes = ["backend:admin"],
-  fresh = true
+  scopes = ["backend:admin"]
 ): Context {
   return {
     auth: { kind: "token", actor, scopes: new Set(scopes) },
     access: {
-      has: (_, permission) => fresh && permissions.includes(permission),
+      has: (_, permission) => permissions.includes(permission),
       current: () => null,
       subjectBySub: () => undefined,
       subjectByTelegramId: () => undefined,
-      status: () => ({ lastSyncAt: 1, fresh, generation: 1, subjects: 1 }),
+      status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
     },
   }
 }
@@ -132,7 +123,6 @@ describe("Azure directory token authorization", () => {
     ["no permission", tokenContext([])],
     ["creation alone", tokenContext(["azure:members:create"])],
     ["no admin scope", tokenContext(["azure:members:read"], undefined, [])],
-    ["stale snapshot", tokenContext(["azure:members:read"], undefined, undefined, false)],
     ["service actor", tokenContext(["azure:members:read"], { kind: "service", client: "telegram-bot" })],
     [
       "Telegram actor",
@@ -148,20 +138,17 @@ describe("Azure directory token authorization", () => {
     await expect(caller.members.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("keeps existing-user and group changes unavailable even with both member permissions", async () => {
+  it("keeps group reads unavailable even with both member permissions", async () => {
     const caller = await createCaller(tokenContext(["azure:members:read", "azure:members:create"]))
-    await expect(
-      caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })
-    ).rejects.toMatchObject({ code: "FORBIDDEN" })
-    await expect(
-      caller.groups.addMember({ groupId: "mock-group-empty", userId: "mock-member-grace" })
-    ).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("refuses anonymous reads when legacy access is disabled", async () => {
-    const caller = await createCaller({ legacyAnonymous: "deny" })
-    await expect(caller.members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+  it("refuses anonymous reads unless LEGACY_ANONYMOUS allows them", async () => {
+    for (const context of [{}, { legacyAnonymous: "deny" } as const]) {
+      const caller = await createCaller(context)
+      await expect(caller.members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+    }
+    expect(await (await createCaller({ legacyAnonymous: "allow" })).members.getAll()).toHaveLength(3)
   })
 })
 
@@ -186,7 +173,6 @@ describe("Azure group token authorization", () => {
     ["no permission", tokenContext([])],
     ["member permissions alone", tokenContext(["azure:members:read", "azure:members:create"])],
     ["no admin scope", tokenContext(["azure:groups:write"], undefined, [])],
-    ["stale snapshot", tokenContext(["azure:groups:write"], undefined, undefined, false)],
     ["service actor", tokenContext(["azure:groups:write"], { kind: "service", client: "telegram-bot" })],
   ])("refuses membership changes with %s", async (_, context) => {
     const caller = await createCaller(context)
