@@ -111,3 +111,11 @@ Emails (`src/emails/templates`, preview with `bun run email`):
 
 Signatures are checked against the CIE certification authorities of the Ministero dell'Interno bundled in
 `src/esign/trust`. Tests: `bunx vitest run tests/esign-*.test.ts` (validated with poppler `pdfsig` when installed).
+
+## Freshman content
+
+`web.freshman` exposes fixed-slot content for the website and authorized admin editors. Migration
+`0026_freshman_content` initializes 10 resources, 8 Telegram links and 5 existing/new FAQs, preserving matching
+catalog entries. Selected FAQs/categories must be replaced in Freshman before deleting them from the catalog.
+The development seed also initializes the card slots and selections; `--force` clears those selections before
+replacing the sample FAQ catalog.
