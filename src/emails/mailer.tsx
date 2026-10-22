@@ -66,7 +66,15 @@ export async function sendWelcomeEmail(
 
 export async function sendSignatureRequestEmail(
   toAddress: string,
-  props: { signerName: string; requestedBy: string; title: string; role: string | null; url: string }
+  props: {
+    signerName: string
+    requestedBy: string
+    title: string
+    role: string | null
+    ordered: boolean
+    url: string
+    setupUrl: string
+  }
 ) {
   return sendEmail(toAddress, makeSubject(`Signature needed: ${props.title}`), <SignatureRequestEmail {...props} />)
 }

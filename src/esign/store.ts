@@ -109,6 +109,9 @@ export type Job = {
   completedAt: Date | null
 }
 
+/** Why a job ended, stored in its error columns. */
+export type JobError = { code: string; message: string }
+
 export type NewJob = Pick<
   Job,
   "ticketHash" | "requestId" | "signerId" | "sub" | "baseVersion" | "places" | "step" | "expiresAt"
@@ -190,15 +193,27 @@ export interface EsignStore {
   getRequest(id: string): Promise<SigningRequest | null>
   listRequests(filter: RequestFilter): Promise<SigningRequest[]>
   updateRequest(id: string, patch: Partial<Pick<SigningRequest, "delivery">>): Promise<void>
-  /** Cancels an in-progress request and its open jobs, atomically with signature commits. */
-  cancelRequest(id: string, event: NewEvent): Promise<"ok" | "conflict">
+  /**
+   * Cancels an in-progress request and its open jobs, atomically with signature commits. `jobError` tells the agent
+   * and the dashboard why the jobs ended.
+   */
+  cancelRequest(id: string, event: NewEvent, jobError: JobError): Promise<"ok" | "conflict">
   /**
    * Deletes a request with its documents, signers, jobs and events, unless it is in progress or its delivery is
    * pending, atomically with signature commits and delivery claims.
    */
   deleteRequest(id: string): Promise<"ok" | "conflict">
-  /** Records a pending signer's refusal, which ends the request, atomically with signature commits. */
-  declineRequest(id: string, signerId: string, reason: string | null, event: NewEvent): Promise<"ok" | "conflict">
+  /**
+   * Records a pending signer's refusal, which ends the request and cancels its open jobs with `jobError`, atomically
+   * with signature commits.
+   */
+  declineRequest(
+    id: string,
+    signerId: string,
+    reason: string | null,
+    event: NewEvent,
+    jobError: JobError
+  ): Promise<"ok" | "conflict">
   /**
    * Claims a completed request's delivery for one worker: succeeds when it is pending (or failed with `retry`) and no
    * other attempt started after `staleBefore`.

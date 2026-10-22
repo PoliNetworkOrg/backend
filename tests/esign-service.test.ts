@@ -8,6 +8,7 @@ import { signedBytes } from "@/esign/pdf/incremental"
 import { inspectPdf } from "@/esign/pdf/inspect"
 import { finalizeSignature, prepareSignature } from "@/esign/pdf/pades"
 import { type Access, type Caller, createEsignService, type Mailer } from "@/esign/service"
+import type { EsignStore } from "@/esign/store"
 import { createMemoryStore } from "@/esign/store-memory"
 import { appendRevision, cardSign, createTestCa, samplePdf, type TestSigner } from "./esign-fixtures"
 
@@ -27,10 +28,12 @@ function setup(
     revocation?: "good" | "revoked" | "unknown"
     policy?: "require" | "prefer" | "off"
     directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
+    /** Another service instance's store: a replica, or the service after a restart. */
+    store?: EsignStore
   } = {}
 ) {
   let clock = new Date("2026-10-17T10:00:00Z").getTime()
-  const store = createMemoryStore()
+  const store = opts.store ?? createMemoryStore()
   const drive = createMockDrive()
   const archive = createMockDrive({ id: "archive", label: "Archive" })
   /** Roles and permissions by subject, for drive access rules. */
@@ -174,7 +177,11 @@ describe("e-signing service", () => {
     expect(request.turn).toEqual([secretary.sub])
     expect(env.mailer.signatureRequest).toHaveBeenCalledWith(
       "mario@example.org",
-      expect.objectContaining({ role: "segretario" })
+      expect.objectContaining({
+        role: "segretario",
+        ordered: true,
+        setupUrl: "https://admin.example.org/dashboard/esign/setup",
+      })
     )
 
     expect(await env.service.listRequests(secretary, "inbox")).toHaveLength(1)
@@ -195,6 +202,7 @@ describe("e-signing service", () => {
       const { request: done } = await env.service.getRequest(manager, request.id)
       expect(done.delivery?.status).toBe("delivered")
     })
+    expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
     const { request: done, versions, events } = await env.service.getRequest(manager, request.id)
     expect(versions.map((v) => v.version)).toEqual([0, 1, 2])
     expect(done.signers.map((s) => s.fiscalCode)).toEqual(["RSSMRA80A01F205X", "BNCNNA85B41F205Y"])
@@ -215,22 +223,86 @@ describe("e-signing service", () => {
     expect(attachment?.filename).toBe("verbale.pdf")
   })
 
-  it("binds a signer to the CIE of their first signature", async () => {
+  it("emails every signer of an unordered request once, when it is created", async () => {
+    const request = await prepareRequest(env, false)
+    expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
+    expect(env.mailer.signatureRequest).toHaveBeenCalledWith(
+      "anna@example.org",
+      expect.objectContaining({ ordered: false })
+    )
+    await sign(env, secretary, secretarySigner, request.id)
+    expect(env.mailer.signatureRequest).toHaveBeenCalledTimes(2)
+    const { events } = await env.service.getRequest(manager, request.id)
+    expect(events.filter((e) => e.type === "notified")).toHaveLength(2)
+  })
+
+  it("doesn't email the creator who signs an unordered request", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+    const request = await env.service.createRequest(manager, {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: false,
+      signers: [
+        { sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+        { sub: secretary.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+      ],
+      output: null,
+      email: null,
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    expect(env.mailer.signatureRequest.mock.calls.map(([to]) => to)).toEqual(["mario@example.org"])
+  })
+
+  it("records a signer who couldn't be emailed and why", async () => {
+    env.mailer.signatureRequest.mockResolvedValueOnce(false)
+    const request = await prepareRequest(env)
+    await env.service.syncProfile(president, { name: "Anna Bianchi", email: null })
+    await sign(env, secretary, secretarySigner, request.id)
+    await vi.waitFor(async () => {
+      const { events } = await env.service.getRequest(manager, request.id)
+      expect(events.filter((e) => e.type === "notify_failed").map((e) => e.data)).toEqual([
+        { sub: secretary.sub, reason: "send_failed" },
+        { sub: president.sub, reason: "no_email" },
+      ])
+    })
+    const { events } = await env.service.getRequest(manager, request.id)
+    expect(events.some((e) => e.type === "notified")).toBe(false)
+  })
+
+  it("binds a signer to the CIE of their first signature, ending a job signed with another", async () => {
     const request = await prepareRequest(env, false)
     await sign(env, secretary, secretarySigner, request.id)
     const other = await prepareRequest(env, false)
-    const { ticket } = await env.service.createJob(secretary, other.id)
+    const { ticket, jobId } = await env.service.createJob(secretary, other.id)
     await expect(
       env.service.agentPrepare(ticket, Buffer.from(presidentSigner.cert).toString("base64"), [], 2)
     ).rejects.toMatchObject({ code: "signer_mismatch" })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "failed",
+      errorCode: "signer_mismatch",
+      errorMessage: "This CIE does not belong to Mario Rossi",
+    })
+    expect((await env.service.getRequest(president, other.id)).signingNow).toBeNull()
+    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({
+      code: "job_failed",
+      message: "This CIE does not belong to Mario Rossi",
+    })
   })
 
   it("lets one signer at a time sign an unordered request", async () => {
     const request = await prepareRequest(env, false)
     expect(request.turn).toEqual([secretary.sub, president.sub])
-    await env.service.createJob(secretary, request.id)
+    const { expiresAt } = await env.service.createJob(secretary, request.id)
+    expect((await env.service.getRequest(president, request.id)).signingNow).toEqual({
+      sub: secretary.sub,
+      name: "Mario Rossi",
+      until: expiresAt,
+    })
     await expect(env.service.createJob(president, request.id)).rejects.toThrow(/Mario Rossi is signing/)
     env.advance(11 * 60 * 1000)
+    expect((await env.service.getRequest(president, request.id)).signingNow).toBeNull()
     await expect(env.service.createJob(president, request.id)).resolves.toMatchObject({ ticket: expect.any(String) })
   })
 
@@ -255,12 +327,41 @@ describe("e-signing service", () => {
     ).rejects.toMatchObject({ code: "certificate_invalid" })
   })
 
-  it("cancels open signatures with the request", async () => {
+  it("cancels open signatures with the request, saying who cancelled it", async () => {
     const request = await prepareRequest(env)
     const { ticket, jobId } = await env.service.createJob(secretary, request.id)
     await env.service.cancelRequest(manager, request.id)
-    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({ code: "job_cancelled" })
-    expect((await env.service.jobStatuses(secretary, [jobId]))[0].status).toBe("cancelled")
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "cancelled",
+      errorCode: "request_cancelled",
+      errorMessage: "Luca Verdi cancelled this request.",
+    })
+    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({
+      code: "job_cancelled",
+      message: "Luca Verdi cancelled this request.",
+    })
+    await expect(env.service.createJob(secretary, request.id)).rejects.toMatchObject({
+      code: "conflict",
+      message: "“Verbale CD 10/10/2026” was cancelled.",
+    })
+  })
+
+  it("cancels open signatures when a co-signer declines, with the reason", async () => {
+    const request = await prepareRequest(env, false)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    await env.service.declineRequest(president, request.id, "Errore nel testo")
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "cancelled",
+      errorCode: "request_declined",
+      errorMessage: "Anna Bianchi declined this request: “Errore nel testo”.",
+    })
+    await expect(env.service.agentJob(ticket)).rejects.toThrow(
+      "Anna Bianchi declined this request: “Errore nel testo”."
+    )
+    await expect(env.service.uploadSigned(secretary, request.id, await samplePdf())).rejects.toMatchObject({
+      code: "conflict",
+      message: "“Verbale CD 10/10/2026” was declined.",
+    })
   })
 
   it("records agent failures without ending the job", async () => {
@@ -276,6 +377,51 @@ describe("e-signing service", () => {
     })
     await env.service.agentFail(ticket, "cancelled", null)
     expect((await env.service.jobStatuses(secretary, [jobId]))[0].status).toBe("cancelled")
+    await expect(env.service.agentJob(ticket)).rejects.toThrow("This signature was cancelled.")
+  })
+
+  it("refuses an agent error that would pass for how the service ended the job", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    for (const code of ["request_cancelled", "request_declined", "job_done", "job_cancelled"])
+      await expect(env.service.agentFail(ticket, code, "Luca Verdi cancelled this request.")).rejects.toMatchObject({
+        code: "bad_request",
+      })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "pending",
+      errorCode: null,
+      errorMessage: null,
+    })
+  })
+
+  it("quotes as much of a long decline reason as fits in the open signatures' message", async () => {
+    const request = await prepareRequest(env, false)
+    const { jobId } = await env.service.createJob(secretary, request.id)
+    const reason = "Il testo del verbale non corrisponde a quanto deliberato. ".repeat(8).trim()
+    await env.service.declineRequest(president, request.id, reason)
+    const { errorMessage } = (await env.service.jobStatuses(secretary, [jobId]))[0]
+    expect(errorMessage?.length).toBeLessThanOrEqual(300)
+    expect(errorMessage).toMatch(/^Anna Bianchi declined this request: “Il testo del verbale .+…”\.$/)
+    const { request: detail } = await env.service.getRequest(manager, request.id)
+    expect(detail.signers.find((s) => s.sub === president.sub)?.declineReason).toBe(reason)
+  })
+
+  it("ends the job on an agent error that retrying can't fix", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    await expect(env.service.agentFail(ticket, "pin_locked", "Your CIE PIN is blocked.")).resolves.toEqual({
+      status: "failed",
+    })
+    const failed = { status: "failed", errorCode: "pin_locked", errorMessage: "Your CIE PIN is blocked." }
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject(failed)
+    await expect(env.service.agentJob(ticket)).rejects.toMatchObject({
+      code: "job_failed",
+      message: "Your CIE PIN is blocked.",
+    })
+    // The agent reports the backend's own errors back: the failed job stays as it is.
+    await expect(env.service.agentFail(ticket, "job_failed", "Something else")).resolves.toEqual({ status: "failed" })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject(failed)
+    await expect(env.service.createJob(secretary, request.id)).resolves.toMatchObject({ ticket: expect.any(String) })
   })
 
   it("accepts a PDF signed with the official CIE app as a fallback", async () => {
@@ -475,6 +621,7 @@ describe("e-signing service", () => {
     await sign(env, secretary, secretarySigner, request.id)
     await sign(env, president, presidentSigner, request.id)
     await expect(env.service.cancelRequest(manager, request.id)).rejects.toMatchObject({ code: "conflict" })
+    await expect(env.service.createJob(president, request.id)).rejects.toThrow("is already signed by everyone")
   })
 
   it("deletes only a finished request, and only managers delete", async () => {
@@ -766,14 +913,14 @@ describe("e-signing service", () => {
     })
   })
 
-  it("asks an outdated agent to update before it signs", async () => {
+  it("asks an outdated agent to update before it signs, ending the job", async () => {
     const request = await prepareRequest(env)
     const { ticket, jobId } = await env.service.createJob(secretary, request.id)
     await expect(
       env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"))
     ).rejects.toMatchObject({ code: "agent_outdated" })
     expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
-      status: "pending",
+      status: "failed",
       errorCode: "agent_outdated",
     })
   })
@@ -839,8 +986,14 @@ describe("e-signing service", () => {
     expect(await env.service.listRequests(manager, "all")).toHaveLength(1)
     expect(await env.service.listRequests(president, "inbox")).toHaveLength(1)
 
-    // A signer who loses access can't sign any more.
+    // A signer who loses access can't sign any more, and is told so instead of seeing their turn.
     env.people.set(president.sub, { roles: [], permissions: ["esign:sign"] })
+    expect(await env.service.listRequests(president, "inbox")).toHaveLength(0)
+    expect(await env.service.listRequests(president, "mine")).toHaveLength(1)
+    const { request: stranded } = await env.service.getRequest(president, request.id)
+    expect(stranded.myTurn).toBe(false)
+    expect(stranded.turn).toEqual([president.sub])
+    expect(stranded.signers[0].lostAccess).toBe("Archive")
     await expect(env.service.createJob(president, request.id)).rejects.toThrow(/no longer sign documents of Archive/)
 
     // Clearing the rule restores the default.
@@ -849,7 +1002,44 @@ describe("e-signing service", () => {
       sign: { roles: [], permissions: [] },
     })
     expect((await env.service.drivesFor(other)).map((d) => d.id)).toEqual(["dev", "archive"])
+    expect((await env.service.getRequest(president, request.id)).request.signers[0].lostAccess).toBeNull()
     await expect(env.service.createJob(president, request.id)).resolves.toMatchObject({ ticket: expect.any(String) })
+  })
+
+  it("lists the requests in progress that a narrower sign rule would strand", async () => {
+    const admin: Caller = { ...manager, canManageDrives: true }
+    const boardOnly = { roles: ["direttivo"], permissions: [] }
+    env.people.set(president.sub, { roles: ["direttivo"], permissions: ["esign:sign"] })
+    env.people.set(secretary.sub, { roles: [], permissions: ["esign:sign"] })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    await env.service.syncProfile(president, { name: "Anna Bianchi", email: "anna@example.org" })
+    const { document } = await env.service.stageDriveItem(manager, "archive", "mock-verbale-cd")
+    // The secretary signs second: a later signer of an ordered request is stranded too.
+    const request = await env.service.createRequest(manager, {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: true,
+      signers: [
+        { sub: president.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+        { sub: secretary.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+      ],
+      output: null,
+      email: null,
+    })
+
+    expect(await env.service.driveAccessImpact(admin, "archive", boardOnly)).toEqual([
+      { id: request.id, title: "Verbale", signers: ["Mario Rossi"] },
+    ])
+    expect(await env.service.driveAccessImpact(admin, "dev", boardOnly)).toEqual([])
+    expect(await env.service.driveAccessImpact(admin, "archive", { roles: [], permissions: [] })).toEqual([])
+    await env.service.setDriveAccess(admin, "archive", { request: { roles: [], permissions: [] }, sign: boardOnly })
+    expect(await env.service.driveAccessImpact(admin, "archive", boardOnly)).toEqual([])
+    expect(
+      await env.service.driveAccessImpact(admin, "archive", { roles: ["direttivo", "socio"], permissions: [] })
+    ).toEqual([])
+    await expect(env.service.driveAccessImpact(manager, "archive", boardOnly)).rejects.toMatchObject({
+      code: "forbidden",
+    })
   })
 
   it("matches a rule by permission as well as by role", async () => {
@@ -870,6 +1060,33 @@ describe("e-signing service", () => {
     const { request: declined } = await env.service.getRequest(manager, request.id)
     expect(declined.status).toBe("declined")
     expect(declined.signers[0]).toMatchObject({ status: "declined", declineReason: "Errore nel testo" })
+  })
+
+  it("reads a document's bytes for its pages and signatures only when they weren't inspected yet", async () => {
+    const request = await prepareRequest(env)
+    const documentId = (await env.service.getRequest(manager, request.id)).currentDocumentId ?? ""
+    const getDocument = vi.spyOn(env.store, "getDocument")
+    // The upload inspected it.
+    const { meta, pdf } = await env.service.documentInfo(secretary, documentId)
+    expect(meta).toMatchObject({ id: documentId, fileName: "verbale.pdf", version: 0, pages: 2 })
+    expect(meta).not.toHaveProperty("content")
+    expect(pdf.pages).toHaveLength(2)
+    expect(getDocument).not.toHaveBeenCalled()
+    // A replica reads and inspects it once.
+    const replica = setup({ store: env.store })
+    await expect(replica.service.documentInfo(secretary, documentId)).resolves.toEqual({ meta, pdf })
+    await replica.service.documentInfo(president, documentId)
+    expect(getDocument).toHaveBeenCalledTimes(1)
+    const stranger: Caller = { sub: "sub-stranger", canManage: false }
+    await expect(replica.service.documentInfo(stranger, documentId)).rejects.toMatchObject({ code: "not_found" })
+    await expect(env.service.document(stranger, documentId)).rejects.toMatchObject({ code: "not_found" })
+    const { meta: same, content } = await env.service.document(secretary, documentId)
+    expect(same).toEqual(meta)
+    expect(content).toHaveLength(meta.size)
+    // A staged upload is its creator's and the managers'.
+    const { document: staged } = await env.service.stageUpload(manager, "bozza.pdf", await samplePdf(1))
+    expect((await env.service.documentInfo(manager, staged.id)).pdf.pages).toHaveLength(1)
+    await expect(env.service.documentInfo(secretary, staged.id)).rejects.toMatchObject({ code: "not_found" })
   })
 
   it("hides requests from people who are not involved", async () => {
