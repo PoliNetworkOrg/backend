@@ -19,27 +19,30 @@ const alg = {
   publicExponent: new Uint8Array([1, 0, 1]),
   modulusLength: 2048,
 }
+const VALID_FROM = new Date("2026-01-01T00:00:00Z")
+const VALID_UNTIL = new Date("2036-01-01T00:00:00Z")
 
 type Signer = { cert: Uint8Array; key: webcrypto.CryptoKey; name: string }
 let ca: x509.X509Certificate
+let caKeys: CryptoKeyPair
 let secretary: Signer
 let president: Signer
 
-async function issue(name: string, fiscalCode: string, caKeys: CryptoKeyPair): Promise<Signer> {
-  const keys = await webcrypto.subtle.generateKey(alg, true, ["sign", "verify"])
+async function issue(name: string, fiscalCode: string, keys: CryptoKeyPair, validTo = VALID_UNTIL): Promise<Signer> {
+  const signerKeys = await webcrypto.subtle.generateKey(alg, true, ["sign", "verify"])
   const [surname, given] = name.split(" ")
   const cert = await x509.X509CertificateGenerator.create({
     serialNumber: Math.floor(Math.random() * 1e9).toString(16),
     subject: `C=IT, 2.5.4.4=${surname}, 2.5.4.42=${given}, 2.5.4.5=TINIT-${fiscalCode}, CN=${name}`,
     issuer: ca.subject,
-    notBefore: new Date(Date.now() - 86_400_000),
-    notAfter: new Date(Date.now() + 365 * 86_400_000),
+    notBefore: VALID_FROM,
+    notAfter: validTo,
     signingAlgorithm: alg,
-    publicKey: keys.publicKey,
-    signingKey: caKeys.privateKey,
+    publicKey: signerKeys.publicKey,
+    signingKey: keys.privateKey,
     extensions: [new x509.KeyUsagesExtension(x509.KeyUsageFlags.digitalSignature | x509.KeyUsageFlags.nonRepudiation)],
   })
-  return { cert: new Uint8Array(cert.rawData), key: keys.privateKey, name }
+  return { cert: new Uint8Array(cert.rawData), key: signerKeys.privateKey, name }
 }
 
 /** Signs a SHA-256 digest the way the agent does with CKM_RSA_PKCS: DigestInfo, PKCS#1 v1.5 padding, raw RSA. */
@@ -99,12 +102,12 @@ function pdfsig(pdf: Uint8Array): string | null {
 }
 
 beforeAll(async () => {
-  const caKeys = await webcrypto.subtle.generateKey(alg, true, ["sign", "verify"])
+  caKeys = await webcrypto.subtle.generateKey(alg, true, ["sign", "verify"])
   ca = await x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: "01",
     name: "C=IT, O=Test, CN=Test CIE CA",
-    notBefore: new Date(Date.now() - 86_400_000),
-    notAfter: new Date(Date.now() + 3650 * 86_400_000),
+    notBefore: VALID_FROM,
+    notAfter: VALID_UNTIL,
     signingAlgorithm: alg,
     keys: caKeys,
     extensions: [new x509.BasicConstraintsExtension(true, undefined, true)],
@@ -112,6 +115,20 @@ beforeAll(async () => {
   secretary = await issue("ROSSI MARIO", "RSSMRA80A01F205X", caKeys)
   president = await issue("BIANCHI ANNA", "BNCNNA85B41F205Y", caKeys)
 }, 30_000)
+
+it("rejects an expired signing certificate", async () => {
+  const expired = await issue("ROSSI MARIO", "RSSMRA80A01F205X", caKeys, new Date("2026-10-16T00:00:00Z"))
+  await expect(
+    prepareSignature(await samplePdf(false), expired.cert, {
+      placement: { page: 0, x: 0.1, y: 0.8, width: 0.35, height: 0.1 },
+      fieldName: "Expired",
+      signerName: expired.name,
+      reason: "Test",
+      signingTime: new Date("2026-10-17T00:00:00Z"),
+      appearance: { lines: [{ text: "Expired certificate regression" }] },
+    })
+  ).rejects.toMatchObject({ code: "certificate_invalid" })
+})
 
 describe.each([
   ["classic cross-reference table", false],
