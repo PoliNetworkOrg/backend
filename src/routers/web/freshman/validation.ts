@@ -27,7 +27,6 @@ export const freshmanSlotId = z
 export const updateFreshmanCardInput = freshmanCardFields
   .extend({
     id: freshmanSlotId,
-    modifiedBy: z.number().int().positive().optional(),
   })
   .superRefine((input, ctx) => {
     if (input.id.startsWith("telegram-") && input.href === "")
@@ -37,7 +36,6 @@ export const moveFreshmanCardInput = z
   .object({
     id: freshmanSlotId,
     direction: z.union([z.literal(-1), z.literal(1)]),
-    modifiedBy: z.number().int().positive().optional(),
   })
   .strict()
 export const selectFreshmanFaqInput = z
@@ -48,7 +46,6 @@ export const selectFreshmanFaqInput = z
       .min(0)
       .max(freshmanFaqCount - 1),
     faqId: z.number().int().positive(),
-    modifiedBy: z.number().int().positive().optional(),
   })
   .strict()
 

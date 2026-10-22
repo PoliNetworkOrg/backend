@@ -6,7 +6,6 @@ import type { RequestAuth } from "@/idp/auth"
 vi.hoisted(() => {
   Object.assign(process.env, {
     NODE_ENV: "test",
-    BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
     ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     DB_HOST: "localhost",
     DB_USER: "postgres",

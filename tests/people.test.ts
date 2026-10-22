@@ -465,3 +465,27 @@ it("retains deselected census groups as pending HR work until Telegram confirms 
     person: { discrepancies: [] },
   })
 })
+
+it("keeps groups and pending removals while Telegram group admins are unknown", async () => {
+  const groups: { chatId: string; title: string; admins: string[] | null }[] = [
+    { chatId: "-1001", title: "Test group", admins: ["103"] },
+  ]
+  const h = harness({ telegramGroups: async () => groups })
+  await h.seed()
+  await h.service.listPeople(master)
+  await h.service.answerCensus(viewer("member", ["people:self"], "103"), {
+    answer: "continues",
+    course: "Computer science",
+    year: "2nd year",
+    campus: "Leonardo",
+    keepGroups: [],
+    keepTeams: [],
+    reason: "",
+    note: "",
+  })
+  groups[0].admins = null
+  const person = await h.service.getPerson(master, { id: "P-0003" })
+  expect(person.admin?.groups).toEqual([{ chatId: "-1001", title: "Test group" }])
+  expect(person.discrepancies).toContainEqual(expect.objectContaining({ kind: "admin-removal" }))
+  expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(1)
+})

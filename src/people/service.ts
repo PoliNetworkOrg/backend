@@ -80,11 +80,13 @@ export function createPeopleService(options: PeopleOptions) {
     for (const p of Object.values(s.persons))
       if (p.admin && p.profile.telegramId) {
         const telegramId = p.profile.telegramId
-        p.admin.groups = groups
-          .filter((g) => g.admins.includes(telegramId))
-          .map(({ chatId, title }) => ({ chatId, title }))
+        const known = new Set(groups.filter((g) => g.admins).map((g) => g.chatId))
+        p.admin.groups = [
+          ...p.admin.groups.filter((g) => !known.has(g.chatId)),
+          ...groups.filter((g) => g.admins?.includes(telegramId)).map(({ chatId, title }) => ({ chatId, title })),
+        ]
         p.pendingGroupRemovals = p.pendingGroupRemovals?.filter((pending) => {
-          if (p.admin?.groups.some((g) => g.chatId === pending.chatId)) return true
+          if (!known.has(pending.chatId) || p.admin?.groups.some((g) => g.chatId === pending.chatId)) return true
           p.discrepancies = p.discrepancies.filter((d) => d.message !== pending.message)
           log(p, "system", `Telegram confirmed admin removal from ${pending.chatId}`, now())
           return false
@@ -1337,7 +1339,7 @@ export function createPeopleService(options: PeopleOptions) {
         const allowed = new Set(groups.map((g) => g.chatId))
         return {
           scope,
-          groups: groups.map((g) => ({ chatId: g.chatId, title: g.title, admins: g.admins.length })),
+          groups: groups.map((g) => ({ chatId: g.chatId, title: g.title, admins: g.admins?.length ?? null })),
           admins: scoped.map((p) => {
             const r = row(u.state, p, v, config, date(), true)
             r.profile.personalEmail = null

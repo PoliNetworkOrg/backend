@@ -26,23 +26,10 @@ export const people = createPeopleService({
       telegramId: idp?.snapshot?.current()?.bySub(a.sub)?.telegramId ?? null,
     }))
   },
+  // Group admins are native Telegram status (RFC v3 decision 2), which the backend does not store.
   async telegramGroups() {
-    const [groups, admins] = await Promise.all([
-      DB.select().from(SCHEMA.TG.groups),
-      DB.select().from(SCHEMA.TG.groupAdmins),
-    ])
-    const adminsByGroup = new Map<string, string[]>()
-    for (const admin of admins) {
-      const id = String(admin.groupId)
-      const members = adminsByGroup.get(id) ?? []
-      members.push(String(admin.userId))
-      adminsByGroup.set(id, members)
-    }
-    return groups.map((g) => ({
-      chatId: String(g.telegramId),
-      title: g.title,
-      admins: adminsByGroup.get(String(g.telegramId)) ?? [],
-    }))
+    const groups = await DB.select().from(SCHEMA.TG.groups)
+    return groups.map((g) => ({ chatId: String(g.telegramId), title: g.title, admins: null }))
   },
   async telegramUsers() {
     const users = await DB.select().from(SCHEMA.TG.users)
