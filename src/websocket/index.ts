@@ -9,19 +9,14 @@ type ClientToServerEvents = Telegram.ToServer
 type ServerToClientEvents = Telegram.ToClient
 
 export interface SocketData {
-  type: "telegram" | "admin"
   connectedAt: Date
-  /** `token`: authenticated as the bot (RFC v3 §8.3); `legacy`: identified by the handshake query. */
-  auth: "token" | "legacy"
 }
 
 type ServerSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
 
 export type WebSocketServerOptions = {
-  /** Checks the handshake's `auth.token`; absent means anonymous. */
+  /** Checks the handshake's `auth.token`; only the Telegram bot's token is accepted (RFC v3 §8.3). */
   authenticate: (token: unknown) => Promise<SocketAuth>
-  /** RFC v3 §13: whether sockets without a token are accepted. */
-  legacyAnonymous: "allow" | "deny"
 }
 
 /** A missing acknowledgement must not hang the request that triggered the emit. */
@@ -43,13 +38,6 @@ export class WebSocketServer {
             logger.warn({ reason: auth.reason }, "[WS] socket rejected")
             return next(new Error("Unauthorized"))
           }
-          if (auth.kind === "anonymous") {
-            if (options.legacyAnonymous !== "allow") return next(new Error("Unauthorized"))
-            socket.data.auth = "legacy"
-            return next()
-          }
-          socket.data.auth = "token"
-          socket.data.type = "telegram"
           // The bot reconnects with a fresh token.
           const timer = setTimeout(() => socket.disconnect(true), Math.max(0, auth.expiresAt - Date.now()))
           socket.on("disconnect", () => clearTimeout(timer))
@@ -64,17 +52,7 @@ export class WebSocketServer {
 
     this.io.on("connection", (s) => {
       s.data.connectedAt = new Date()
-      if (s.data.auth === "token") {
-        logger.info("[WS] Telegram socket connected with a token")
-        return
-      }
-      logger.info("[AUTH] legacy anonymous socket")
-      if ("type" in s.handshake.query && s.handshake.query.type === "telegram") {
-        logger.info("[WS] Telegram socket connected")
-        s.data.type = s.handshake.query.type
-      } else {
-        logger.info("[WS] Generic socket connected")
-      }
+      logger.info("[WS] Telegram socket connected with a token")
     })
   }
 
@@ -85,18 +63,13 @@ export class WebSocketServer {
   }
 
   /**
-   * The bot's socket, preferring one authenticated with a token. While the bot reconnects with a
-   * fresh token, the newest connection is the one that will not be cut at `exp`.
+   * The bot's socket. While the bot reconnects with a fresh token, the newest connection is the one
+   * that will not be cut at `exp`.
    */
   private telegramSocket(action: string): ServerSocket | null {
-    let token: ServerSocket | null = null
-    let legacy: ServerSocket | null = null
-    for (const socket of this.io.of("/").sockets.values()) {
-      if (socket.data.type !== "telegram") continue
-      if (socket.data.auth !== "token") legacy ??= socket
-      else if (!token || socket.data.connectedAt > token.data.connectedAt) token = socket
-    }
-    const socket = token ?? legacy
+    let socket: ServerSocket | null = null
+    for (const candidate of this.io.of("/").sockets.values())
+      if (!socket || candidate.data.connectedAt > socket.data.connectedAt) socket = candidate
     if (!socket) logger.error(`[WS] There is no bot websocket connected, cannot perform ${action}`)
     return socket
   }

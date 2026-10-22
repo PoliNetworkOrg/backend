@@ -83,6 +83,7 @@ try {
       signedDocument: async () => {
         throw new Error("eSign must never send receipt email")
       },
+      requestUpdate: async () => true,
     },
     logger: { info() {}, warn() {}, error() {} },
     dashboardUrl: config.dashboardUrl,

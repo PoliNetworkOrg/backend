@@ -11,7 +11,7 @@ export const ACT_AS_SCOPE = "backend:tg:act-as"
 
 /**
  * How a request authenticated (RFC v3 §6.4, §13):
- * - `anonymous`: no bearer token; the legacy path, while `LEGACY_ANONYMOUS=allow`;
+ * - `anonymous`: no bearer token; refused unless `LEGACY_ANONYMOUS=allow` (rollback only);
  * - `token`: a verified IdP access token and the actor it resolves to;
  * - `rejected`: a token or actor header was sent but cannot be accepted. Never falls back to legacy.
  */

@@ -1,12 +1,14 @@
 import { render } from "@react-email/components"
 import { createTestAccount, createTransport, getTestMessageUrl } from "nodemailer"
 import type { JSX } from "react"
-import { sendEmail as azureSendEmail, type EmailAttachment } from "@/azure/functions/emails"
+import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } from "@/azure/functions/emails"
 import { env } from "@/env"
+import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import OtpEmail from "./templates/otp"
+import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
-import SignedDocumentEmail from "./templates/signed-document"
+import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
 import Welcome from "./templates/welcome"
 
 const makeSubject = (subject: string) => (env.NODE_ENV === "development" ? `[DEV] ${subject}` : subject)
@@ -26,11 +28,13 @@ async function devSendMail(
   to: string | string[],
   subject: string,
   component: JSX.Element,
-  attachments: EmailAttachment[] = []
+  attachments: EmailAttachment[] = [],
+  options: EmailOptions = {}
 ) {
   const html = await render(component)
   const res = await transporter.sendMail({
     to,
+    replyTo: options.replyTo,
     subject,
     html,
     attachments: attachments.map((a) => ({ ...a, content: Buffer.from(a.content) })),
@@ -66,26 +70,36 @@ export async function sendWelcomeEmail(
 
 export async function sendSignatureRequestEmail(
   toAddress: string,
-  props: { signerName: string; requestedBy: string; title: string; role: string | null; url: string }
+  props: {
+    signerName: string
+    requestedBy: string
+    title: string
+    role: string | null
+    ordered: boolean
+    url: string
+    setupUrl: string
+  }
 ) {
   return sendEmail(toAddress, makeSubject(`Signature needed: ${props.title}`), <SignatureRequestEmail {...props} />)
 }
 
+export async function sendRequestUpdateEmail(toAddress: string, props: RequestUpdate) {
+  return sendEmail(toAddress, makeSubject(requestUpdateSubject(props)), <RequestUpdateEmail {...props} />)
+}
+
+/** In Italian: it goes to offices and people outside PoliNetwork. Replies reach whoever sent the request. */
 export async function sendSignedDocumentEmail(
   to: string[],
-  props: {
-    title: string
-    signers: { name: string; role: string | null }[]
-    message: string | null
-    link: string | null
-  },
+  props: SignedDocumentProps,
   attachment: EmailAttachment | null
 ) {
+  const { sentBy } = props
   return sendEmail(
     to,
-    makeSubject(`Signed: ${props.title}`),
+    makeSubject(`Documento firmato: ${props.title}`),
     <SignedDocumentEmail {...props} />,
-    attachment ? [attachment] : []
+    attachment ? [attachment] : [],
+    sentBy?.email ? { replyTo: { name: sentBy.name, address: sentBy.email } } : {}
   )
 }
 

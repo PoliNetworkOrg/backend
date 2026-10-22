@@ -1,6 +1,8 @@
 import { Container, Link, Section, Text } from "@react-email/components"
+import type { ReactNode } from "react"
 
-export function Footer() {
+/** `children` replaces the "do not reply" note. */
+export function Footer({ children }: { children?: ReactNode }) {
   return (
     <Section className="py-5 text-center bg-gray-100">
       <Container className="px-5">
@@ -8,8 +10,12 @@ export function Footer() {
           PoliNetwork APS
         </Link>
         <Text className="text-xs text-gray-700">
-          This is an automated message. <br /> Please <strong>do not reply</strong> to this email directly as you will
-          not receive a response.
+          {children ?? (
+            <>
+              This is an automated message. <br /> Please <strong>do not reply</strong> to this email directly as you
+              will not receive a response.
+            </>
+          )}
         </Text>
       </Container>
     </Section>

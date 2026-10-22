@@ -42,19 +42,15 @@ export default createTRPCRouter({
       return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
     }),
 
-  addProject: policy(dashboard("web:content:write"))
+  addProject: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
         .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
-        .pipe(
-          projectFormSchema.extend({
-            createdBy: z.coerce.number<string>().optional(),
-          })
-        )
+        .pipe(projectFormSchema)
     )
     .mutation(async ({ input, ctx }) => {
-      const { title, descriptionIt, descriptionEn, logo, link, category, createdBy } = input
+      const { title, descriptionIt, descriptionEn, logo, link, category } = input
 
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
@@ -68,14 +64,14 @@ export default createTRPCRouter({
           logo: uploadedLogo?.url ?? null,
           link,
           category,
-          ...createdByColumns(authorOf(ctx.actor, createdBy)),
+          ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
 
       return res
     }),
 
-  editProject: policy(dashboard("web:content:write"))
+  editProject: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(
       z
         .instanceof(FormData)
@@ -83,12 +79,11 @@ export default createTRPCRouter({
         .pipe(
           projectFormSchema.extend({
             id: z.coerce.number<string>(),
-            modifiedBy: z.coerce.number<string>().optional(),
           })
         )
     )
     .mutation(async ({ input, ctx }) => {
-      const { title, descriptionIt, descriptionEn, logo, link, category, modifiedBy } = input
+      const { title, descriptionIt, descriptionEn, logo, link, category } = input
       const uploadedLogo = logo
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
@@ -101,7 +96,7 @@ export default createTRPCRouter({
           ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
           link,
           category,
-          ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)),
+          ...modifiedByColumns(authorOf(ctx.actor)),
         })
         .where(eq(PROJECTS.id, input.id))
         .returning()
