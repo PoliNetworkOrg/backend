@@ -25,6 +25,9 @@ const CLAIMED_PERMISSION: Record<TAuditType, string> = {
   unmute: "tg:moderate",
   ban_all: "tg:moderate:global",
   unban_all: "tg:moderate:global",
+  warn: "tg:moderate",
+  unwarn: "tg:moderate",
+  warns: "tg:moderate",
 }
 
 /** Bases the bot reports (RFC v3 §10.2); `legacy` is only for old rows. */

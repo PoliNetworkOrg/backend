@@ -6,6 +6,7 @@ import * as messages from "./messages"
 import * as permissions from "./permissions"
 import * as test from "./test"
 import * as users from "./users"
+import * as warnings from "./warnings"
 
 export const schema = {
   ...groups,
@@ -16,4 +17,5 @@ export const schema = {
   ...auditLog,
   ...users,
   ...grants,
+  ...warnings,
 }
