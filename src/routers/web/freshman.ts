@@ -57,19 +57,19 @@ export default createTRPCRouter({
       )
     }),
 
-  updateCard: policy(dashboard("web:content:write"))
+  updateCard: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(updateFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
-      const { id, modifiedBy, ...fields } = input
+      const { id, modifiedBy: _legacyAuthor, ...fields } = input
       const [updated] = await DB.update(CARDS)
-        .set({ ...fields, ...modifiedByColumns(authorOf(ctx.actor, modifiedBy)) })
+        .set({ ...fields, ...modifiedByColumns(authorOf(ctx.actor)) })
         .where(eq(CARDS.id, id))
         .returning({ id: CARDS.id })
       if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "The website slot is not initialized." })
       return { error: null }
     }),
 
-  moveCard: policy(dashboard("web:content:write"))
+  moveCard: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(moveFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
       const index = freshmanSlots.findIndex((slot) => slot.id === input.id)
@@ -77,7 +77,7 @@ export default createTRPCRouter({
       const next = freshmanSlots[index + input.direction]
       if (!next || next.group !== slot.group)
         throw new TRPCError({ code: "BAD_REQUEST", message: "Cards can only move within their website section." })
-      const author = modifiedByColumns(authorOf(ctx.actor, input.modifiedBy))
+      const author = modifiedByColumns(authorOf(ctx.actor))
       await DB.transaction(async (tx) => {
         const rows = await tx
           .select()
@@ -102,10 +102,10 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  selectFaq: policy(dashboard("web:content:write"))
+  selectFaq: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(selectFreshmanFaqInput)
     .mutation(async ({ input, ctx }) => {
-      const author = modifiedByColumns(authorOf(ctx.actor, input.modifiedBy))
+      const author = modifiedByColumns(authorOf(ctx.actor))
       await DB.transaction(async (tx) => {
         // Serialize writes to the five slots before reading; public snapshot reads remain unblocked.
         // Catalog deletions take the same lock before checking whether a FAQ is selected.
