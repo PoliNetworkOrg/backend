@@ -100,14 +100,14 @@ export function row(
 export function record(s: PeopleState, p: Person, v: Viewer, config: PeopleConfig, date: string): C.PersonRecord {
   const self = own(s, v)?.id === p.id
   const read = general(v, "people:read")
+  const pendingMessages = new Set(p.pendingGroupRemovals?.map((pending) => pending.message))
+  const discrepancies: C.Discrepancy[] = p.discrepancies.map((item) =>
+    pendingMessages.has(item.message) ? { ...item, kind: "admin-removal" } : item
+  )
   return C.personRecordSchema.parse({
     ...row(s, p, v, config, date),
     notes: read ? p.notes : null,
-    discrepancies: read
-      ? p.discrepancies
-      : self
-        ? p.discrepancies.filter((d) => p.pendingGroupRemovals?.some((pending) => pending.message === d.message))
-        : [],
+    discrepancies: read ? discrepancies : self ? discrepancies.filter((d) => pendingMessages.has(d.message)) : [],
     activity: read
       ? p.activity
       : self

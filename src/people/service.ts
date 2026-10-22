@@ -1272,7 +1272,7 @@ export function createPeopleService(options: PeopleOptions) {
           if (pending.some((g) => g.chatId === group.chatId)) continue
           const message = `Telegram admin removal pending: ${group.title} (${group.chatId}). HR must remove the admin rights; requested in census ${c.year}.`
           pending.push({ chatId: group.chatId, message })
-          p.discrepancies.push({ kind: "needs-review", message, suggestedTelegram: null })
+          p.discrepancies.push({ kind: "admin-removal", message, suggestedTelegram: null })
           log(p, v.sub, message, now())
         }
         Object.assign(p.profile, { course: input.course, year: input.year, campus: input.campus })
