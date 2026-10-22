@@ -16,7 +16,7 @@
         "@socket.io/bun-engine": "~0.1.0",
         "@socket.io/devalue-parser": "^0.1.0",
         "@t3-oss/env-core": "^0.13.8",
-        "@trpc/server": "11.5.1",
+        "@trpc/server": "11.8.0",
         "better-auth": "1.5.5",
         "croner": "^9.1.0",
         "drizzle-orm": "^0.44.7",
@@ -646,7 +646,7 @@
 
     "@t3-oss/env-core": ["@t3-oss/env-core@0.13.8", "", { "optionalDependencies": { "typescript": "5.9.2", "zod": "4.1.11" } }, "sha512-L1inmpzLQyYu4+Q1DyrXsGJYCXbtXjC4cICw1uAKv0ppYPQv656lhZPU91Qd1VS6SO/bou1/q5ufVzBGbNsUpw=="],
 
-    "@trpc/server": ["@trpc/server@11.5.1", "", { "peerDependencies": { "typescript": "5.9.2" } }, "sha512-KIDzHRS5m8U1ncPwjgtOtPWK9lNO0kYL7b+lnvKXRqowSAQIEC/z6y7g/dkt4Aqv3DKI/STLydt2/afrP1QrxQ=="],
+    "@trpc/server": ["@trpc/server@11.8.0", "", { "peerDependencies": { "typescript": ">=5.7.2" } }, "sha512-DphyQnLuyX2nwJCQGWQ9zYz4hZGvRhSBqDhQ0SH3tDhQ3PU4u68xofA0pJ741Ir4InEAFD+TtJVLAQy+wVOkiQ=="],
 
     "@tybys/wasm-util": ["@tybys/wasm-util@0.10.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg=="],
 
