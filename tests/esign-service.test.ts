@@ -41,14 +41,16 @@ function setup(
   const mailer = {
     signatureRequest: vi.fn<Mailer["signatureRequest"]>().mockResolvedValue(true),
     signedDocument: vi.fn<Mailer["signedDocument"]>().mockResolvedValue(true),
+    requestUpdate: vi.fn<Mailer["requestUpdate"]>().mockResolvedValue(true),
   }
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
   const service = createEsignService({
     store,
     drives: [drive, archive],
     access: (sub) => people.get(sub) ?? null,
     directory: opts.directory,
     mailer,
-    logger: { info: () => {}, warn: () => {}, error: () => {} },
+    logger,
     dashboardUrl: "https://admin.example.org",
     allowTestCertificates: opts.allowTestCertificates ?? true,
     revocation: opts.policy ?? "prefer",
@@ -66,7 +68,7 @@ function setup(
   const advance = (ms: number) => {
     clock += ms
   }
-  return { service, store, drive, archive, people, mailer, advance }
+  return { service, store, drive, archive, people, mailer, logger, advance }
 }
 
 async function prepareRequest(env: ReturnType<typeof setup>, ordered = true) {
@@ -220,7 +222,35 @@ describe("e-signing service", () => {
     const [to, props, attachment] = env.mailer.signedDocument.mock.calls[0]
     expect(to).toEqual(["archivio@example.org"])
     expect(props.signers.map((s) => s.name)).toEqual(["Mario Rossi", "Anna Bianchi"])
+    expect(props.sentBy).toEqual({ name: "Luca Verdi", email: "luca@example.org" })
     expect(attachment?.filename).toBe("verbale.pdf")
+  })
+
+  it("links a signed PDF too large to attach from OneDrive instead", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const upload = env.drive.upload
+    vi.spyOn(env.drive, "upload").mockImplementation(async (...args) => ({
+      ...(await upload(...args)),
+      webUrl: "https://drive.example.org/big.pdf",
+    }))
+    const doc = await PDFDocument.create()
+    doc.addPage([595, 842])
+    doc.context.register(doc.context.stream(new Uint8Array(randomBytes(2_200_000))))
+    const { document } = await env.service.stageUpload(manager, "big.pdf", await doc.save())
+    const request = await env.service.createRequest(manager, {
+      title: "Big",
+      documentId: document.id,
+      ordered: true,
+      signers: [{ sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+      output: { driveId: "dev", folderId: "mock-firmati", fileName: "big" },
+      email: { to: ["archivio@example.org"], message: "In allegato il contratto." },
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    await vi.waitFor(() => expect(env.mailer.signedDocument).toHaveBeenCalledOnce())
+    const [, props, attachment] = env.mailer.signedDocument.mock.calls[0]
+    expect(props).toMatchObject({ link: "https://drive.example.org/big.pdf", message: "In allegato il contratto." })
+    expect(attachment).toBeNull()
   })
 
   it("emails every signer of an unordered request once, when it is created", async () => {
@@ -253,6 +283,29 @@ describe("e-signing service", () => {
     })
     await sign(env, secretary, secretarySigner, request.id)
     expect(env.mailer.signatureRequest.mock.calls.map(([to]) => to)).toEqual(["mario@example.org"])
+  })
+
+  it("tells the agent who requested the signature, except on the signer's own request", async () => {
+    await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+    await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+    const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+    const request = await env.service.createRequest(manager, {
+      title: "Verbale",
+      documentId: document.id,
+      ordered: false,
+      signers: [
+        { sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+        { sub: secretary.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+      ],
+      output: null,
+      email: null,
+    })
+    // The signer's name is the one saved with the request, the requester's the current one: they no longer match.
+    await env.service.syncProfile(manager, { name: "Luca Verdi Neri", email: "luca@example.org" })
+    const { job } = await sign(env, secretary, secretarySigner, request.id)
+    expect(job.requestedBy).toBe("Luca Verdi Neri")
+    const { ticket } = await env.service.createJob(manager, request.id)
+    expect(await env.service.agentJob(ticket)).toMatchObject({ signer: { name: "Luca Verdi" }, requestedBy: null })
   })
 
   it("records a signer who couldn't be emailed and why", async () => {
@@ -715,6 +768,37 @@ describe("e-signing service", () => {
     expect(env.mailer.signedDocument).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps only the result of the run holding the delivery's claim", async () => {
+    const request = await prepareRequest(env)
+    const upload = env.drive.upload
+    let release: () => void = () => {}
+    vi.spyOn(env.drive, "upload").mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { ...(await upload(...args)), id: "stale-run" }
+    })
+    await sign(env, secretary, secretarySigner, request.id)
+    await sign(env, president, presidentSigner, request.id)
+    await vi.waitFor(() => expect(env.drive.upload).toHaveBeenCalledOnce())
+    // The upload hangs past the claim: the sweep takes the delivery over and finishes it.
+    env.advance(6 * 60 * 1000)
+    await env.service.sweep()
+    const delivered = (await env.service.getRequest(manager, request.id)).request.delivery
+    expect(delivered).toMatchObject({ status: "delivered", driveItem: { name: "Verbale CD firmato.pdf" } })
+    await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+
+    release()
+    await vi.waitFor(() =>
+      expect(env.logger.warn).toHaveBeenCalledWith(
+        { requestId: request.id },
+        "[ESIGN] a later delivery attempt took over, this one's result is dropped"
+      )
+    )
+    expect((await env.service.getRequest(manager, request.id)).request.delivery).toEqual(delivered)
+    expect(env.mailer.requestUpdate).toHaveBeenCalledOnce()
+  })
+
   it("refuses an email-only request whose signed PDF would be too large to attach", async () => {
     await env.service.syncProfile(manager, { name: "Luca Verdi", email: null })
     await env.service.syncProfile(secretary, { name: "Mario Rossi", email: null })
@@ -925,6 +1009,61 @@ describe("e-signing service", () => {
     })
   })
 
+  it("refuses an agent below the minimum version when it loads the job, before the PIN", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    const old = "PoliNetwork-eSign/v0.1.9"
+    await expect(env.service.agentJob(ticket, old)).rejects.toMatchObject({
+      code: "agent_outdated",
+      message: "PoliNetwork eSign 0.1.9 is too old. Install the latest version from the setup guide, then sign again.",
+    })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "failed",
+      errorCode: "agent_outdated",
+      seen: true,
+    })
+    // Reopening the window with the same agent says the same, not that the job failed.
+    await expect(env.service.agentJob(ticket, old)).rejects.toMatchObject({ code: "agent_outdated" })
+
+    const next = await env.service.createJob(secretary, request.id)
+    await expect(
+      env.service.agentPrepare(next.ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2, old)
+    ).rejects.toMatchObject({ code: "agent_outdated" })
+    expect((await env.service.jobStatuses(secretary, [next.jobId]))[0].errorCode).toBe("agent_outdated")
+  })
+
+  it("refuses a released 0.1 agent, named PoliNetwork Sign Agent, when it loads the job", async () => {
+    const request = await prepareRequest(env)
+    const { ticket, jobId } = await env.service.createJob(secretary, request.id)
+    await expect(env.service.agentJob(ticket, "PoliNetwork-Sign-Agent/v0.1.1")).rejects.toMatchObject({
+      code: "agent_outdated",
+      message: "PoliNetwork eSign 0.1.1 is too old. Install the latest version from the setup guide, then sign again.",
+    })
+    expect((await env.service.jobStatuses(secretary, [jobId]))[0]).toMatchObject({
+      status: "failed",
+      errorCode: "agent_outdated",
+      seen: true,
+    })
+  })
+
+  it("lets an agent sign that is current, a development build, or doesn't say its version", async () => {
+    for (const userAgent of [
+      "PoliNetwork-eSign/v0.2.0",
+      "PoliNetwork-eSign/0.3.1-4-gabc1234-dirty",
+      "PoliNetwork-eSign/dev",
+      "PoliNetwork-Sign-Agent/dev",
+      "node",
+      null,
+    ]) {
+      const request = await prepareRequest(env)
+      const { ticket } = await env.service.createJob(secretary, request.id)
+      await expect(env.service.agentJob(ticket, userAgent)).resolves.toMatchObject({ status: "pending" })
+      await expect(
+        env.service.agentPrepare(ticket, Buffer.from(secretarySigner.cert).toString("base64"), [], 2, userAgent)
+      ).resolves.toMatchObject({ step: 0 })
+    }
+  })
+
   it("restricts each drive to the roles and permissions its rule names", async () => {
     const boardOnly = { roles: ["direttivo"], permissions: [] }
     const admin: Caller = { ...manager, canManageDrives: true }
@@ -1052,6 +1191,229 @@ describe("e-signing service", () => {
     expect((await env.service.drivesFor(manager)).map((d) => d.id)).toEqual(["dev", "archive"])
     expect((await env.service.drivesFor({ sub: "nobody", canManage: true })).map((d) => d.id)).toEqual(["dev"])
     expect(await env.service.drivesFor({ sub: manager.sub, canManage: false })).toEqual([])
+  })
+
+  describe("request update email", () => {
+    const managing = { roles: [], permissions: ["esign:sign", "esign:requests:manage"] }
+    const updates = () => env.mailer.requestUpdate.mock.calls.map(([to, props]) => ({ to, ...props }))
+
+    it("tells the creator who declined and why, once", async () => {
+      const request = await prepareRequest(env)
+      await env.service.declineRequest(secretary, request.id, "La data è sbagliata")
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()).toEqual([
+        {
+          to: "luca@example.org",
+          recipientName: "Luca",
+          title: "Verbale CD 10/10/2026",
+          url: `https://admin.example.org/dashboard/esign/requests/${request.id}`,
+          outcome: "declined",
+          by: "Mario Rossi",
+          reason: "La data è sbagliata",
+        },
+      ])
+      await expect(env.service.declineRequest(president, request.id, null)).rejects.toMatchObject({ code: "conflict" })
+      expect(env.mailer.requestUpdate).toHaveBeenCalledOnce()
+    })
+
+    it("doesn't email a creator who declined", async () => {
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered: true,
+        signers: [{ sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+        output: null,
+        email: null,
+      })
+      await env.service.declineRequest(manager, request.id, null)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).not.toHaveBeenCalled()
+    })
+
+    it("tells the creator that everyone signed and where the PDF went", async () => {
+      const request = await prepareRequest(env)
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, president, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()).toEqual([
+        expect.objectContaining({
+          to: "luca@example.org",
+          outcome: "completed",
+          savedTo: { path: "Firmati/Verbale CD firmato.pdf", url: null },
+          emailedTo: ["archivio@example.org"],
+        }),
+      ])
+    })
+
+    it("doesn't tell a creator who signed last that everyone signed", async () => {
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered: true,
+        signers: [
+          { sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+          { sub: manager.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+        ],
+        output: null,
+        email: null,
+      })
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, manager, presidentSigner, request.id)
+      await vi.waitFor(async () =>
+        expect((await env.service.getRequest(manager, request.id)).request.delivery?.status).toBe("delivered")
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).not.toHaveBeenCalled()
+    })
+
+    it("tells the creator and everyone who may retry that the delivery failed, the last signer included", async () => {
+      const other = { sub: "sub-other-manager", name: "Giulia Neri", email: "giulia@example.org" }
+      const unsigned = { sub: "sub-manage-only", name: "Paolo Gialli", email: "paolo@example.org" }
+      env.people.set(manager.sub, managing)
+      env.people.set(president.sub, managing)
+      env.people.set(other.sub, managing)
+      // Retrying goes through the dashboard, which takes esign:sign too.
+      env.people.set(unsigned.sub, { roles: [], permissions: ["esign:requests:manage"] })
+      env.people.set(secretary.sub, { roles: [], permissions: ["esign:sign"] })
+      await env.store.upsertProfile(other)
+      await env.store.upsertProfile(unsigned)
+      const request = await prepareRequest(env)
+      env.mailer.signedDocument.mockResolvedValue(false)
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, president, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const failed = {
+        outcome: "delivery_failed",
+        failed: { step: "email", target: "archivio@example.org" },
+        error: "The email could not be sent",
+        canRetry: true,
+      }
+      expect(updates()).toHaveLength(3)
+      expect(updates()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ...failed, to: "luca@example.org", requestedBy: null }),
+          expect.objectContaining({
+            ...failed,
+            to: "giulia@example.org",
+            recipientName: "Giulia",
+            requestedBy: "Luca Verdi",
+          }),
+          expect.objectContaining({ ...failed, to: "anna@example.org", requestedBy: "Luca Verdi" }),
+        ])
+      )
+
+      // A retry that fails again is seen by whoever retried; one that works tells the creator.
+      await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3)
+      env.mailer.signedDocument.mockResolvedValue(true)
+      await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(4))
+      expect(updates()[3]).toMatchObject({
+        to: "luca@example.org",
+        outcome: "completed",
+        savedTo: { path: "Firmati/Verbale CD firmato.pdf" },
+      })
+    })
+
+    it("tells a creator who signed last that saving failed, and that a retry worked", async () => {
+      const other = { sub: "sub-other-manager", name: "Giulia Neri", email: "giulia@example.org" }
+      env.people.set(manager.sub, managing)
+      env.people.set(other.sub, managing)
+      await env.store.upsertProfile(other)
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      await env.service.syncProfile(secretary, { name: "Mario Rossi", email: "mario@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Verbale",
+        documentId: document.id,
+        ordered: true,
+        signers: [
+          { sub: secretary.sub, role: null, places: [{ ...placement(0), kind: "signature" }] },
+          { sub: manager.sub, role: null, places: [{ ...placement(1), kind: "signature" }] },
+        ],
+        output: { driveId: "dev", folderId: "mock-firmati", fileName: "Verbale firmato" },
+        email: null,
+      })
+      vi.spyOn(env.drive, "upload").mockRejectedValueOnce(new Error("Access denied"))
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, manager, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(2))
+      expect(updates()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ to: "luca@example.org", outcome: "delivery_failed", requestedBy: null }),
+          expect.objectContaining({ to: "giulia@example.org", outcome: "delivery_failed" }),
+        ])
+      )
+
+      await env.service.retryDelivery({ sub: other.sub, canManage: true }, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledTimes(3))
+      expect(updates()[2]).toMatchObject({ to: "luca@example.org", outcome: "completed" })
+    })
+
+    it("tells a creator who signed their own request alone that saving failed", async () => {
+      env.people.set(manager.sub, managing)
+      await env.service.syncProfile(manager, { name: "Luca Verdi", email: "luca@example.org" })
+      const { document } = await env.service.stageUpload(manager, "verbale.pdf", await samplePdf())
+      const request = await env.service.createRequest(manager, {
+        title: "Dichiarazione",
+        documentId: document.id,
+        ordered: true,
+        signers: [{ sub: manager.sub, role: null, places: [{ ...placement(0), kind: "signature" }] }],
+        output: { driveId: "dev", folderId: "mock-firmati", fileName: "Dichiarazione firmata" },
+        email: null,
+      })
+      vi.spyOn(env.drive, "upload").mockRejectedValue(new Error("Access denied"))
+      await sign(env, manager, secretarySigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()[0]).toMatchObject({
+        to: "luca@example.org",
+        outcome: "delivery_failed",
+        failed: { step: "save", target: "Firmati/Dichiarazione firmata.pdf" },
+        error: "Access denied",
+        requestedBy: null,
+        canRetry: true,
+      })
+
+      // Their own retry that fails again needs no email: they see it.
+      await env.service.retryDelivery(manager, request.id)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(env.mailer.requestUpdate).toHaveBeenCalledOnce()
+    })
+
+    it("says which save failed, and that only a manager can retry", async () => {
+      const request = await prepareRequest(env)
+      vi.spyOn(env.drive, "upload").mockRejectedValue(new Error("Access denied"))
+      await sign(env, secretary, secretarySigner, request.id)
+      await sign(env, president, presidentSigner, request.id)
+      await vi.waitFor(() => expect(env.mailer.requestUpdate).toHaveBeenCalledOnce())
+      expect(updates()[0]).toMatchObject({
+        to: "luca@example.org",
+        outcome: "delivery_failed",
+        failed: { step: "save", target: "Firmati/Verbale CD firmato.pdf" },
+        error: "Access denied",
+        canRetry: false,
+      })
+    })
+
+    it("logs an email that can't be sent without failing the decline", async () => {
+      const request = await prepareRequest(env)
+      env.mailer.requestUpdate.mockRejectedValue(new Error("mailbox down"))
+      await env.service.declineRequest(secretary, request.id, null)
+      await vi.waitFor(() =>
+        expect(env.logger.error).toHaveBeenCalledWith(
+          expect.objectContaining({ requestId: request.id, sub: manager.sub }),
+          "[ESIGN] cannot send the request update email"
+        )
+      )
+      expect((await env.service.getRequest(manager, request.id)).request.status).toBe("declined")
+    })
   })
 
   it("lets a signer decline", async () => {

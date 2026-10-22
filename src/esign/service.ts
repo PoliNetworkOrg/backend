@@ -1,4 +1,5 @@
 import { createHash, randomBytes, X509Certificate } from "node:crypto"
+import { outdatedAgent } from "./agent-version"
 import { type Drive, DriveError, MAX_PDF_BYTES } from "./drive/types"
 import { EsignError } from "./errors"
 import { identityOf, titleCase } from "./identity"
@@ -8,6 +9,7 @@ import { inspectPdf, type PdfInfo } from "./pdf/inspect"
 import { finalizeSignature, type PreparedSignature, prepareSignature, SignatureError } from "./pdf/pades"
 import { type PlaceInput, type PlacementInput, validatePlacement, validatePlaces } from "./placement"
 import type {
+  DeliveryJson,
   DocumentMeta,
   DocumentRecord,
   DriveAccess,
@@ -33,6 +35,28 @@ export type Access = { roles: string[]; permissions: string[] }
 /** What a drive access rule can name, for the dashboard's picker. */
 export type AccessCatalog = { roles: { key: string; name: string }[]; permissions: { key: string; name: string }[] }
 
+/** How a request ended, or why its signed PDF didn't reach its destination. */
+export type RequestOutcome =
+  | { outcome: "declined"; by: string; reason: string | null }
+  | {
+      outcome: "completed"
+      /** The OneDrive copy, when there is one. */
+      savedTo: { path: string; url: string | null } | null
+      emailedTo: string[]
+    }
+  | {
+      outcome: "delivery_failed"
+      /** The step that failed and where it was going: a OneDrive path, or the email recipients. */
+      failed: { step: "save" | "email"; target: string }
+      error: string
+      /** The creator's name, when the recipient isn't the creator. */
+      requestedBy: string | null
+      canRetry: boolean
+    }
+
+/** A "Request update" email to one person. */
+export type RequestUpdate = { recipientName: string; title: string; url: string } & RequestOutcome
+
 export type Mailer = {
   signatureRequest(
     to: string,
@@ -46,6 +70,7 @@ export type Mailer = {
       setupUrl: string
     }
   ): Promise<boolean>
+  /** Replies go to `sentBy`'s email. */
   signedDocument(
     to: string[],
     props: {
@@ -53,9 +78,11 @@ export type Mailer = {
       signers: { name: string; role: string | null }[]
       message: string | null
       link: string | null
+      sentBy: { name: string; email: string | null } | null
     },
     attachment: { filename: string; content: Uint8Array; contentType: string } | null
   ): Promise<boolean>
+  requestUpdate: (to: string, props: RequestUpdate) => Promise<boolean>
 }
 
 type Logger = {
@@ -108,6 +135,10 @@ const STAGED_TTL_MS = 24 * 60 * 60 * 1000
 /** The longest message a job keeps for the agent and the dashboard to show. */
 const MAX_JOB_MESSAGE = 300
 const MAX_SIGNERS = 10
+/** The IdP permission to use e-signing at all: be picked as a signer, open the dashboard's pages. */
+const SIGN = "esign:sign"
+/** The IdP permission to create and manage requests, retrying a delivery included. */
+const MANAGE = "esign:requests:manage"
 /** Documents signed with one PIN. */
 const MAX_BATCH = 10
 /**
@@ -131,6 +162,13 @@ const TERMINAL = new Set([
   "job_done",
   "agent_outdated",
 ])
+
+/** Tells an agent too old to sign to update; `version` is the one it reported, if any. */
+const agentOutdated = (version: string | null) =>
+  new EsignError(
+    "agent_outdated",
+    `${version ? `PoliNetwork eSign ${version} is` : "This version of PoliNetwork eSign is"} too old. Install the latest version from the setup guide, then sign again.`
+  )
 
 export type CreateRequestInput = {
   title: string
@@ -186,6 +224,16 @@ function formatRomeDate(date: Date) {
     minute: "2-digit",
   }).format(date)
 }
+
+/** "Verbali/Verbale CD.pdf"; just the name in the drive's root folder. */
+const drivePath = (folderPath: string, name: string) => [folderPath, name].filter(Boolean).join("/")
+
+/** The signer whose signature completed a request: the one who made the newest version. */
+const lastSigner = (request: SigningRequest) =>
+  request.signers.reduce<Signer | undefined>(
+    (last, s) => ((s.version ?? -1) > (last?.version ?? -1) ? s : last),
+    undefined
+  )
 
 /** Signers who may sign now: the first pending one in order, or every pending one. */
 export function turnOf(request: SigningRequest): Signer[] {
@@ -392,6 +440,112 @@ export function createEsignService(options: ServiceOptions) {
       )
   }
 
+  /**
+   * Who may retry a request's delivery, by subject: managers who may use e-signing and see the request. Empty if they
+   * can't be listed.
+   */
+  async function managersOf(request: SigningRequest): Promise<Map<string, { name: string; email: string | null }>> {
+    try {
+      const [rules, people] = await Promise.all([
+        accessRules(),
+        options.directory ? options.directory() : store.listProfiles(),
+      ])
+      return new Map(
+        people
+          .filter((p) => {
+            const held = options.access?.(p.sub)?.permissions ?? []
+            return (
+              held.includes(SIGN) && held.includes(MANAGE) && canView(rules, { sub: p.sub, canManage: true }, request)
+            )
+          })
+          .map((p) => [p.sub, { name: p.name, email: p.email }])
+      )
+    } catch (error) {
+      logger.error({ error, requestId: request.id }, "[ESIGN] cannot list who may retry a delivery")
+      return new Map()
+    }
+  }
+
+  /**
+   * Emails these people a "Request update", except `actor`, who saw it happen; `known` has names and addresses for
+   * people without a profile. Each outcome is reached by one call only, so it is emailed once. A failure is only
+   * logged: the action that led here succeeded.
+   */
+  async function emailUpdate(
+    request: SigningRequest,
+    subs: string[],
+    actor: string | null,
+    outcome: (sub: string) => RequestOutcome,
+    known = new Map<string, { name: string; email: string | null }>()
+  ) {
+    const recipients = [...new Set(subs)].filter((sub) => sub !== actor)
+    await Promise.all(
+      recipients.map(async (sub) => {
+        const profile = await store.getProfile(sub)
+        const name = profile?.name ?? known.get(sub)?.name ?? ""
+        const email = profile?.email ?? known.get(sub)?.email
+        if (!email) {
+          logger.warn({ requestId: request.id, sub }, "[ESIGN] no email for a request update")
+          return
+        }
+        try {
+          const sent = await mailer.requestUpdate(email, {
+            recipientName: name.split(" ")[0] || name,
+            title: request.title,
+            url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
+            ...outcome(sub),
+          })
+          if (!sent) throw new Error("The email could not be sent")
+        } catch (error) {
+          logger.error({ error, requestId: request.id, sub }, "[ESIGN] cannot send the request update email")
+        }
+      })
+    )
+  }
+
+  /**
+   * After a delivery attempt: tells the creator everyone signed, unless they saw it happen by signing last or retrying;
+   * or, when an attempt nobody asked for fails, the creator and everyone who may retry it, the last signer included,
+   * who may have left before it ran. A manager watches their own retry: only its success is emailed.
+   */
+  async function emailDelivery(
+    request: SigningRequest,
+    delivery: DeliveryJson,
+    step: "save" | "email",
+    retryBy: string | null
+  ) {
+    const { output } = request
+    if (delivery.status === "delivered") {
+      const item = delivery.driveItem
+      await emailUpdate(request, [request.createdBySub], retryBy ?? lastSigner(request)?.sub ?? null, () => ({
+        outcome: "completed",
+        savedTo: output && item ? { path: drivePath(output.folderPath, item.name), url: item.webUrl } : null,
+        emailedTo: delivery.emailedTo,
+      }))
+      return
+    }
+    if (retryBy) return
+    const managers = await managersOf(request)
+    const requestedBy = await profileName(request.createdBySub)
+    const failed =
+      step === "save" && output
+        ? { step, target: drivePath(output.folderPath, output.fileName) }
+        : { step: "email" as const, target: request.email?.to.join(", ") ?? "" }
+    await emailUpdate(
+      request,
+      [request.createdBySub, ...managers.keys()],
+      null,
+      (sub) => ({
+        outcome: "delivery_failed",
+        failed,
+        error: delivery.error ?? "Unknown error",
+        requestedBy: sub === request.createdBySub ? null : requestedBy,
+        canRetry: managers.has(sub),
+      }),
+      managers
+    )
+  }
+
   const signaturePlaces = (places: PlaceJson[]) => places.filter((p) => p.kind === "signature")
   const signaturesLeft = (job: Job) => signaturePlaces(job.places).length - job.step
 
@@ -483,10 +637,22 @@ export function createEsignService(options: ServiceOptions) {
 
   // ── Ticket resolution for the agent ──────────────────────────────────────────────────────────────────────────
 
-  async function resolveTicket(ticket: string, allowed: Job["status"][]): Promise<Job> {
+  /**
+   * The job of a ticket, if its status is allowed. With the agent's `userAgent`, an agent older than the minimum is
+   * told to update whatever the job's state, and its open job ends: the dashboard shows why.
+   */
+  async function resolveTicket(ticket: string, allowed: Job["status"][], userAgent?: string | null): Promise<Job> {
     if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) throw new EsignError("ticket_invalid", "This signing link is not valid")
     const job = await store.getJobByTicketHash(sha256Hex(ticket))
     if (!job) throw new EsignError("ticket_invalid", "This signing link is not valid")
+    const outdated = outdatedAgent(userAgent ?? null)
+    if (outdated) {
+      const error = agentOutdated(outdated)
+      // The agent did reach the job: the dashboard tells one to update from one that isn't running.
+      if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
+      await failJob(job, error.code, error.message)
+      throw error
+    }
     if (job.status === "completed") throw new EsignError("job_done", "This document is already signed")
     if (job.status === "failed") {
       if (allowed.includes("failed")) return job
@@ -544,11 +710,13 @@ export function createEsignService(options: ServiceOptions) {
 
   /**
    * Uploads and emails a completed request's PDF. A claim makes one worker do it at a time; a crash leaves it pending,
-   * and the sweep resumes it once the claim is stale.
+   * and the sweep resumes it once the claim is stale. A run that outlives its claim may already have saved or emailed
+   * a copy, but only the run holding the claim records its result and emails the outcome.
    */
-  async function deliver(requestId: string, retry = false) {
+  async function deliver(requestId: string, retryBy: string | null = null) {
     const at = now()
-    if (!(await store.claimDelivery(requestId, at, new Date(at.getTime() - DELIVERY_CLAIM_MS), retry))) return
+    if (!(await store.claimDelivery(requestId, at, new Date(at.getTime() - DELIVERY_CLAIM_MS), retryBy !== null)))
+      return
     const request = await store.getRequest(requestId)
     if (!request || request.status !== "completed") return
     const document = await store.latestDocument(requestId)
@@ -560,6 +728,7 @@ export function createEsignService(options: ServiceOptions) {
       error: null as string | null,
       attemptedAt: now().toISOString(),
     }
+    let step: "save" | "email" = "save"
     try {
       if (request.output && !delivery.driveItem) {
         const drive = driveFor(request.output.driveId)
@@ -572,10 +741,12 @@ export function createEsignService(options: ServiceOptions) {
           data: { name: item.name, path: request.output.folderPath, drive: drive.label },
         })
       }
+      step = "email"
       if (request.email && request.email.to.length > 0 && delivery.emailedTo.length === 0) {
         const attach = document.size <= MAX_ATTACHMENT_BYTES
         if (!attach && !delivery.driveItem?.webUrl)
           throw new Error("The PDF is too large to email and there is no OneDrive link to send instead")
+        const creator = await store.getProfile(request.createdBySub)
         const sent = await mailer.signedDocument(
           request.email.to,
           {
@@ -583,6 +754,7 @@ export function createEsignService(options: ServiceOptions) {
             signers: request.signers.map((s) => ({ name: s.name, role: s.role })),
             message: request.email.message,
             link: attach ? null : (delivery.driveItem?.webUrl ?? null),
+            sentBy: creator ? { name: creator.name, email: creator.email } : null,
           },
           attach ? { filename: document.fileName, content: document.content, contentType: "application/pdf" } : null
         )
@@ -596,7 +768,13 @@ export function createEsignService(options: ServiceOptions) {
       logger.error({ error, requestId }, "[ESIGN] delivery failed")
       await store.addEvent({ requestId, actorSub: null, type: "delivery_failed", data: { error: delivery.error } })
     }
-    await store.updateRequest(requestId, { delivery })
+    if (!(await store.finishDelivery(requestId, at, delivery))) {
+      logger.warn({ requestId }, "[ESIGN] a later delivery attempt took over, this one's result is dropped")
+      return
+    }
+    void emailDelivery(request, delivery, step, retryBy).catch((error) =>
+      logger.error({ error, requestId }, "[ESIGN] request update crashed")
+    )
   }
 
   /** Stores a signed version, binds the signer's CIE, then delivers or asks the next signer. */
@@ -752,7 +930,7 @@ export function createEsignService(options: ServiceOptions) {
       const registered = options.directory ? await options.directory() : profiles
       const bySub = new Map(profiles.map((profile) => [profile.sub, profile]))
       return registered
-        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes("esign:sign"))
+        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes(SIGN))
         .map((person) => {
           const profile = bySub.get(person.sub)
           return {
@@ -842,7 +1020,7 @@ export function createEsignService(options: ServiceOptions) {
       for (const s of input.signers) {
         const person = registered ? registered.get(s.sub) : await store.getProfile(s.sub)
         if (!person) throw new EsignError("bad_request", "A signer is not a registered user")
-        if (registered && !options.access?.(s.sub)?.permissions.includes("esign:sign"))
+        if (registered && !options.access?.(s.sub)?.permissions.includes(SIGN))
           throw new EsignError("bad_request", `${person.name} is not allowed to sign`)
         if (registered)
           profilesToSync.push({
@@ -1005,6 +1183,11 @@ export function createEsignService(options: ServiceOptions) {
         { code: "request_declined", message: `${lead}${quoted}.`.slice(0, MAX_JOB_MESSAGE) }
       )
       if (result === "conflict") throw new EsignError("conflict", "The request changed; reload it")
+      void emailUpdate(request, [request.createdBySub], caller.sub, () => ({
+        outcome: "declined",
+        by: signer.name,
+        reason: why,
+      })).catch((error) => logger.error({ error, requestId: id }, "[ESIGN] request update crashed"))
     },
 
     async retryDelivery(caller: Caller, id: string) {
@@ -1012,7 +1195,7 @@ export function createEsignService(options: ServiceOptions) {
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can retry the delivery")
       if (request.status !== "completed" || request.delivery?.status !== "failed")
         throw new EsignError("conflict", "Nothing to retry")
-      await deliver(id, true)
+      await deliver(id, caller.sub)
       return (await store.getRequest(id))?.delivery ?? null
     },
 
@@ -1039,8 +1222,9 @@ export function createEsignService(options: ServiceOptions) {
 
     // ── The agent's side, authenticated by the ticket ──────────────────────────────────────────────────────────
 
-    async agentJob(ticket: string) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
+    /** The job the agent's page shows; `userAgent` is the agent's, which refuses one too old before the PIN. */
+    async agentJob(ticket: string, userAgent: string | null = null) {
+      const job = await resolveTicket(ticket, ["pending", "prepared"], userAgent)
       return failOnTerminal(job, async () => {
         const { request, signer, current } = await jobContext(job)
         if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
@@ -1051,7 +1235,8 @@ export function createEsignService(options: ServiceOptions) {
           document: { title: request.title, fileName: current.fileName, pages: current.pages },
           signer: { name: signer.name, role: signer.role },
           placement: { page: signaturePlaces(job.places)[job.step]?.page ?? 0 },
-          requestedBy: await profileName(request.createdBySub),
+          /** The creator's name, when the signer isn't the creator. */
+          requestedBy: signer.sub === request.createdBySub ? null : await profileName(request.createdBySub),
           /** Signatures still to make, one after another with the same card session. */
           signatures: signaturesLeft(job),
           /** Extra marks the next signature draws. */
@@ -1062,14 +1247,17 @@ export function createEsignService(options: ServiceOptions) {
       })
     },
 
-    async agentPrepare(ticket: string, certificateB64: string, chainB64: string[] = [], protocol = 1) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
+    async agentPrepare(
+      ticket: string,
+      certificateB64: string,
+      chainB64: string[] = [],
+      protocol = 1,
+      userAgent: string | null = null
+    ) {
+      const job = await resolveTicket(ticket, ["pending", "prepared"], userAgent)
       return failOnTerminal(job, async () => {
-        if (protocol < 2)
-          throw new EsignError(
-            "agent_outdated",
-            "This version of the signing app is too old. Install the latest PoliNetwork eSign from the setup guide, then sign again."
-          )
+        // The safety net for agents that don't send their version: caught here, once the PIN opened the card.
+        if (protocol < 2) throw agentOutdated(null)
         const { request, signer, current } = await jobContext(job)
         const place = signaturePlaces(job.places)[job.step]
         if (!place) throw new EsignError("conflict", "The signature changed state; start again")

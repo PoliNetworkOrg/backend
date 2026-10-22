@@ -219,6 +219,11 @@ export interface EsignStore {
    * other attempt started after `staleBefore`.
    */
   claimDelivery(id: string, at: Date, staleBefore: Date, retry: boolean): Promise<boolean>
+  /**
+   * Records the result of the delivery attempt that claimed it `at`, unless a later attempt has since taken over the
+   * claim; returns whether it did.
+   */
+  finishDelivery(id: string, at: Date, delivery: DeliveryJson): Promise<boolean>
   /** Completed requests whose delivery is pending and was not attempted after `staleBefore`. */
   pendingDeliveries(staleBefore: Date): Promise<string[]>
   updateSigner(id: string, patch: Partial<Pick<Signer, "status" | "declineReason" | "places">>): Promise<void>

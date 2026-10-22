@@ -395,6 +395,20 @@ export function createPgStore(db: Db): EsignStore {
         .returning({ id: requests.id })
       return rows.length === 1
     },
+    async finishDelivery(id, at, result) {
+      const rows = await db
+        .update(requests)
+        .set({ delivery: result })
+        .where(
+          and(
+            eq(requests.id, id),
+            sql`${delivery}->>'status' = 'pending'`,
+            sql`${delivery}->>'attemptedAt' = ${at.toISOString()}`
+          )
+        )
+        .returning({ id: requests.id })
+      return rows.length === 1
+    },
     async pendingDeliveries(staleBefore) {
       const rows = await db
         .select({ id: requests.id })
