@@ -51,7 +51,6 @@
     "@better-auth/drizzle-adapter": "1.5.5",
     "@better-auth/passkey": "1.5.5",
     "@hono/trpc-server": "^0.4.2",
-    "@hono/zod-validator": "^0.7.6",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@polinetwork/auth-kit": "^1.2.0",
     "@react-email/components": "1.0.6",

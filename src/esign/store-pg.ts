@@ -339,13 +339,13 @@ export function createPgStore(db: Db): EsignStore {
         .returning({ id: jobs.id })
       return rows.length === 1
     },
-    async cancelRequest(id, event) {
+    async cancelRequest(id, event, jobError) {
       return db.transaction(async (tx) => {
         const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for("update")
         if (!request || request.status !== "in_progress") return "conflict" as const
         await tx
           .update(jobs)
-          .set({ status: "cancelled", preparedPdf: null })
+          .set({ status: "cancelled", errorCode: jobError.code, errorMessage: jobError.message, preparedPdf: null })
           .where(and(eq(jobs.requestId, id), inArray(jobs.status, ["pending", "prepared"])))
         await tx.update(requests).set({ status: "cancelled", cancelledAt: new Date() }).where(eq(requests.id, id))
         await tx.insert(events).values(event)
@@ -361,7 +361,7 @@ export function createPgStore(db: Db): EsignStore {
         return "ok" as const
       })
     },
-    async declineRequest(id, signerId, reason, event) {
+    async declineRequest(id, signerId, reason, event, jobError) {
       return db.transaction(async (tx) => {
         const [request] = await tx.select().from(requests).where(eq(requests.id, id)).for("update")
         if (!request || request.status !== "in_progress") return "conflict" as const
@@ -373,7 +373,7 @@ export function createPgStore(db: Db): EsignStore {
         if (declined.length !== 1) return "conflict" as const
         await tx
           .update(jobs)
-          .set({ status: "cancelled", preparedPdf: null })
+          .set({ status: "cancelled", errorCode: jobError.code, errorMessage: jobError.message, preparedPdf: null })
           .where(and(eq(jobs.requestId, id), inArray(jobs.status, ["pending", "prepared"])))
         await tx.update(requests).set({ status: "declined" }).where(eq(requests.id, id))
         await tx.insert(events).values(event)
@@ -392,6 +392,20 @@ export function createPgStore(db: Db): EsignStore {
           delivery: sql`jsonb_set(jsonb_set(${delivery}, '{status}', '"pending"'), '{attemptedAt}', to_jsonb(${at.toISOString()}::text))`,
         })
         .where(and(eq(requests.id, id), eq(requests.status, "completed"), claimable))
+        .returning({ id: requests.id })
+      return rows.length === 1
+    },
+    async finishDelivery(id, at, result) {
+      const rows = await db
+        .update(requests)
+        .set({ delivery: result })
+        .where(
+          and(
+            eq(requests.id, id),
+            sql`${delivery}->>'status' = 'pending'`,
+            sql`${delivery}->>'attemptedAt' = ${at.toISOString()}`
+          )
+        )
         .returning({ id: requests.id })
       return rows.length === 1
     },

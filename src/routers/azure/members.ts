@@ -3,7 +3,7 @@ import { azureDirectory } from "@/azure/directory"
 import { sendWelcomeEmail } from "@/emails/mailer"
 import { dashboard } from "@/idp/policies"
 import { logger } from "@/logger"
-import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
 
 // Becomes the Entra display name and mail nickname.
 const personName = z
@@ -17,18 +17,6 @@ export default createTRPCRouter({
   getAll: policy(dashboard("azure:members:read")).query(async () => {
     return await azureDirectory.getMembers()
   }),
-  setAssocNumber: legacyProcedure
-    .input(
-      z.object({
-        userId: z.string(),
-        assocNumber: z.number(),
-      })
-    )
-    .output(z.object({ error: z.nullable(z.string()) }))
-    .mutation(async ({ input }) => {
-      const { error } = await azureDirectory.setMemberNumber(input.userId, input.assocNumber)
-      return { error }
-    }),
   /**
    * The dashboard's only Azure mutation (RFC v3 §4 decision 9): create a new Entra user and add
    * only that user to the fixed Soci group. No caller-supplied group or existing user.

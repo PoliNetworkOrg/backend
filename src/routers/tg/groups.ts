@@ -1,4 +1,3 @@
-import { TRPCError } from "@trpc/server"
 import { and, eq, exists, ilike, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
@@ -213,18 +212,15 @@ export default createTRPCRouter({
       return rows.length === 1
     }),
 
-  leaveChat: policy(dashboard("tg:groups:manage"))
+  /** The performer is the token's user. */
+  leaveChat: policy(dashboard("tg:groups:manage"), { tokenOnly: true })
     .input(
       z.object({
         chatId: z.number(),
-        /** Legacy callers only; token callers are taken from the token. */
-        performerId: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.actor && input.performerId === undefined)
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Missing performerId" })
-      const performer = await describeActor(ctx.actor, input.performerId)
+      const performer = await describeActor(ctx.actor)
       const left = await WSS.leaveChat({
         chatId: input.chatId,
         performerId: performer.telegramId ? Number(performer.telegramId) : null,

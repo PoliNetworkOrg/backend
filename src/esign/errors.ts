@@ -9,6 +9,7 @@ export type EsignErrorCode =
   | "job_expired"
   | "job_done"
   | "job_cancelled"
+  | "job_failed"
   | "document_changed"
   | "certificate_invalid"
   | "signer_mismatch"
@@ -27,6 +28,7 @@ export const HTTP_STATUS: Record<EsignErrorCode, number> = {
   job_expired: 410,
   job_done: 409,
   job_cancelled: 409,
+  job_failed: 409,
   document_changed: 409,
   certificate_invalid: 422,
   signer_mismatch: 403,
