@@ -1,4 +1,5 @@
 import { createHash, randomBytes, X509Certificate } from "node:crypto"
+import { outdatedAgent } from "./agent-version"
 import { type Drive, DriveError, MAX_PDF_BYTES } from "./drive/types"
 import { EsignError } from "./errors"
 import { identityOf, titleCase } from "./identity"
@@ -8,6 +9,7 @@ import { inspectPdf, type PdfInfo } from "./pdf/inspect"
 import { finalizeSignature, type PreparedSignature, prepareSignature, SignatureError } from "./pdf/pades"
 import { type PlaceInput, type PlacementInput, validatePlacement, validatePlaces } from "./placement"
 import type {
+  DeliveryJson,
   DocumentMeta,
   DocumentRecord,
   DriveAccess,
@@ -33,11 +35,42 @@ export type Access = { roles: string[]; permissions: string[] }
 /** What a drive access rule can name, for the dashboard's picker. */
 export type AccessCatalog = { roles: { key: string; name: string }[]; permissions: { key: string; name: string }[] }
 
+/** How a request ended, or why its signed PDF didn't reach its destination. */
+export type RequestOutcome =
+  | { outcome: "declined"; by: string; reason: string | null }
+  | {
+      outcome: "completed"
+      /** The OneDrive copy, when there is one. */
+      savedTo: { path: string; url: string | null } | null
+      emailedTo: string[]
+    }
+  | {
+      outcome: "delivery_failed"
+      /** The step that failed and where it was going: a OneDrive path, or the email recipients. */
+      failed: { step: "save" | "email"; target: string }
+      error: string
+      /** The creator's name, when the recipient isn't the creator. */
+      requestedBy: string | null
+      canRetry: boolean
+    }
+
+/** A "Request update" email to one person. */
+export type RequestUpdate = { recipientName: string; title: string; url: string } & RequestOutcome
+
 export type Mailer = {
   signatureRequest(
     to: string,
-    props: { signerName: string; requestedBy: string; title: string; role: string | null; url: string }
+    props: {
+      signerName: string
+      requestedBy: string
+      title: string
+      role: string | null
+      ordered: boolean
+      url: string
+      setupUrl: string
+    }
   ): Promise<boolean>
+  /** Replies go to `sentBy`'s email. */
   signedDocument(
     to: string[],
     props: {
@@ -45,9 +78,11 @@ export type Mailer = {
       signers: { name: string; role: string | null }[]
       message: string | null
       link: string | null
+      sentBy: { name: string; email: string | null } | null
     },
     attachment: { filename: string; content: Uint8Array; contentType: string } | null
   ): Promise<boolean>
+  requestUpdate: (to: string, props: RequestUpdate) => Promise<boolean>
 }
 
 type Logger = {
@@ -97,9 +132,43 @@ const MARK_GROWTH_BYTES = 4 * 1024
 /** A delivery attempt older than this is presumed dead and may be resumed. */
 const DELIVERY_CLAIM_MS = 5 * 60 * 1000
 const STAGED_TTL_MS = 24 * 60 * 60 * 1000
+/** The longest message a job keeps for the agent and the dashboard to show. */
+const MAX_JOB_MESSAGE = 300
 const MAX_SIGNERS = 10
+/** The IdP permission to use e-signing at all: be picked as a signer, open the dashboard's pages. */
+const SIGN = "esign:sign"
+/** The IdP permission to create and manage requests, retrying a delivery included. */
+const MANAGE = "esign:requests:manage"
 /** Documents signed with one PIN. */
 const MAX_BATCH = 10
+/**
+ * Errors that end a signature job, because trying again in the same agent window can't succeed; any other error
+ * leaves the job open. The agent and the dashboard keep the same list, documented in the admin's
+ * docs/esign/contracts.md.
+ */
+const TERMINAL = new Set([
+  // Reported by the agent.
+  "pin_locked",
+  "card_untrusted",
+  "middleware_missing",
+  "not_paired",
+  "certificate_not_found",
+  // Raised by this service.
+  "signer_mismatch",
+  "certificate_invalid",
+  "signature_invalid",
+  "document_changed",
+  "pdf_invalid",
+  "job_done",
+  "agent_outdated",
+])
+
+/** Tells an agent too old to sign to update; `version` is the one it reported, if any. */
+const agentOutdated = (version: string | null) =>
+  new EsignError(
+    "agent_outdated",
+    `${version ? `PoliNetwork eSign ${version} is` : "This version of PoliNetwork eSign is"} too old. Install the latest version from the setup guide, then sign again.`
+  )
 
 export type CreateRequestInput = {
   title: string
@@ -110,9 +179,17 @@ export type CreateRequestInput = {
   email: { to: string[]; message: string | null } | null
 }
 
-export type RequestView = SigningRequest & {
+export type RequestView = Omit<SigningRequest, "signers"> & {
+  signers: (Signer & {
+    /**
+     * While the request waits for this signer: the label of a drive whose documents they may no longer sign, after its
+     * rule or their IdP roles changed. Null otherwise.
+     */
+    lostAccess: string | null
+  })[]
   /** Signers who may sign now. */
   turn: string[]
+  /** The caller is in `turn` and may still sign the request's drives. */
   myTurn: boolean
   signedCount: number
   createdByName: string
@@ -121,6 +198,9 @@ export type RequestView = SigningRequest & {
 const sha256Hex = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex")
 const b64 = (data: Uint8Array) => Buffer.from(data).toString("base64")
 const fromB64 = (data: string) => new Uint8Array(Buffer.from(data, "base64"))
+/** `text` cut to at most `max` characters, ending in an ellipsis when cut. */
+const clip = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, Math.max(max - 1, 0)).trimEnd()}…`
 
 /** "Verbale CD.pdf" with characters OneDrive refuses removed. */
 export function safeFileName(name: string): string {
@@ -144,6 +224,16 @@ function formatRomeDate(date: Date) {
     minute: "2-digit",
   }).format(date)
 }
+
+/** "Verbali/Verbale CD.pdf"; just the name in the drive's root folder. */
+const drivePath = (folderPath: string, name: string) => [folderPath, name].filter(Boolean).join("/")
+
+/** The signer whose signature completed a request: the one who made the newest version. */
+const lastSigner = (request: SigningRequest) =>
+  request.signers.reduce<Signer | undefined>(
+    (last, s) => ((s.version ?? -1) > (last?.version ?? -1) ? s : last),
+    undefined
+  )
 
 /** Signers who may sign now: the first pending one in order, or every pending one. */
 export function turnOf(request: SigningRequest): Signer[] {
@@ -183,10 +273,11 @@ export function createEsignService(options: ServiceOptions) {
     return result
   }
 
-  async function info(sha256: string, content: Uint8Array): Promise<PdfInfo> {
+  /** What is in a PDF, inspected once per content: a `content` loader runs only when it isn't cached. */
+  async function info(sha256: string, content: Uint8Array | (() => Promise<Uint8Array>)): Promise<PdfInfo> {
     const cached = infoCache.get(sha256)
     if (cached) return cached
-    const result = await inspectPdf(content)
+    const result = await inspectPdf(typeof content === "function" ? await content() : content)
     if (infoCache.size > 100) infoCache.delete(infoCache.keys().next().value as string)
     infoCache.set(sha256, result)
     return result
@@ -241,16 +332,44 @@ export function createEsignService(options: ServiceOptions) {
     return request
   }
 
+  /** Refuses to sign a request that ended since the caller's page loaded, saying how it ended. */
+  function assertInProgress(request: SigningRequest) {
+    if (request.status === "in_progress") return
+    const ended = {
+      cancelled: "was cancelled",
+      declined: "was declined",
+      completed: "is already signed by everyone",
+    }[request.status]
+    throw new EsignError("conflict", `“${request.title}” ${ended}.`)
+  }
+
+  /** A version of a request the caller can see, or a staged upload of theirs (any, for a manager). */
+  async function readable<T extends DocumentMeta>(caller: Caller, document: T | null): Promise<T> {
+    if (!document) throw new EsignError("not_found", "Document not found")
+    if (document.requestId) await requestFor(caller, document.requestId)
+    else if (document.createdBySub !== caller.sub && !caller.canManage)
+      throw new EsignError("not_found", "Document not found")
+    return document
+  }
+
   async function profileName(sub: string) {
     return (await store.getProfile(sub))?.name ?? "A PoliNetwork member"
   }
 
-  async function view(caller: Caller, request: SigningRequest): Promise<RequestView> {
+  async function view(caller: Caller, request: SigningRequest, rules: Rules): Promise<RequestView> {
     const turn = turnOf(request).map((s) => s.sub)
+    const signers = request.signers.map((signer) => {
+      const denied =
+        request.status === "in_progress" && signer.status === "pending"
+          ? request.drives.find((d) => !maySign(rules, signer.sub, d))
+          : undefined
+      return { ...signer, lostAccess: denied ? driveLabel(denied) : null }
+    })
     return {
       ...request,
+      signers,
       turn,
-      myTurn: turn.includes(caller.sub),
+      myTurn: turn.includes(caller.sub) && !signers.some((s) => s.sub === caller.sub && s.lostAccess),
       signedCount: request.signers.filter((s) => s.status === "signed").length,
       createdByName: await profileName(request.createdBySub),
     }
@@ -283,27 +402,148 @@ export function createEsignService(options: ServiceOptions) {
     return { document, pdf }
   }
 
-  async function notifyTurn(request: SigningRequest, except: string | null) {
+  /**
+   * Emails these signers that it is their turn, all at once, and records in signer order who was emailed and who
+   * couldn't be.
+   */
+  async function notifyTurn(request: SigningRequest, signers: Signer[]) {
     const requestedBy = await profileName(request.createdBySub)
-    for (const signer of turnOf(request)) {
-      if (signer.sub === except) continue
-      const profile = await store.getProfile(signer.sub)
-      if (!profile?.email) continue
-      const sent = await mailer
-        .signatureRequest(profile.email, {
-          signerName: profile.name.split(" ")[0] ?? profile.name,
-          requestedBy,
-          title: request.title,
-          role: signer.role,
-          url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
-        })
-        .catch((error) => {
-          logger.error({ error, requestId: request.id }, "[ESIGN] cannot send the signature request email")
-          return false
-        })
-      if (sent)
-        await store.addEvent({ requestId: request.id, actorSub: null, type: "notified", data: { sub: signer.sub } })
+    const results = await Promise.all(
+      signers.map(async (signer) => {
+        const profile = await store.getProfile(signer.sub)
+        if (!profile?.email) {
+          logger.warn({ requestId: request.id, sub: signer.sub }, "[ESIGN] signer has no email")
+          return { signer, outcome: "no_email" as const }
+        }
+        const sent = await mailer
+          .signatureRequest(profile.email, {
+            signerName: profile.name.split(" ")[0] ?? profile.name,
+            requestedBy,
+            title: request.title,
+            role: signer.role,
+            ordered: request.ordered,
+            url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
+            setupUrl: `${options.dashboardUrl}/dashboard/esign/setup`,
+          })
+          .catch((error) => {
+            logger.error({ error, requestId: request.id }, "[ESIGN] cannot send the signature request email")
+            return false
+          })
+        return { signer, outcome: sent ? ("sent" as const) : ("send_failed" as const) }
+      })
+    )
+    for (const { signer, outcome } of results)
+      await store.addEvent(
+        outcome === "sent"
+          ? { requestId: request.id, actorSub: null, type: "notified", data: { sub: signer.sub } }
+          : { requestId: request.id, actorSub: null, type: "notify_failed", data: { sub: signer.sub, reason: outcome } }
+      )
+  }
+
+  /**
+   * Who may retry a request's delivery, by subject: managers who may use e-signing and see the request. Empty if they
+   * can't be listed.
+   */
+  async function managersOf(request: SigningRequest): Promise<Map<string, { name: string; email: string | null }>> {
+    try {
+      const [rules, people] = await Promise.all([
+        accessRules(),
+        options.directory ? options.directory() : store.listProfiles(),
+      ])
+      return new Map(
+        people
+          .filter((p) => {
+            const held = options.access?.(p.sub)?.permissions ?? []
+            return (
+              held.includes(SIGN) && held.includes(MANAGE) && canView(rules, { sub: p.sub, canManage: true }, request)
+            )
+          })
+          .map((p) => [p.sub, { name: p.name, email: p.email }])
+      )
+    } catch (error) {
+      logger.error({ error, requestId: request.id }, "[ESIGN] cannot list who may retry a delivery")
+      return new Map()
     }
+  }
+
+  /**
+   * Emails these people a "Request update", except `actor`, who saw it happen; `known` has names and addresses for
+   * people without a profile. Each outcome is reached by one call only, so it is emailed once. A failure is only
+   * logged: the action that led here succeeded.
+   */
+  async function emailUpdate(
+    request: SigningRequest,
+    subs: string[],
+    actor: string | null,
+    outcome: (sub: string) => RequestOutcome,
+    known = new Map<string, { name: string; email: string | null }>()
+  ) {
+    const recipients = [...new Set(subs)].filter((sub) => sub !== actor)
+    await Promise.all(
+      recipients.map(async (sub) => {
+        const profile = await store.getProfile(sub)
+        const name = profile?.name ?? known.get(sub)?.name ?? ""
+        const email = profile?.email ?? known.get(sub)?.email
+        if (!email) {
+          logger.warn({ requestId: request.id, sub }, "[ESIGN] no email for a request update")
+          return
+        }
+        try {
+          const sent = await mailer.requestUpdate(email, {
+            recipientName: name.split(" ")[0] || name,
+            title: request.title,
+            url: `${options.dashboardUrl}/dashboard/esign/requests/${request.id}`,
+            ...outcome(sub),
+          })
+          if (!sent) throw new Error("The email could not be sent")
+        } catch (error) {
+          logger.error({ error, requestId: request.id, sub }, "[ESIGN] cannot send the request update email")
+        }
+      })
+    )
+  }
+
+  /**
+   * After a delivery attempt: tells the creator everyone signed, unless they saw it happen by signing last or retrying;
+   * or, when an attempt nobody asked for fails, the creator and everyone who may retry it, the last signer included,
+   * who may have left before it ran. A manager watches their own retry: only its success is emailed.
+   */
+  async function emailDelivery(
+    request: SigningRequest,
+    delivery: DeliveryJson,
+    step: "save" | "email",
+    retryBy: string | null
+  ) {
+    const { output } = request
+    if (delivery.status === "delivered") {
+      const item = delivery.driveItem
+      await emailUpdate(request, [request.createdBySub], retryBy ?? lastSigner(request)?.sub ?? null, () => ({
+        outcome: "completed",
+        savedTo: output && item ? { path: drivePath(output.folderPath, item.name), url: item.webUrl } : null,
+        emailedTo: delivery.emailedTo,
+      }))
+      return
+    }
+    if (retryBy) return
+    const managers = await managersOf(request)
+    const requestedBy = await profileName(request.createdBySub)
+    const failed =
+      step === "save" && output
+        ? { step, target: drivePath(output.folderPath, output.fileName) }
+        : { step: "email" as const, target: request.email?.to.join(", ") ?? "" }
+    await emailUpdate(
+      request,
+      [request.createdBySub, ...managers.keys()],
+      null,
+      (sub) => ({
+        outcome: "delivery_failed",
+        failed,
+        error: delivery.error ?? "Unknown error",
+        requestedBy: sub === request.createdBySub ? null : requestedBy,
+        canRetry: managers.has(sub),
+      }),
+      managers
+    )
   }
 
   const signaturePlaces = (places: PlaceJson[]) => places.filter((p) => p.kind === "signature")
@@ -321,6 +561,7 @@ export function createEsignService(options: ServiceOptions) {
     const planned: { request: SigningRequest; signer: Signer; current: DocumentRecord; places: PlaceJson[] }[] = []
     for (const item of items) {
       const request = await requestFor(caller, item.requestId)
+      assertInProgress(request)
       const signer = turnOf(request).find((s) => s.sub === caller.sub)
       if (!signer) throw new EsignError("forbidden", `It is not your turn to sign “${request.title}”`)
       const denied = request.drives.find((d) => !maySign(rules, caller.sub, d))
@@ -396,19 +637,61 @@ export function createEsignService(options: ServiceOptions) {
 
   // ── Ticket resolution for the agent ──────────────────────────────────────────────────────────────────────────
 
-  async function resolveTicket(ticket: string, allowed: Job["status"][]): Promise<Job> {
+  /**
+   * The job of a ticket, if its status is allowed. With the agent's `userAgent`, an agent older than the minimum is
+   * told to update whatever the job's state, and its open job ends: the dashboard shows why.
+   */
+  async function resolveTicket(ticket: string, allowed: Job["status"][], userAgent?: string | null): Promise<Job> {
     if (!/^[A-Za-z0-9_-]{43}$/.test(ticket)) throw new EsignError("ticket_invalid", "This signing link is not valid")
     const job = await store.getJobByTicketHash(sha256Hex(ticket))
     if (!job) throw new EsignError("ticket_invalid", "This signing link is not valid")
+    const outdated = outdatedAgent(userAgent ?? null)
+    if (outdated) {
+      const error = agentOutdated(outdated)
+      // The agent did reach the job: the dashboard tells one to update from one that isn't running.
+      if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
+      await failJob(job, error.code, error.message)
+      throw error
+    }
     if (job.status === "completed") throw new EsignError("job_done", "This document is already signed")
+    if (job.status === "failed") {
+      if (allowed.includes("failed")) return job
+      throw new EsignError("job_failed", job.errorMessage ?? "This signature failed. Start again from the dashboard.")
+    }
     if (job.status === "cancelled")
-      throw new EsignError("job_cancelled", "This signature was cancelled in the dashboard")
+      throw new EsignError(
+        "job_cancelled",
+        // A job the signer cancelled keeps the agent's last error ("Wrong PIN."): pass on only a cancel's or decline's.
+        job.errorCode === "request_cancelled" || job.errorCode === "request_declined"
+          ? (job.errorMessage ?? "This signature was cancelled.")
+          : "This signature was cancelled."
+      )
     if (job.status === "expired" || job.expiresAt < now()) {
       await store.transitionJob(job.id, ["pending", "prepared"], { status: "expired" })
-      throw new EsignError("job_expired", "This signing link expired. Start again from the dashboard.")
+      throw new EsignError("job_expired", "This signing link expired.")
     }
     if (!allowed.includes(job.status)) throw new EsignError("conflict", "The signature is not ready")
     return job
+  }
+
+  /** Ends the job: the dashboard stops waiting and shows why, and the agent can't retry it. */
+  async function failJob(job: Job, code: string, message: string | null) {
+    await store.transitionJob(job.id, ["pending", "prepared"], {
+      status: "failed",
+      errorCode: code,
+      errorMessage: message?.slice(0, MAX_JOB_MESSAGE) ?? null,
+      preparedPdf: null,
+    })
+  }
+
+  /** Runs an agent step on an open job, failing the job when the step hits an error that retrying can't fix. */
+  async function failOnTerminal<T>(job: Job, step: () => Promise<T>): Promise<T> {
+    try {
+      return await step()
+    } catch (error) {
+      if (error instanceof EsignError && TERMINAL.has(error.code)) await failJob(job, error.code, error.message)
+      throw error
+    }
   }
 
   /** The request and signer of an open job, checked again: either may have changed since the job started. */
@@ -427,11 +710,13 @@ export function createEsignService(options: ServiceOptions) {
 
   /**
    * Uploads and emails a completed request's PDF. A claim makes one worker do it at a time; a crash leaves it pending,
-   * and the sweep resumes it once the claim is stale.
+   * and the sweep resumes it once the claim is stale. A run that outlives its claim may already have saved or emailed
+   * a copy, but only the run holding the claim records its result and emails the outcome.
    */
-  async function deliver(requestId: string, retry = false) {
+  async function deliver(requestId: string, retryBy: string | null = null) {
     const at = now()
-    if (!(await store.claimDelivery(requestId, at, new Date(at.getTime() - DELIVERY_CLAIM_MS), retry))) return
+    if (!(await store.claimDelivery(requestId, at, new Date(at.getTime() - DELIVERY_CLAIM_MS), retryBy !== null)))
+      return
     const request = await store.getRequest(requestId)
     if (!request || request.status !== "completed") return
     const document = await store.latestDocument(requestId)
@@ -443,6 +728,7 @@ export function createEsignService(options: ServiceOptions) {
       error: null as string | null,
       attemptedAt: now().toISOString(),
     }
+    let step: "save" | "email" = "save"
     try {
       if (request.output && !delivery.driveItem) {
         const drive = driveFor(request.output.driveId)
@@ -455,10 +741,12 @@ export function createEsignService(options: ServiceOptions) {
           data: { name: item.name, path: request.output.folderPath, drive: drive.label },
         })
       }
+      step = "email"
       if (request.email && request.email.to.length > 0 && delivery.emailedTo.length === 0) {
         const attach = document.size <= MAX_ATTACHMENT_BYTES
         if (!attach && !delivery.driveItem?.webUrl)
           throw new Error("The PDF is too large to email and there is no OneDrive link to send instead")
+        const creator = await store.getProfile(request.createdBySub)
         const sent = await mailer.signedDocument(
           request.email.to,
           {
@@ -466,6 +754,7 @@ export function createEsignService(options: ServiceOptions) {
             signers: request.signers.map((s) => ({ name: s.name, role: s.role })),
             message: request.email.message,
             link: attach ? null : (delivery.driveItem?.webUrl ?? null),
+            sentBy: creator ? { name: creator.name, email: creator.email } : null,
           },
           attach ? { filename: document.fileName, content: document.content, contentType: "application/pdf" } : null
         )
@@ -479,7 +768,13 @@ export function createEsignService(options: ServiceOptions) {
       logger.error({ error, requestId }, "[ESIGN] delivery failed")
       await store.addEvent({ requestId, actorSub: null, type: "delivery_failed", data: { error: delivery.error } })
     }
-    await store.updateRequest(requestId, { delivery })
+    if (!(await store.finishDelivery(requestId, at, delivery))) {
+      logger.warn({ requestId }, "[ESIGN] a later delivery attempt took over, this one's result is dropped")
+      return
+    }
+    void emailDelivery(request, delivery, step, retryBy).catch((error) =>
+      logger.error({ error, requestId }, "[ESIGN] request update crashed")
+    )
   }
 
   /** Stores a signed version, binds the signer's CIE, then delivers or asks the next signer. */
@@ -498,6 +793,7 @@ export function createEsignService(options: ServiceOptions) {
   }) {
     const { request, signer, current, job, signed, sha256, identity, final } = input
     const remaining = request.signers.filter((s) => s.status === "pending" && (s.id !== signer.id || !final)).length
+    const inTurnBefore = new Set(turnOf(request).map((s) => s.sub))
     const result = await store.commitSignature({
       jobId: job.id,
       requestId: request.id,
@@ -546,7 +842,10 @@ export function createEsignService(options: ServiceOptions) {
     if (updated?.status === "completed") {
       void deliver(request.id).catch((error) => logger.error({ error }, "[ESIGN] delivery crashed"))
     } else if (updated) {
-      void notifyTurn(updated, null).catch((error) => logger.error({ error }, "[ESIGN] notification crashed"))
+      // Only signers whose turn this signature started: an unordered request emailed everyone when it was created.
+      const entered = turnOf(updated).filter((s) => !inTurnBefore.has(s.sub))
+      if (entered.length > 0)
+        void notifyTurn(updated, entered).catch((error) => logger.error({ error }, "[ESIGN] notification crashed"))
     }
     logger.info(
       { requestId: request.id, version: job.baseVersion + 1, remaining, method: input.method },
@@ -599,6 +898,27 @@ export function createEsignService(options: ServiceOptions) {
       logger.info({ driveId, by: caller.sub }, "[ESIGN] drive access changed")
     },
 
+    /**
+     * The in-progress requests that a new "be asked to sign" rule for the drive would strand, with the pending signers
+     * who may sign its documents now and no longer would: for a confirmation before saving the rule.
+     */
+    async driveAccessImpact(caller: Caller, driveId: string, sign: DriveRule) {
+      if (!caller.canManageDrives) throw new EsignError("forbidden", "You cannot manage drive access")
+      driveFor(driveId)
+      const rules = await accessRules()
+      const requests = await store.listRequests({ status: ["in_progress"] })
+      return requests
+        .filter((r) => r.drives.includes(driveId))
+        .map((r) => ({
+          id: r.id,
+          title: r.title,
+          signers: r.signers
+            .filter((s) => s.status === "pending" && maySign(rules, s.sub, driveId) && !satisfies(sign, s.sub))
+            .map((s) => s.name),
+        }))
+        .filter((r) => r.signers.length > 0)
+    },
+
     async syncProfile(caller: Caller, profile: { name: string; email: string | null }): Promise<Profile> {
       return store.upsertProfile({ sub: caller.sub, name: profile.name.trim().slice(0, 120), email: profile.email })
     },
@@ -610,7 +930,7 @@ export function createEsignService(options: ServiceOptions) {
       const registered = options.directory ? await options.directory() : profiles
       const bySub = new Map(profiles.map((profile) => [profile.sub, profile]))
       return registered
-        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes("esign:sign"))
+        .filter((person) => !options.directory || options.access?.(person.sub)?.permissions.includes(SIGN))
         .map((person) => {
           const profile = bySub.get(person.sub)
           return {
@@ -663,15 +983,24 @@ export function createEsignService(options: ServiceOptions) {
       }
     },
 
-    /** A document version's bytes and what is in it, for the viewer. */
+    /**
+     * A document version and its pages and signatures. Pages reload it every few seconds while a co-signer signs: its
+     * bytes are read only when they weren't inspected yet.
+     */
+    async documentInfo(caller: Caller, documentId: string) {
+      const meta = await readable(caller, await store.getDocumentMeta(documentId))
+      const pdf = await info(meta.sha256, async () => {
+        const document = await store.getDocument(documentId)
+        if (!document) throw new EsignError("not_found", "Document not found")
+        return document.content
+      })
+      return { meta, pdf }
+    },
+
+    /** A document version's bytes, for the viewer and downloads. */
     async document(caller: Caller, documentId: string) {
-      const document = await store.getDocument(documentId)
-      if (!document) throw new EsignError("not_found", "Document not found")
-      if (document.requestId) await requestFor(caller, document.requestId)
-      else if (document.createdBySub !== caller.sub && !caller.canManage)
-        throw new EsignError("not_found", "Document not found")
-      const { content, ...meta } = document
-      return { meta, content, pdf: await info(document.sha256, content) }
+      const { content, ...meta } = await readable(caller, await store.getDocument(documentId))
+      return { meta, content }
     },
 
     async createRequest(caller: Caller, input: CreateRequestInput): Promise<RequestView> {
@@ -691,7 +1020,7 @@ export function createEsignService(options: ServiceOptions) {
       for (const s of input.signers) {
         const person = registered ? registered.get(s.sub) : await store.getProfile(s.sub)
         if (!person) throw new EsignError("bad_request", "A signer is not a registered user")
-        if (registered && !options.access?.(s.sub)?.permissions.includes("esign:sign"))
+        if (registered && !options.access?.(s.sub)?.permissions.includes(SIGN))
           throw new EsignError("bad_request", `${person.name} is not allowed to sign`)
         if (registered)
           profilesToSync.push({
@@ -768,8 +1097,11 @@ export function createEsignService(options: ServiceOptions) {
         type: "created",
         data: { signers: signers.length },
       })
-      await notifyTurn(request, caller.sub)
-      return view(caller, request)
+      await notifyTurn(
+        request,
+        turnOf(request).filter((s) => s.sub !== caller.sub)
+      )
+      return view(caller, request, rules)
     },
 
     async listRequests(caller: Caller, scope: "inbox" | "mine" | "all") {
@@ -780,25 +1112,33 @@ export function createEsignService(options: ServiceOptions) {
       )
       const rules = await accessRules()
       const visible = requests.filter((r) => canView(rules, caller, r))
-      return Promise.all(visible.map((r) => view(caller, r)))
+      const views = await Promise.all(visible.map((r) => view(caller, r, rules)))
+      // A signer who may no longer sign a drive's documents can't act on them: they stay under Requests only.
+      return scope === "inbox" ? views.filter((r) => r.myTurn) : views
     },
 
     async getRequest(caller: Caller, id: string) {
       const request = await requestFor(caller, id)
-      const [events, versions, open] = await Promise.all([
+      const [events, versions, open, rules] = await Promise.all([
         store.listEvents(id),
         store.listVersions(id),
         store.openJobs(id),
+        accessRules(),
       ])
       const current = versions.at(-1)
       const signingNow = open.find((j) => j.expiresAt > now())
       return {
-        request: await view(caller, request),
+        request: await view(caller, request, rules),
         events,
         versions,
         currentDocumentId: current?.id ?? null,
         signingNow: signingNow
-          ? { sub: signingNow.sub, name: request.signers.find((s) => s.id === signingNow.signerId)?.name ?? "" }
+          ? {
+              sub: signingNow.sub,
+              name: request.signers.find((s) => s.id === signingNow.signerId)?.name ?? "",
+              /** The job's expiry: the request is free again by then at the latest. */
+              until: signingNow.expiresAt,
+            }
           : null,
       }
     },
@@ -806,12 +1146,14 @@ export function createEsignService(options: ServiceOptions) {
     async cancelRequest(caller: Caller, id: string) {
       await requestFor(caller, id)
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can cancel requests")
-      const result = await store.cancelRequest(id, {
-        requestId: id,
-        actorSub: caller.sub,
-        type: "cancelled",
-        data: null,
-      })
+      const result = await store.cancelRequest(
+        id,
+        { requestId: id, actorSub: caller.sub, type: "cancelled", data: null },
+        {
+          code: "request_cancelled",
+          message: `${await profileName(caller.sub)} cancelled this request.`.slice(0, MAX_JOB_MESSAGE),
+        }
+      )
       if (result === "conflict") throw new EsignError("conflict", "The request is not in progress")
     },
 
@@ -830,13 +1172,22 @@ export function createEsignService(options: ServiceOptions) {
       const signer = request.signers.find((s) => s.sub === caller.sub && s.status === "pending")
       if (request.status !== "in_progress" || !signer) throw new EsignError("conflict", "There is nothing to decline")
       const why = reason?.trim() || null
-      const result = await store.declineRequest(id, signer.id, why, {
-        requestId: id,
-        actorSub: caller.sub,
-        type: "declined",
-        data: { reason: why },
-      })
+      // The signer and the event keep the whole reason; the jobs' message quotes as much of it as fits.
+      const lead = `${signer.name} declined this request`
+      const quoted = why ? `: “${clip(why, MAX_JOB_MESSAGE - lead.length - 5)}”` : ""
+      const result = await store.declineRequest(
+        id,
+        signer.id,
+        why,
+        { requestId: id, actorSub: caller.sub, type: "declined", data: { reason: why } },
+        { code: "request_declined", message: `${lead}${quoted}.`.slice(0, MAX_JOB_MESSAGE) }
+      )
       if (result === "conflict") throw new EsignError("conflict", "The request changed; reload it")
+      void emailUpdate(request, [request.createdBySub], caller.sub, () => ({
+        outcome: "declined",
+        by: signer.name,
+        reason: why,
+      })).catch((error) => logger.error({ error, requestId: id }, "[ESIGN] request update crashed"))
     },
 
     async retryDelivery(caller: Caller, id: string) {
@@ -844,7 +1195,7 @@ export function createEsignService(options: ServiceOptions) {
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can retry the delivery")
       if (request.status !== "completed" || request.delivery?.status !== "failed")
         throw new EsignError("conflict", "Nothing to retry")
-      await deliver(id, true)
+      await deliver(id, caller.sub)
       return (await store.getRequest(id))?.delivery ?? null
     },
 
@@ -871,163 +1222,171 @@ export function createEsignService(options: ServiceOptions) {
 
     // ── The agent's side, authenticated by the ticket ──────────────────────────────────────────────────────────
 
-    async agentJob(ticket: string) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
-      const { request, signer, current } = await jobContext(job)
-      if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
-      return {
-        id: job.id,
-        status: job.status,
-        expiresAt: job.expiresAt,
-        document: { title: request.title, fileName: current.fileName, pages: current.pages },
-        signer: { name: signer.name, role: signer.role },
-        placement: { page: signaturePlaces(job.places)[job.step]?.page ?? 0 },
-        requestedBy: await profileName(request.createdBySub),
-        /** Signatures still to make, one after another with the same card session. */
-        signatures: signaturesLeft(job),
-        /** Extra marks the next signature draws. */
-        marks: job.step === 0 ? job.places.length - signaturePlaces(job.places).length : 0,
-        /** Pages with this signer's boxes, 0-based. */
-        pages: [...new Set(job.places.map((p) => p.page))].sort((a, b) => a - b),
-      }
+    /** The job the agent's page shows; `userAgent` is the agent's, which refuses one too old before the PIN. */
+    async agentJob(ticket: string, userAgent: string | null = null) {
+      const job = await resolveTicket(ticket, ["pending", "prepared"], userAgent)
+      return failOnTerminal(job, async () => {
+        const { request, signer, current } = await jobContext(job)
+        if (!job.seenAt) await store.transitionJob(job.id, ["pending", "prepared"], { seenAt: now() })
+        return {
+          id: job.id,
+          status: job.status,
+          expiresAt: job.expiresAt,
+          document: { title: request.title, fileName: current.fileName, pages: current.pages },
+          signer: { name: signer.name, role: signer.role },
+          placement: { page: signaturePlaces(job.places)[job.step]?.page ?? 0 },
+          /** The creator's name, when the signer isn't the creator. */
+          requestedBy: signer.sub === request.createdBySub ? null : await profileName(request.createdBySub),
+          /** Signatures still to make, one after another with the same card session. */
+          signatures: signaturesLeft(job),
+          /** Extra marks the next signature draws. */
+          marks: job.step === 0 ? job.places.length - signaturePlaces(job.places).length : 0,
+          /** Pages with this signer's boxes, 0-based. */
+          pages: [...new Set(job.places.map((p) => p.page))].sort((a, b) => a - b),
+        }
+      })
     },
 
-    async agentPrepare(ticket: string, certificateB64: string, chainB64: string[] = [], protocol = 1) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
-      if (protocol < 2) {
-        const message = "Update the PoliNetwork Sign Agent from the setup guide, then sign again."
-        await store.transitionJob(job.id, ["pending", "prepared"], {
-          errorCode: "agent_outdated",
-          errorMessage: message,
-        })
-        throw new EsignError("agent_outdated", message)
-      }
-      const { request, signer, current } = await jobContext(job)
-      const place = signaturePlaces(job.places)[job.step]
-      if (!place) throw new EsignError("conflict", "The signature changed state; start again")
-      let cert: X509Certificate
-      try {
-        cert = new X509Certificate(Buffer.from(certificateB64, "base64"))
-      } catch {
-        throw new EsignError("certificate_invalid", "The card's certificate cannot be read")
-      }
-      const at = now()
-      if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
-        throw new EsignError("certificate_invalid", "The CIE certificate is expired")
-      const trust = (options.trust ?? cieChain)(cert, at)
-      if (!trust.trusted && !options.allowTestCertificates)
-        throw new EsignError("certificate_invalid", "This certificate was not issued for a CIE")
-      const identity = identityOf(cert)
-      if (!identity.fiscalCode && !options.allowTestCertificates)
-        throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
-      const revocation = await revocationOf(cert, trust.issuer)
-      const profile = await store.getProfile(signer.sub)
-      if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
-        throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
+    async agentPrepare(
+      ticket: string,
+      certificateB64: string,
+      chainB64: string[] = [],
+      protocol = 1,
+      userAgent: string | null = null
+    ) {
+      const job = await resolveTicket(ticket, ["pending", "prepared"], userAgent)
+      return failOnTerminal(job, async () => {
+        // The safety net for agents that don't send their version: caught here, once the PIN opened the card.
+        if (protocol < 2) throw agentOutdated(null)
+        const { request, signer, current } = await jobContext(job)
+        const place = signaturePlaces(job.places)[job.step]
+        if (!place) throw new EsignError("conflict", "The signature changed state; start again")
+        let cert: X509Certificate
+        try {
+          cert = new X509Certificate(Buffer.from(certificateB64, "base64"))
+        } catch {
+          throw new EsignError("certificate_invalid", "The card's certificate cannot be read")
+        }
+        const at = now()
+        if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
+          throw new EsignError("certificate_invalid", "The CIE certificate is expired")
+        const trust = (options.trust ?? cieChain)(cert, at)
+        if (!trust.trusted && !options.allowTestCertificates)
+          throw new EsignError("certificate_invalid", "This certificate was not issued for a CIE")
+        const identity = identityOf(cert)
+        if (!identity.fiscalCode && !options.allowTestCertificates)
+          throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
+        const revocation = await revocationOf(cert, trust.issuer)
+        const profile = await store.getProfile(signer.sub)
+        if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
+          throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
 
-      const pdf = await info(current.sha256, current.content)
-      const used = new Set(pdf.fieldNames)
-      let fieldName = `Firma ${identity.name}`
-      for (let i = 2; used.has(fieldName); i++) fieldName = `Firma ${identity.name} ${i}`
-      const chain = trust.trusted ? trust.chain : chainB64.slice(0, 4).map(fromB64)
-      let prepared: PreparedSignature
-      try {
-        prepared = await prepareSignature(current.content, new Uint8Array(cert.raw), {
-          placement: place,
-          // The first signature draws the marks, so it covers them.
-          marks: job.step === 0 ? job.places.filter((p) => p.kind === "mark") : [],
-          fieldName,
-          signerName: identity.name,
-          reason: signer.role ? `${titleCase(signer.role)} - ${request.title}` : request.title,
-          signingTime: at,
-          appearance: {
-            lines: [
-              { text: "Firmato digitalmente da", muted: true },
-              { text: identity.name, bold: true },
-              ...(signer.role ? [{ text: titleCase(signer.role) }] : []),
-              { text: `${formatRomeDate(at)} · CIE`, muted: true },
-            ],
+        const pdf = await info(current.sha256, current.content)
+        const used = new Set(pdf.fieldNames)
+        let fieldName = `Firma ${identity.name}`
+        for (let i = 2; used.has(fieldName); i++) fieldName = `Firma ${identity.name} ${i}`
+        const chain = trust.trusted ? trust.chain : chainB64.slice(0, 4).map(fromB64)
+        let prepared: PreparedSignature
+        try {
+          prepared = await prepareSignature(current.content, new Uint8Array(cert.raw), {
+            placement: place,
+            // The first signature draws the marks, so it covers them.
+            marks: job.step === 0 ? job.places.filter((p) => p.kind === "mark") : [],
+            fieldName,
+            signerName: identity.name,
+            reason: signer.role ? `${titleCase(signer.role)} - ${request.title}` : request.title,
+            signingTime: at,
+            appearance: {
+              lines: [
+                { text: "Firmato digitalmente da", muted: true },
+                { text: identity.name, bold: true },
+                ...(signer.role ? [{ text: titleCase(signer.role) }] : []),
+                { text: `${formatRomeDate(at)} · CIE`, muted: true },
+              ],
+            },
+          })
+        } catch (error) {
+          if (error instanceof PdfError || error instanceof SignatureError)
+            throw new EsignError(error instanceof SignatureError ? "certificate_invalid" : "pdf_invalid", error.message)
+          throw error
+        }
+        const ok = await store.transitionJob(job.id, ["pending", "prepared"], {
+          status: "prepared",
+          errorCode: null,
+          errorMessage: null,
+          preparedPdf: prepared.placeholder.pdf,
+          prepared: {
+            byteRange: prepared.placeholder.byteRange,
+            contentsOffset: prepared.placeholder.contentsOffset,
+            contentsHexLength: prepared.placeholder.contentsHexLength,
+            signedAttrs: b64(prepared.signedAttrs),
+            toBeSigned: b64(prepared.toBeSigned),
+            certificate: b64(prepared.certificate),
+            chain: chain.map(b64),
+            signingTime: at.toISOString(),
+            revocation,
           },
         })
-      } catch (error) {
-        if (error instanceof PdfError || error instanceof SignatureError)
-          throw new EsignError(error instanceof SignatureError ? "certificate_invalid" : "pdf_invalid", error.message)
-        throw error
-      }
-      const ok = await store.transitionJob(job.id, ["pending", "prepared"], {
-        status: "prepared",
-        errorCode: null,
-        errorMessage: null,
-        preparedPdf: prepared.placeholder.pdf,
-        prepared: {
-          byteRange: prepared.placeholder.byteRange,
-          contentsOffset: prepared.placeholder.contentsOffset,
-          contentsHexLength: prepared.placeholder.contentsHexLength,
-          signedAttrs: b64(prepared.signedAttrs),
+        if (!ok) throw new EsignError("conflict", "The signature changed state; start again")
+        return {
           toBeSigned: b64(prepared.toBeSigned),
-          certificate: b64(prepared.certificate),
-          chain: chain.map(b64),
-          signingTime: at.toISOString(),
-          revocation,
-        },
+          algorithm: "RSASSA-PKCS1-v1_5-SHA256" as const,
+          step: job.step,
+          steps: signaturePlaces(job.places).length,
+        }
       })
-      if (!ok) throw new EsignError("conflict", "The signature changed state; start again")
-      return {
-        toBeSigned: b64(prepared.toBeSigned),
-        algorithm: "RSASSA-PKCS1-v1_5-SHA256" as const,
-        step: job.step,
-        steps: signaturePlaces(job.places).length,
-      }
     },
 
     async agentComplete(ticket: string, signatureB64: string) {
       const job = await resolveTicket(ticket, ["prepared"])
-      const { request, signer, current } = await jobContext(job)
-      const state = job.prepared
-      const pdf = await store.getPreparedPdf(job.id)
-      if (!state || !pdf) throw new EsignError("conflict", "The signature is not ready")
-      const prepared: PreparedSignature = {
-        placeholder: {
-          pdf,
-          byteRange: state.byteRange,
-          contentsOffset: state.contentsOffset,
-          contentsHexLength: state.contentsHexLength,
-        },
-        signedAttrs: fromB64(state.signedAttrs),
-        toBeSigned: fromB64(state.toBeSigned),
-        certificate: fromB64(state.certificate),
-      }
-      let signed: Uint8Array
-      try {
-        signed = finalizeSignature(prepared, fromB64(signatureB64), state.chain.map(fromB64))
-      } catch (error) {
-        if (error instanceof SignatureError) {
-          await store.transitionJob(job.id, ["prepared"], {
-            errorCode: "signature_invalid",
-            errorMessage: error.message,
-          })
-          throw new EsignError("signature_invalid", "The card's signature does not match. Try again.")
+      return failOnTerminal(job, async () => {
+        const { request, signer, current } = await jobContext(job)
+        const state = job.prepared
+        const pdf = await store.getPreparedPdf(job.id)
+        if (!state || !pdf) throw new EsignError("conflict", "The signature is not ready")
+        const prepared: PreparedSignature = {
+          placeholder: {
+            pdf,
+            byteRange: state.byteRange,
+            contentsOffset: state.contentsOffset,
+            contentsHexLength: state.contentsHexLength,
+          },
+          signedAttrs: fromB64(state.signedAttrs),
+          toBeSigned: fromB64(state.toBeSigned),
+          certificate: fromB64(state.certificate),
         }
-        throw error
-      }
-      const sha256 = sha256Hex(signed)
-      const check = await info(sha256, signed)
-      const last = check.signatures.at(-1)
-      if (!last?.intact || !last.verified || !last.coversWholeDocument)
-        throw new EsignError("signature_invalid", "The signed document failed verification")
+        let signed: Uint8Array
+        try {
+          signed = finalizeSignature(prepared, fromB64(signatureB64), state.chain.map(fromB64))
+        } catch (error) {
+          if (error instanceof SignatureError) {
+            logger.warn({ error, jobId: job.id }, "[ESIGN] the card's signature does not match")
+            throw new EsignError(
+              "signature_invalid",
+              "The card's signature does not match. Start again from the dashboard."
+            )
+          }
+          throw error
+        }
+        const sha256 = sha256Hex(signed)
+        const check = await info(sha256, signed)
+        const last = check.signatures.at(-1)
+        if (!last?.intact || !last.verified || !last.coversWholeDocument)
+          throw new EsignError("signature_invalid", "The signed document failed verification")
 
-      const identity = identityOf(new X509Certificate(Buffer.from(prepared.certificate)))
-      return commitSigned({
-        request,
-        signer,
-        current,
-        job,
-        signed,
-        sha256,
-        identity,
-        method: "agent",
-        revocation: state.revocation ?? null,
-        final: signaturesLeft(job) === 1,
+        const identity = identityOf(new X509Certificate(Buffer.from(prepared.certificate)))
+        return commitSigned({
+          request,
+          signer,
+          current,
+          job,
+          signed,
+          sha256,
+          identity,
+          method: "agent",
+          revocation: state.revocation ?? null,
+          final: signaturesLeft(job) === 1,
+        })
       })
     },
 
@@ -1038,6 +1397,7 @@ export function createEsignService(options: ServiceOptions) {
      */
     async uploadSigned(caller: Caller, requestId: string, bytes: Uint8Array) {
       const request = await requestFor(caller, requestId)
+      assertInProgress(request)
       const signer = turnOf(request).find((s) => s.sub === caller.sub)
       if (!signer) throw new EsignError("forbidden", "It is not your turn to sign")
       const rules = await accessRules()
@@ -1119,16 +1479,29 @@ export function createEsignService(options: ServiceOptions) {
       })
     },
 
+    /** The agent reports an error, or the user's cancel: a terminal error fails the job, others leave it open. */
     async agentFail(ticket: string, code: string, message: string | null) {
-      const job = await resolveTicket(ticket, ["pending", "prepared"])
+      // The agent also reports the errors this service raised, which may have failed the job already.
+      const job = await resolveTicket(ticket, ["pending", "prepared", "failed"])
+      if (job.status === "failed") return { status: job.status }
       const safeCode = code.replace(/[^a-z_]/g, "").slice(0, 40) || "unknown"
-      if (safeCode === "cancelled") await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
-      else
-        await store.transitionJob(job.id, ["pending", "prepared"], {
-          errorCode: safeCode,
-          errorMessage: message?.slice(0, 300) ?? null,
-        })
-      return { status: safeCode === "cancelled" ? "cancelled" : job.status }
+      // These codes say how this service ended a job (a request cancelled or declined, a job done or expired): an
+      // agent's report must not pass for one.
+      if (safeCode.startsWith("request_") || safeCode.startsWith("job_"))
+        throw new EsignError("bad_request", "This error code is reserved")
+      if (safeCode === "cancelled") {
+        await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
+        return { status: "cancelled" as const }
+      }
+      if (TERMINAL.has(safeCode)) {
+        await failJob(job, safeCode, message)
+        return { status: "failed" as const }
+      }
+      await store.transitionJob(job.id, ["pending", "prepared"], {
+        errorCode: safeCode,
+        errorMessage: message?.slice(0, MAX_JOB_MESSAGE) ?? null,
+      })
+      return { status: job.status }
     },
 
     /** Periodic cleanup: expired jobs, their prepared PDFs and abandoned uploads. */

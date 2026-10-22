@@ -84,7 +84,11 @@ check("commit binds the fiscal code", (await commit("AAA", job.id, a.id, a.signe
 check("profile bound", (await store.getProfile(sub))?.fiscalCode === "AAA")
 check(
   "cancel after completion conflicts",
-  (await store.cancelRequest(a.id, { requestId: a.id, actorSub: sub, type: "cancelled", data: null })) === "conflict"
+  (await store.cancelRequest(
+    a.id,
+    { requestId: a.id, actorSub: sub, type: "cancelled", data: null },
+    { code: "request_cancelled", message: "Smoke Test cancelled this request." }
+  )) === "conflict"
 )
 const now = new Date()
 check("claim pending delivery", await store.claimDelivery(a.id, now, new Date(now.getTime() - 1000), false))
@@ -106,18 +110,30 @@ await store.transitionJob(job2.id, ["pending"], { status: "prepared" })
 check("another card is refused", (await commit("BBB", job2.id, b.id, b.signers[0].id)) === "mismatch")
 check(
   "decline ends the request",
-  (await store.declineRequest(b.id, b.signers[0].id, "no", {
-    requestId: b.id,
-    actorSub: sub,
-    type: "declined",
-    data: null,
-  })) === "ok"
+  (await store.declineRequest(
+    b.id,
+    b.signers[0].id,
+    "no",
+    { requestId: b.id, actorSub: sub, type: "declined", data: null },
+    { code: "request_declined", message: "Smoke Test declined this request: “no”." }
+  )) === "ok"
 )
 check("open jobs cancelled", (await store.openJobs(b.id)).length === 0)
+const declinedJob = await store.getJob(job2.id)
+check(
+  "cancelled job says why",
+  declinedJob?.status === "cancelled" &&
+    declinedJob.errorCode === "request_declined" &&
+    declinedJob.errorMessage === "Smoke Test declined this request: “no”."
+)
 const c = await create()
 check(
   "cancel in progress",
-  (await store.cancelRequest(c.id, { requestId: c.id, actorSub: sub, type: "cancelled", data: null })) === "ok"
+  (await store.cancelRequest(
+    c.id,
+    { requestId: c.id, actorSub: sub, type: "cancelled", data: null },
+    { code: "request_cancelled", message: "Smoke Test cancelled this request." }
+  )) === "ok"
 )
 
 // A signer with two places: the first commit moves the job on, the second finishes.

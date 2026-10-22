@@ -92,6 +92,22 @@ Requirements:
   consent, for the drive; emails use the existing `Mail.Send` sender.
 - The dashboard proxies `/api/esign/agent/*` to this backend's `/esign/agent/*`; the agent never calls the backend
   directly. Those endpoints are authenticated only by the job's single-use ticket.
+- The proxy passes on the agent's `User-Agent: PoliNetwork-eSign/<version>` (`PoliNetwork-Sign-Agent/<version>` for
+  0.1.x, released before the rename). An agent older than `MIN_AGENT_VERSION` (`src/esign/agent-version.ts`) gets 426
+  `agent_outdated` when it loads a job, before the PIN, and the job fails so the dashboard can say why. No User-Agent,
+  a development or source build (`dev`, `v0.1.1-6-g0cb0f7b`) or an unreadable version passes; preparing a signature
+  still refuses an agent without protocol 2.
+
+Emails (`src/emails/templates`, preview with `bun run email`):
+
+- "Signature needed" tells signers their turn started.
+- "Documento firmato" sends the signed PDF to the addresses the request names, in Italian since they are often outside
+  PoliNetwork. The PDF is attached up to 2 MB, otherwise linked from OneDrive; replies go to whoever sent the request.
+- "Request update" tells a request's creator that a signer declined, with the reason, or that everyone signed, unless
+  the creator saw it by signing last or retrying the delivery. When saving or emailing the signed PDF fails, it tells
+  the creator and every manager who may retry (`esign:sign` and `esign:requests:manage`, allowed on the request's
+  drives), the last signer included: the delivery runs once they have signed. Nobody is emailed about what they just
+  did, each outcome is emailed once, and an email that fails is only logged.
 
 Signatures are checked against the CIE certification authorities of the Ministero dell'Interno bundled in
 `src/esign/trust`. Tests: `bunx vitest run tests/esign-*.test.ts` (validated with poppler `pdfsig` when installed).
