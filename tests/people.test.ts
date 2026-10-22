@@ -428,12 +428,13 @@ it("retains deselected census groups as pending HR work until Telegram confirms 
   expect(person.admin?.groups).toHaveLength(1)
   expect(person.discrepancies).toContainEqual(
     expect.objectContaining({
-      kind: "needs-review",
+      kind: "admin-removal",
       message: expect.stringContaining("Telegram admin removal pending: Test group (-1001)"),
     })
   )
   expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(1)
   await h.store.transaction(async ({ state }) => {
+    state.persons["P-0003"].discrepancies[0].kind = "needs-review"
     state.persons["P-0003"].discrepancies.push({
       kind: "needs-review",
       message: "HR-only identity review",
@@ -446,6 +447,7 @@ it("retains deselected census groups as pending HR work until Telegram confirms 
     person: {
       discrepancies: [
         expect.objectContaining({
+          kind: "admin-removal",
           message: expect.stringContaining("Telegram admin removal pending:"),
         }),
       ],
