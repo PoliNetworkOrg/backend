@@ -4,7 +4,6 @@ import { authorOf } from "@/idp/author"
 describe("authorOf", () => {
   it("takes the author from the token's user", () => {
     expect(authorOf({ kind: "user", client: "admin-dashboard", sub: "usr_1", telegramId: "5" })).toEqual({
-      id: null,
       sub: "usr_1",
     })
   })

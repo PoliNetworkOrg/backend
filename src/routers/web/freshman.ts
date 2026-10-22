@@ -60,7 +60,7 @@ export default createTRPCRouter({
   updateCard: policy(dashboard("web:content:write"), { tokenOnly: true })
     .input(updateFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
-      const { id, modifiedBy: _legacyAuthor, ...fields } = input
+      const { id, ...fields } = input
       const [updated] = await DB.update(CARDS)
         .set({ ...fields, ...modifiedByColumns(authorOf(ctx.actor)) })
         .where(eq(CARDS.id, id))

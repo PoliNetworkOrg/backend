@@ -6,7 +6,6 @@ import type { Context } from "@/trpc"
 
 const REQUIRED_ENV: Record<string, string> = {
   NODE_ENV: "test",
-  BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
   ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   DB_HOST: "localhost",
   DB_PORT: "5432",
@@ -28,8 +27,7 @@ const db = vi.hoisted(() => ({
 
 // The real schema, without a connection: importing "@/db" would run migrations.
 vi.mock("@/db", async () => {
-  const [auth, common, tg, wa, web, views] = await Promise.all([
-    import("@/db/schema/auth"),
+  const [common, tg, wa, web, views] = await Promise.all([
     import("@/db/schema/common"),
     import("@/db/schema/tg"),
     import("@/db/schema/wa"),
@@ -65,7 +63,7 @@ vi.mock("@/db", async () => {
   })
   return {
     DB: { select, insert },
-    SCHEMA: { AUTH: auth.schema, COMMON: common.schema, TG: tg.schema, WA: wa.schema, WEB: web.schema },
+    SCHEMA: { COMMON: common.schema, TG: tg.schema, WA: wa.schema, WEB: web.schema },
     VIEWS: { GROUPS: views.views },
   }
 })
@@ -189,7 +187,6 @@ describe("app router", () => {
           label: "students",
           description: undefined,
           color: "#3b82f6",
-          createdBy: null,
           createdBySub: "usr_admin",
         },
       },
@@ -281,7 +278,7 @@ describe("tg.access.resolve and me.access", () => {
 
   it("resolves Telegram users to their subject, permissions and active grant", async () => {
     const validUntil = new Date(Date.now() + 3_600_000)
-    db.rows = { tg_grants: [{ userId: 456, validUntil }], tg_grants_v2: [] }
+    db.rows = { tg_grants: [{ telegramUserId: 456, validUntil }] }
     const caller = appRouter.createCaller({
       auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:read"]) },
       access: access(true),
