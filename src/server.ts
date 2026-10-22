@@ -16,7 +16,7 @@ import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
 import { redis } from "./redis"
 import { appRouter } from "./routers"
-import { withRequestBodyLimit } from "./serve-options"
+import { limitRequestBody, withRequestBodyLimit } from "./serve-options"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
 
 export const WSS = new WebSocketServer({
@@ -74,8 +74,9 @@ app.route("/esign/agent", agentRoutes(esign))
 // Access-changed events from the IdP (RFC v3 §5.6). Authenticated by the event's own signature.
 app.post("/internal/events", (c) => (idp?.events ? idp.events(c.req.raw) : c.body(null, 404)))
 
-app.all(`${WS_PATH}/`, (c) => {
-  return wssEngine.handleRequest(c.req.raw, server)
+app.all(`${WS_PATH}/`, async (c) => {
+  const req = await limitRequestBody(c.req.raw, wssEngine.opts.maxHttpBufferSize)
+  return req instanceof Response ? req : wssEngine.handleRequest(req, server)
 })
 
 // Graceful shutdown for hot-reloading
