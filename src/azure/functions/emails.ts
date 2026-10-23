@@ -8,7 +8,11 @@ import { getAzureClient } from "../client"
 export type EmailAttachment = { filename: string; content: Uint8Array; contentType: string }
 
 /** Where replies go instead of the sender's mailbox. */
-export type EmailOptions = { replyTo?: { name: string; address: string } }
+export type EmailOptions = {
+  replyTo?: { name: string; address: string }
+  throwOnError?: boolean
+  messageId?: string
+}
 
 export async function sendEmail(
   to: string | string[],
@@ -34,6 +38,7 @@ export async function sendEmail(
     subject,
     text,
     html,
+    messageId: options.messageId,
     attachments: attachments.map((a) => ({
       filename: a.filename,
       content: Buffer.from(a.content),
@@ -51,6 +56,7 @@ export async function sendEmail(
     return true
   } catch (error) {
     logger.error({ error }, "[Azure Graph API] Could not send email")
+    if (options.throwOnError) throw error
     return false
   }
 }

@@ -27,6 +27,14 @@ export function cron() {
   })
 
   logger.info("[CRON] scheduled")
+  new Cron("0 * * * * *", async () => {
+    try {
+      const { people } = await import("./people")
+      await people.sweep()
+    } catch (err) {
+      logger.error(err, "[CRON] People sweep")
+    }
+  })
 }
 
 export async function cleanLinkCodes() {

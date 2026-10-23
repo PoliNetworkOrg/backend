@@ -5,6 +5,7 @@ import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } 
 import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
+import MemberNumberChanged from "./templates/member-number-changed"
 import OtpEmail from "./templates/otp"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
@@ -68,6 +69,28 @@ export async function sendWelcomeEmail(
   )
 }
 
+export async function sendMemberNumberChangedEmail(
+  toAddress: string,
+  memberInfo: {
+    firstName: string | null
+    assocNumber: number
+    previousAssocNumber: string | null
+    email: string | null
+  }
+) {
+  const subject = makeSubject("Your PoliNetwork member number has changed")
+  return sendEmail(
+    toAddress,
+    subject,
+    <MemberNumberChanged
+      firstName={memberInfo.firstName}
+      assocNum={memberInfo.assocNumber}
+      previousAssocNum={memberInfo.previousAssocNumber}
+      email={memberInfo.email}
+    />
+  )
+}
+
 export async function sendSignatureRequestEmail(
   toAddress: string,
   props: {
@@ -101,4 +124,32 @@ export async function sendSignedDocumentEmail(
     attachment ? [attachment] : [],
     sentBy?.email ? { replyTo: { name: sentBy.name, address: sentBy.email } } : {}
   )
+}
+
+/** People retains the provider's error and records a stable Message-ID for delivery reconciliation. */
+export async function sendPeopleEmail(input: {
+  id: string
+  to: string
+  subject: string
+  text: string
+  attachment: { fileName: string; contentType: string; content: Uint8Array } | null
+}) {
+  const component = <div style={{ whiteSpace: "pre-wrap" }}>{input.text}</div>
+  const attachments = input.attachment
+    ? [
+        {
+          filename: input.attachment.fileName,
+          contentType: input.attachment.contentType,
+          content: input.attachment.content,
+        },
+      ]
+    : []
+  if (env.NODE_ENV === "development" && env.USE_DEV_MAILER) {
+    await devSendMail(input.to, input.subject, component, attachments)
+  } else {
+    await azureSendEmail(input.to, input.subject, component, attachments, {
+      throwOnError: true,
+      messageId: `<people-${Buffer.from(input.id).toString("base64url")}@polinetwork.org>`,
+    })
+  }
 }

@@ -78,12 +78,14 @@ const WelcomeEmail: EmailTemplate<Props> = (props) => {
                 If you encounter any issue or have some questions, please contact me on{" "}
                 <Link href="https://t.me/lorenzocorallo" className="text-[#1156AE] underline">
                   Telegram
+                </Link>{" "}
+                or at{" "}
+                <Link href="mailto:it@polinetwork.org" className="text-[#1156AE] underline">
+                  it@polinetwork.org
                 </Link>
               </Text>
 
-              <Text className="my-2 text-sm leading-normal text-gray-700">
-                ~ Lorenzo Corallo, Gestione Progetti Innovativi e Supporto Tecnico (IT)
-              </Text>
+              <Text className="my-2 text-sm leading-normal text-gray-700">~ Lorenzo Corallo, Team Lead IT</Text>
             </Section>
           </Container>
 
