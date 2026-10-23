@@ -20,6 +20,7 @@ vi.mock("@/db", () => ({
 }))
 vi.mock("@/env", () => ({ env: { NODE_ENV: "test" } }))
 vi.mock("@/logger", () => ({ logger: { error: vi.fn(), info: vi.fn() } }))
+vi.mock("@/utils/audit-log", () => ({ endedMeasures: vi.fn() }))
 
 const { cleanLinkCodes } = await import("@/cron")
 
