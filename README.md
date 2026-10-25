@@ -57,6 +57,15 @@ The bot's socket.io client authenticates with its service token in `auth.token` 
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
 
+## People register sources
+
+Every five minutes the People sweep mirrors two sources into the register:
+
+- **PoliNetwork Auth roles.** `GET /api/internal/people-roles` lists the roles Master Admin bound to People in the IdP (`admin`, `team:<id>:member`, `team:<id>:lead`) and who holds them. Holders without a record get one (name only, linked to their account); a record without an account is linked when its Telegram ID or Microsoft 365 address matches. On linked records, an admin or team entry starts while its role is held and ends when a role it mirrored is taken back. Entries People added on its own (census import, dashboard before linking) are left alone, and so is any concept with no bound role.
+- **The Microsoft 365 Soci group.** Each member gets a membership with the account's `employeeId` as member number and its creation date as admission date; a member without a usable number is flagged for review. Leaving the group changes nothing: the register keeps the status. Imported memberships get no automatic fee reminders in the year they were imported.
+
+When the dashboard changes a linked record's admin or team role, or a census answer or import does, the backend gives or takes back the bound role with `POST /api/internal/people-roles`, naming the dashboard user it authenticated; the IdP decides whether that user may (no self-grants, `people:write` or `people:appoint`, bounded delegation). Direct dashboard actions fail when the IdP refuses; census answers and imports note the refusal on the record. Writes need the backend's OAuth client to hold the `idp:people:roles` scope on the internal resource; reads use the existing `idp:access:read` token.
+
 ## E-signing with the CIE
 
 The `esign` router and `/esign/agent/*` endpoints let dashboard users sign PDFs with the Italian identity card

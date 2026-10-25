@@ -70,9 +70,11 @@ export const profileSchema = z.object({
   phone: z.string().nullable(),
   telegramUsername: z.string().nullable(),
   telegramId: z.string().nullable(),
+  /** Empty, like `year`, for people known only from PoliNetwork Auth or Microsoft 365 until HR completes them. */
   course: z.string(),
   year: z.string(),
-  campus: campusSchema,
+  /** `null` until known: people known only from PoliNetwork Auth or Microsoft 365. */
+  campus: campusSchema.nullable(),
   otherAssociations: z.array(z.string()),
   studentRepresentative: z.string().nullable(),
 })
@@ -447,7 +449,7 @@ export const myAreaSchema = z.discriminatedUnion("state", [
       name: z.string(),
       course: z.string(),
       year: z.string(),
-      campus: campusSchema,
+      campus: campusSchema.nullable(),
       roles: z.array(z.string()),
     }),
     reason: z.string(),
@@ -523,7 +525,7 @@ export const TEAMS = {
     ],
   },
   design: {
-    name: "Design & Social",
+    name: "Design & Marketing",
     fields: [
       {
         key: "tools",

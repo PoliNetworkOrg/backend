@@ -19,7 +19,7 @@ export type BasicUser = Pick<
 // this is the type representing our call to `/users`
 export type User = Pick<
   Required<TUser>,
-  "displayName" | "mail" | "givenName" | "surname" | "id" | "assignedLicenses" | "employeeId"
+  "displayName" | "mail" | "givenName" | "surname" | "id" | "assignedLicenses" | "employeeId" | "createdDateTime"
 >
 
 export type ParsedUser = {
@@ -29,6 +29,8 @@ export type ParsedUser = {
   givenName: string | null
   surname: string | null
   employeeId: string | null
+  /** When the account was created, as Graph returns it; absent in the seeded directory. */
+  createdDateTime?: string | null
   isMember: boolean
   assignedLicensesIds: string[]
 }
