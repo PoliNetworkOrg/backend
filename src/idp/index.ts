@@ -31,6 +31,7 @@ const peopleDirectory = z.object({
       telegramId: z.string().nullable(),
       telegramUsername: z.string().nullable(),
       roles: z.array(z.string()),
+      assigned: z.array(z.string()).optional(),
     })
   ),
 })
@@ -131,12 +132,17 @@ function configure() {
         } catch {
           throw new RoleChangeError(503, `no token to change roles; is ${PEOPLE_ROLES_SCOPE} granted to this backend?`)
         }
-        const response = await fetch(peopleRolesUrl, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-          body: JSON.stringify(change),
-          signal: AbortSignal.timeout(10_000),
-        })
+        let response: Response
+        try {
+          response = await fetch(peopleRolesUrl, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(change),
+            signal: AbortSignal.timeout(10_000),
+          })
+        } catch {
+          throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
+        }
         if (response.status === 401) roleTokens.invalidate()
         if (response.ok) return
         const body = (await response.json().catch(() => null)) as { error?: unknown } | null

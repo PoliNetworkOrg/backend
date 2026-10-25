@@ -15,7 +15,10 @@ export type RoleDirectory = {
     email: string | null
     telegramId: string | null
     telegramUsername: string | null
+    /** Bound roles held, including through a parent role. */
     roles: string[]
+    /** Those given directly, the only ones a change can take back; all of `roles` when absent. */
+    assigned?: string[]
   }[]
 }
 export type RoleChange = { actor: string; sub: string; role: string; action: "assign" | "unassign"; reason: string }
@@ -94,12 +97,14 @@ export function roleChanges(
   bound: Bound,
   held: readonly string[],
   before: RoleView,
-  after: RoleView
+  after: RoleView,
+  assigned: readonly string[] = held
 ): { role: string; action: RoleChange["action"] }[] {
   const changes: { role: string; action: RoleChange["action"] }[] = []
   const holds = (keys: string[]) => keys.some((key) => held.includes(key))
+  // A role held only through a parent can't be taken back on its own: the next sync shows what remains.
   const take = (keys: string[]) => {
-    for (const role of keys) if (held.includes(role)) changes.push({ role, action: "unassign" })
+    for (const role of keys) if (assigned.includes(role)) changes.push({ role, action: "unassign" })
   }
   if (bound.admin.length && before.admin !== after.admin) {
     if (after.admin && !holds(bound.admin)) changes.push({ role: bound.admin[0], action: "assign" })

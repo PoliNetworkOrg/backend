@@ -132,9 +132,11 @@ export function createPeopleService(options: PeopleOptions) {
     const names = new Map(directory.roles.map((r) => [r.key, r.name]))
     for (const p of changed) {
       const sub = p.accountSub as string
-      const held = new Set(directory.users.find((u) => u.sub === sub)?.roles ?? [])
+      const account = directory.users.find((u) => u.sub === sub)
+      const held = new Set(account?.roles ?? [])
+      const assigned = account?.assigned ?? account?.roles ?? []
       try {
-        for (const change of roleChanges(bound, [...held], before.get(p.id) as RoleView, roleView(p))) {
+        for (const change of roleChanges(bound, [...held], before.get(p.id) as RoleView, roleView(p), assigned)) {
           await roles.change({ actor, sub, role: change.role, action: change.action, reason })
           change.action === "assign" ? held.add(change.role) : held.delete(change.role)
           const name = names.get(change.role) ?? change.role

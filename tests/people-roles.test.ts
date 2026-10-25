@@ -70,6 +70,13 @@ describe("roleChanges", () => {
       { role: "it-core", action: "unassign" },
     ])
   })
+  it("takes back only roles given directly, not ones held through a parent", () => {
+    expect(
+      roleChanges(bound, ["it-core", "it-lead"], { admin: false, teams: { it: "lead" } }, { admin: false, teams: {} }, [
+        "it-lead",
+      ])
+    ).toEqual([{ role: "it-lead", action: "unassign" }])
+  })
   it("doesn't give a role already held", () => {
     expect(roleChanges(bound, ["admin"], { admin: false, teams: {} }, { admin: true, teams: {} })).toEqual([])
   })
@@ -214,6 +221,29 @@ describe("People mirrors PoliNetwork Auth", () => {
     expect(p.activity.some((a) => a.text.includes("Couldn't update PoliNetwork Auth: Refused for the test."))).toBe(
       true
     )
+  })
+})
+
+describe("PoliNetwork Auth unreachable", () => {
+  it("notes the failure on a census answer instead of failing it", async () => {
+    const auth = fakeAuth([user("member", ["it-core"])])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.service.syncSources()
+    vi.mocked(auth.roles.change).mockRejectedValue(new RoleChangeError(503, "PoliNetwork Auth could not be reached"))
+    await h.service.answerCensus(viewer("member", ["people:self"]), {
+      answer: "leaving",
+      course: "Ingegneria Informatica",
+      year: "3rd year",
+      campus: "Leonardo",
+      keepGroups: [],
+      keepTeams: [],
+      reason: "Graduating",
+      note: "",
+    })
+    const p = h.state().persons["P-0003"]
+    expect(p.census[0].answer).toBe("leaving")
+    expect(p.activity.some((a) => a.text.includes("could not be reached"))).toBe(true)
   })
 })
 
