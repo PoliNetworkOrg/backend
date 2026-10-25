@@ -9,6 +9,13 @@ export type Person = Omit<PersonRecord, "fees" | "isMember"> & {
   reminders: Record<string, string>
   invite: { hash: string; expiresAt: string } | null
   pendingGroupRemovals?: { chatId: string; message: string }[]
+  /**
+   * Active roles that mirror a role held in PoliNetwork Auth (see `roles.ts`): they end when the role is taken back
+   * there, and ending them here takes the role back there. Roles not listed are owned by People alone.
+   */
+  synced?: { admin?: true; teams?: import("./contract").TeamId[] }
+  /** The fee year whose membership came from Microsoft 365: its automatic reminders are skipped. */
+  importedFeeYear?: string
 }
 export type StoredReceipt = Receipt & {
   officerPersonId: string

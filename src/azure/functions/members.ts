@@ -39,7 +39,16 @@ export async function getMembers(): Promise<ParsedUser[]> {
         .api(`/users`)
         .header("ConsistencyLevel", "eventual")
         .count(true)
-        .select(["displayName", "mail", "givenName", "surname", "id", "assignedLicenses", "employeeId"])
+        .select([
+          "displayName",
+          "mail",
+          "givenName",
+          "surname",
+          "id",
+          "assignedLicenses",
+          "employeeId",
+          "createdDateTime",
+        ])
         .filter("endswith(mail, '@polinetwork.org') or endswith(userPrincipalName, '@polinetwork.org')")
         .get(),
       true

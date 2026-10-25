@@ -33,6 +33,19 @@ import {
   validateFields,
 } from "./model"
 import { receiptPdf } from "./pdf"
+import {
+  type AzureMember,
+  boundRoles,
+  markSynced,
+  type PeopleRoles,
+  RoleChangeError,
+  type RoleView,
+  roleChanges,
+  roleView,
+  syncDirectory,
+  syncMembers,
+  wantedView,
+} from "./roles"
 import type {
   Account,
   ImportRow,
@@ -67,7 +80,15 @@ export type PeopleOptions = {
   inspectSigned: (sub: string, bytes: Uint8Array) => Promise<{ signer: string }>
   completeSigned: (sub: string, requestId: string, bytes: Uint8Array) => Promise<void>
   transferType: (bytes: Uint8Array) => Promise<string>
+  /** Roles bound to People in PoliNetwork Auth; `null` when the backend can't reach it. */
+  peopleRoles?: PeopleRoles | null
+  /** Members of the Microsoft 365 Soci group. */
+  azureMembers?: () => Promise<AzureMember[]>
 }
+
+/** How often the sweep mirrors PoliNetwork Auth and Microsoft 365 into the register. */
+export const SYNC_INTERVAL_MS = 5 * 60_000
+const NO_ROLES: RoleView = { admin: false, teams: {} }
 
 export function createPeopleService(options: PeopleOptions) {
   const { store, config } = options
@@ -75,7 +96,63 @@ export function createPeopleService(options: PeopleOptions) {
   const date = () => today(now())
   const year = () => academicYear(date())
   const tx = <T>(fn: (u: UnitOfWork) => Promise<T> | T) => store.transaction(async (u) => fn(u))
+  let lastSync = Number.NEGATIVE_INFINITY
   const currentFee = (p: Person) => fee(p, config, date()) ?? fail("CONFLICT", "This person is not a current member")
+  const roleViews = (s: PeopleState) => new Map(Object.values(s.persons).map((p) => [p.id, roleView(p)]))
+  const sameView = (a: RoleView, b: RoleView) =>
+    a.admin === b.admin && C.TEAM_IDS.every((team) => a.teams[team] === b.teams[team])
+  /**
+   * Makes PoliNetwork Auth follow the roles just changed on linked records, acting as `actor`, who must be allowed to
+   * there too. `strict` (a direct dashboard action) fails the whole change on a refusal; otherwise (census, import,
+   * linking) a refusal is noted on the record and the next sync restores whatever PoliNetwork Auth still says.
+   */
+  async function pushRoles(
+    s: PeopleState,
+    before: Map<string, RoleView>,
+    actor: string,
+    reason: string,
+    strict: boolean
+  ) {
+    const roles = options.peopleRoles
+    if (!roles) return
+    const changed = Object.values(s.persons).filter((p) => {
+      const was = before.get(p.id)
+      return was && p.accountSub && p.account.status === "linked" && !sameView(was, roleView(p))
+    })
+    if (!changed.length) return
+    let directory: Awaited<ReturnType<PeopleRoles["directory"]>>
+    try {
+      directory = await roles.directory()
+    } catch {
+      if (strict) fail("PRECONDITION_FAILED", "PoliNetwork Auth is unavailable; try again later")
+      for (const p of changed) log(p, actor, "Couldn't update PoliNetwork Auth: it was unavailable", now())
+      return
+    }
+    const bound = boundRoles(directory)
+    const names = new Map(directory.roles.map((r) => [r.key, r.name]))
+    for (const p of changed) {
+      const sub = p.accountSub as string
+      const held = new Set(directory.users.find((u) => u.sub === sub)?.roles ?? [])
+      try {
+        for (const change of roleChanges(bound, [...held], before.get(p.id) as RoleView, roleView(p))) {
+          await roles.change({ actor, sub, role: change.role, action: change.action, reason })
+          change.action === "assign" ? held.add(change.role) : held.delete(change.role)
+          const name = names.get(change.role) ?? change.role
+          log(p, actor, `${change.action === "assign" ? "Gave" : "Took back"} ${name} in PoliNetwork Auth`, now())
+        }
+      } catch (error) {
+        if (!(error instanceof RoleChangeError)) throw error
+        if (strict)
+          fail(
+            error.status === 403 ? "FORBIDDEN" : error.status === 404 ? "NOT_FOUND" : "PRECONDITION_FAILED",
+            `PoliNetwork Auth: ${error.message}`
+          )
+        log(p, actor, `Couldn't update PoliNetwork Auth: ${error.message}`, now())
+      } finally {
+        markSynced(p, bound, wantedView(bound, [...held]))
+      }
+    }
+  }
   function hydrateGroups(s: PeopleState, groups: TelegramGroup[]) {
     for (const p of Object.values(s.persons))
       if (p.admin && p.profile.telegramId) {
@@ -452,12 +529,14 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async endAdmin(v: Viewer, input: C.EndAdminInput) {
       requireGeneral(v, "people:write")
-      return tx((u) => {
+      return tx(async (u) => {
+        const before = roleViews(u.state)
         const p = find(u.state, input.personId)
         if (p.admin?.status !== "active") fail("CONFLICT", "Not an active admin")
         if (p.admin.capoScope) requireGeneral(v, "people:appoint")
         Object.assign(p.admin, { status: "former", endedOn: date(), endReason: input.reason, capoScope: null })
         log(p, v.sub, `Ended admin role: ${input.reason}`, now())
+        await pushRoles(u.state, before, v.sub, input.reason, true)
       })
     },
     async setCapoScope(v: Viewer, input: C.CapoScopeInput) {
@@ -513,7 +592,8 @@ export function createPeopleService(options: PeopleOptions) {
       })
     },
     async addTeamMember(v: Viewer, input: C.AddTeamMemberInput) {
-      return tx((u) => {
+      return tx(async (u) => {
+        const before = roleViews(u.state)
         teamAccess(u.state, v, input.teamId, true)
         if (input.role === "lead") requireGeneral(v, "people:appoint")
         validateFields(input.teamId, input.fields)
@@ -531,6 +611,7 @@ export function createPeopleService(options: PeopleOptions) {
           fields: input.fields,
         })
         log(p, v.sub, `Joined ${input.teamId} as ${input.role}`, now())
+        await pushRoles(u.state, before, v.sub, `Added to ${C.TEAMS[input.teamId].name} from People`, true)
         activeCampaign(u.state)
       })
     },
@@ -546,7 +627,8 @@ export function createPeopleService(options: PeopleOptions) {
       })
     },
     async endTeamMembership(v: Viewer, input: C.EndTeamInput) {
-      return tx((u) => {
+      return tx(async (u) => {
+        const before = roleViews(u.state)
         teamAccess(u.state, v, input.teamId, true)
         const p = find(u.state, input.personId)
         const t = p.teams.find((t) => t.team === input.teamId && !t.endedOn)
@@ -555,6 +637,7 @@ export function createPeopleService(options: PeopleOptions) {
         if (input.lastDay < t.since || input.lastDay > date()) fail("BAD_REQUEST", "Invalid last day")
         Object.assign(t, { endedOn: input.lastDay, endReason: input.reason })
         log(p, v.sub, `Ended ${input.teamId}: ${input.reason}${input.note ? `; ${input.note}` : ""}`, now())
+        await pushRoles(u.state, before, v.sub, input.reason, true)
       })
     },
     async listCampaigns(v: Viewer) {
@@ -770,7 +853,8 @@ export function createPeopleService(options: PeopleOptions) {
     async importCommit(v: Viewer, input: C.ImportCommitInput) {
       requireGeneral(v, "people:write")
       const telegramGroups = await options.telegramGroups()
-      return tx((u) => {
+      return tx(async (u) => {
+        const before = roleViews(u.state)
         const batch = u.state.imports[input.importId]
         if (!batch || batch.owner !== v.sub || batch.expiresAt < now().toISOString())
           fail("NOT_FOUND", "Import preview expired")
@@ -801,6 +885,7 @@ export function createPeopleService(options: PeopleOptions) {
                 phone: r.profile.phone ?? "",
                 telegramUsername: r.profile.telegramUsername ?? "",
                 year: C.personInputSchema.shape.year.parse(r.profile.year),
+                campus: C.campusSchema.parse(r.profile.campus),
                 admin: false,
               },
               date()
@@ -890,6 +975,7 @@ export function createPeopleService(options: PeopleOptions) {
           imported++
         }
         batch.committed = true
+        await pushRoles(u.state, before, v.sub, `Census ${c.year} import`, false)
         return { imported }
       })
     },
@@ -1085,7 +1171,12 @@ export function createPeopleService(options: PeopleOptions) {
       requireGeneral(v, "people:write")
       const account = (await options.directory()).find((a) => a.sub === input.accountId)
       if (!account) fail("NOT_FOUND", "IdP account not found")
-      return tx((u) => link(u.state, find(u.state, input.personId), account, v.sub, input.reason))
+      return tx(async (u) => {
+        const p = find(u.state, input.personId)
+        link(u.state, p, account, v.sub, input.reason)
+        // The record's roles reach PoliNetwork Auth now that it knows whose they are.
+        await pushRoles(u.state, new Map([[p.id, NO_ROLES]]), v.sub, `Linked in People: ${input.reason}`, false)
+      })
     },
     async unlinkAccount(v: Viewer, input: { personId: string }) {
       requireGeneral(v, "people:write")
@@ -1094,6 +1185,8 @@ export function createPeopleService(options: PeopleOptions) {
         if (!p.accountSub) fail("CONFLICT", "Account not linked")
         p.accountSub = null
         p.account = { status: "none" }
+        // Without an account its roles can't follow PoliNetwork Auth: People owns them from now on.
+        delete p.synced
         log(p, v.sub, "Unlinked account", now())
       })
     },
@@ -1253,7 +1346,8 @@ export function createPeopleService(options: PeopleOptions) {
       })
     },
     async answerCensus(v: Viewer, input: C.AnswerCensusInput) {
-      return tx((u) => {
+      return tx(async (u) => {
+        const before = roleViews(u.state)
         const p = requireOwn(u.state, v)
         const c = activeCampaign(u.state)
         if (c.status !== "open" || c.closesOn < date()) fail("CONFLICT", "Census is closed")
@@ -1298,6 +1392,8 @@ export function createPeopleService(options: PeopleOptions) {
           })),
           v.sub
         )
+        // Giving up one's own roles is always allowed in PoliNetwork Auth.
+        await pushRoles(u.state, before, v.sub, `Census ${c.year}: ${input.answer}`, false)
       })
     },
     async requestCorrection(v: Viewer, input: C.CorrectionInput) {
@@ -1878,7 +1974,29 @@ export function createPeopleService(options: PeopleOptions) {
         })
       }
     },
+    /** Mirrors PoliNetwork Auth's bound roles and the Microsoft 365 Soci group into the register. */
+    async syncSources() {
+      const [directory, members] = await Promise.allSettled([
+        options.peopleRoles ? options.peopleRoles.directory() : null,
+        options.azureMembers ? options.azureMembers() : null,
+      ])
+      await tx((u) => {
+        const at = { date: date(), now: now() }
+        if (directory.status === "fulfilled" && directory.value) syncDirectory(u.state, directory.value, at)
+        if (members.status === "fulfilled" && members.value) syncMembers(u.state, members.value, at)
+        activeCampaign(u.state)
+      })
+      const failures = [directory, members].flatMap((r) => (r.status === "rejected" ? [r.reason] : []))
+      if (failures.length) throw new AggregateError(failures, "People sources could not be read")
+    },
     async sweep() {
+      let syncError: unknown = null
+      if (now().getTime() - lastSync >= SYNC_INTERVAL_MS) {
+        lastSync = now().getTime()
+        await this.syncSources().catch((error: unknown) => {
+          syncError = error
+        })
+      }
       await tx(async (u) => {
         activeCampaign(u.state)
         for (const [id, batch] of Object.entries(u.state.batches))
@@ -1890,7 +2008,7 @@ export function createPeopleService(options: PeopleOptions) {
           if (batch.expiresAt < now().toISOString()) delete u.state.imports[id]
         for (const p of Object.values(u.state.persons)) {
           const f = fee(p, config, date())
-          if (!f || f.status !== "due" || !p.member?.m365Email) continue
+          if (!f || f.status !== "due" || !p.member?.m365Email || p.importedFeeYear === f.year) continue
           const days = Math.round((Date.parse(f.dueOn) - Date.parse(date())) / 86400000)
           if (![14, 3].includes(days)) continue
           const id = `fee-auto:${p.id}:${f.year}:${days}`
@@ -1908,6 +2026,7 @@ export function createPeopleService(options: PeopleOptions) {
         }
       })
       await this.deliverPending()
+      if (syncError) throw syncError
     },
   }
 }

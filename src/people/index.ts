@@ -1,3 +1,4 @@
+import { azureDirectory } from "@/azure/directory"
 import { DB, SCHEMA } from "@/db"
 import { sendPeopleEmail } from "@/emails/mailer"
 import { idp } from "@/idp"
@@ -59,6 +60,24 @@ export const people = createPeopleService({
   },
   provisionMember,
   setMemberNumber,
+  peopleRoles: idp?.peopleRoles ?? null,
+  async azureMembers() {
+    return (await azureDirectory.getMembers()).flatMap((u) =>
+      u.isMember && u.mail
+        ? [
+            {
+              id: u.id,
+              mail: u.mail,
+              givenName: u.givenName,
+              surname: u.surname,
+              displayName: u.displayName,
+              employeeId: u.employeeId,
+              createdOn: u.createdDateTime?.slice(0, 10) ?? null,
+            },
+          ]
+        : []
+    )
+  },
   sendMail: sendPeopleEmail,
   async inspectSigned(sub, bytes) {
     const { esign } = await import("@/esign")

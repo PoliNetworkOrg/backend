@@ -12,6 +12,7 @@ import {
 import { z } from "zod"
 import { env } from "@/env"
 import { logger } from "@/logger"
+import { type PeopleRoles, RoleChangeError } from "@/people/roles"
 import { authenticate, type RequestAuth } from "./auth"
 import { dbPersistence } from "./persistence"
 
@@ -20,6 +21,21 @@ const PROJECTION = "backend"
 const signerDirectory = z.array(
   z.object({ sub: z.string(), name: z.string(), email: z.string().nullable(), emailVerified: z.boolean().optional() })
 )
+const peopleDirectory = z.object({
+  roles: z.array(z.object({ key: z.string(), name: z.string(), binding: z.string() })),
+  users: z.array(
+    z.object({
+      sub: z.string(),
+      name: z.string(),
+      email: z.string().nullable(),
+      telegramId: z.string().nullable(),
+      telegramUsername: z.string().nullable(),
+      roles: z.array(z.string()),
+    })
+  ),
+})
+/** Lets the backend give and take back the roles bound to People, for the dashboard user it authenticated. */
+const PEOPLE_ROLES_SCOPE = "idp:people:roles"
 
 function report(component: string) {
   return (error: unknown) => {
@@ -58,6 +74,7 @@ function configure() {
   let snapshot = null
   let events = null
   let directory: (() => Promise<z.infer<typeof signerDirectory>>) | null = null
+  let peopleRoles: PeopleRoles | null = null
   if (env.OAUTH_INTERNAL_RESOURCE_URI && env.OAUTH_BACKEND_CLIENT_ID && env.OAUTH_BACKEND_PRIVATE_JWK) {
     const tokens = serviceTokenSource({
       clientId: env.OAUTH_BACKEND_CLIENT_ID,
@@ -87,6 +104,50 @@ function configure() {
       if (!response.ok) throw new Error(`IdP signer directory returned ${response.status}`)
       return signerDirectory.parse(await response.json())
     }
+    // A separate token, so a client not yet granted the write scope still pulls the snapshot.
+    const roleTokens = serviceTokenSource({
+      clientId: env.OAUTH_BACKEND_CLIENT_ID,
+      privateKey: parsePrivateKey(env.OAUTH_BACKEND_PRIVATE_JWK),
+      tokenUrl: endpoints.tokenUrl,
+      tokenAudience: endpoints.tokenAudience,
+      resource: env.OAUTH_INTERNAL_RESOURCE_URI,
+      scopes: [PEOPLE_ROLES_SCOPE],
+      onError: report("people roles token source"),
+    })
+    const peopleRolesUrl = new URL("/api/internal/people-roles", endpoints.snapshotUrl)
+    peopleRoles = {
+      async directory() {
+        const token = await tokens.getToken()
+        const response = await fetch(peopleRolesUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (response.status === 401) tokens.invalidate()
+        if (!response.ok) throw new Error(`IdP People roles returned ${response.status}`)
+        return peopleDirectory.parse(await response.json())
+      },
+      async change(change) {
+        let token: string
+        try {
+          token = await roleTokens.getToken()
+        } catch {
+          throw new RoleChangeError(503, `no token to change roles; is ${PEOPLE_ROLES_SCOPE} granted to this backend?`)
+        }
+        const response = await fetch(peopleRolesUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(change),
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (response.status === 401) roleTokens.invalidate()
+        if (response.ok) return
+        const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+        throw new RoleChangeError(
+          response.status,
+          typeof body?.error === "string" ? body.error : `request failed (${response.status})`
+        )
+      },
+    }
     events = createAccessEventHandler({
       keyStore,
       issuer: endpoints.issuer,
@@ -103,6 +164,7 @@ function configure() {
     keyStore,
     snapshot,
     directory,
+    peopleRoles,
     /** Fetch API handler for `POST /internal/events`, or null without a snapshot. */
     events,
     verify: (token: string) => verifyAccessToken(token, { issuer: endpoints.issuer, audience, keyStore }),
