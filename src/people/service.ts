@@ -1200,7 +1200,12 @@ export function createPeopleService(options: PeopleOptions) {
           settled(first)
           settled(second)
           const before = roleViews(u.state)
-          const linked = !!first.accountSub
+          // Auth confirmed only the linked record's roles: diff the merged result against those.
+          if (!first.accountSub && second.accountSub) {
+            const confirmed = before.get(second.id)
+            if (confirmed) before.set(first.id, confirmed)
+          }
+          const linked = !!first.accountSub || !!second.accountSub
           r.mergedRecord = structuredClone(second)
           mergePeople(u.state, first, second, v, config, now())
           link(u.state, first, account, v.sub, input.reason)

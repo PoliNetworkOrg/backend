@@ -338,6 +338,35 @@ describe("Auth is the authority for People role commands", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
+  it("sends the roles of an unlinked record merged into a linked one to Auth", async () => {
+    const auth = fakeAuth([user("member", [])])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.store.transaction(async ({ state }) => {
+      const first = state.persons["P-0002"]
+      first.accountSub = null
+      first.account = { status: "none" }
+      first.profile.telegramId = null
+      first.teams.push({ team: "it", role: "member", since: "2026-10-01", endedOn: null, endReason: null, fields: {} })
+      state.reviews.R1 = {
+        id: "R1",
+        kind: "two-records",
+        sub: "member",
+        resolved: false,
+        rejectedPersonIds: [],
+        record: { id: "P-0002" },
+        other: { id: "P-0003" },
+      } as never
+    })
+    await h.service.resolveReview(master, { reviewId: "R1", resolution: "merge-first", reason: "Same student" })
+    expect(auth.roles.change).toHaveBeenCalled()
+    expect(vi.mocked(auth.roles.change).mock.calls[0][0].changes).toContainEqual({
+      kind: "team",
+      team: "it",
+      role: "member",
+    })
+  })
+
   it("sends a revocation as one atomic command and preserves confirmed roles when refused", async () => {
     const auth = fakeAuth([user("member", ["it-core", "it-lead"])], () => "Refused")
     const h = harness({ peopleRoles: auth.roles })

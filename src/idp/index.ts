@@ -133,24 +133,34 @@ function configure() {
         return peopleDirectory.parse(await response.json())
       },
       async change(change) {
-        let token: string
-        try {
-          token = await roleTokens.getToken()
-        } catch {
-          throw new RoleChangeError(503, `no token to change roles; is ${PEOPLE_ROLES_SCOPE} granted to this backend?`)
+        const send = async () => {
+          let token: string
+          try {
+            token = await roleTokens.getToken()
+          } catch {
+            throw new RoleChangeError(
+              503,
+              `no token to change roles; is ${PEOPLE_ROLES_SCOPE} granted to this backend?`
+            )
+          }
+          try {
+            return await fetch(peopleRolesUrl, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+              body: JSON.stringify(change),
+              signal: AbortSignal.timeout(10_000),
+            })
+          } catch {
+            throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
+          }
         }
-        let response: Response
-        try {
-          response = await fetch(peopleRolesUrl, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(change),
-            signal: AbortSignal.timeout(10_000),
-          })
-        } catch {
-          throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
+        let response = await send()
+        // A stale cached token: ask for a new one and send the same command once more. A second 401 is a refusal.
+        if (response.status === 401) {
+          roleTokens.invalidate()
+          response = await send()
+          if (response.status === 401) roleTokens.invalidate()
         }
-        if (response.status === 401) roleTokens.invalidate()
         if (response.ok) {
           // The command was applied, but without a readable answer People can't confirm it: retry it by ID.
           const result = roleResult.safeParse(await response.json().catch(() => null))
