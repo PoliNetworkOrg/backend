@@ -20,6 +20,7 @@ const db = vi.hoisted(() => ({
   /** Rows each table returns, by SQL name. */
   rows: {} as Record<string, unknown[]>,
   inserted: [] as Array<{ table: string; values: Record<string, unknown> }>,
+  deleted: [] as Array<{ table: string; where: unknown }>,
   /** The `where` condition of each select, in order. */
   wheres: [] as unknown[],
   /** Whether an insert hits the idempotency key. */
@@ -63,8 +64,14 @@ vi.mock("@/db", async () => {
       }
     },
   })
+  const remove = (table: Parameters<typeof getTableName>[0]) => ({
+    where: async (where: unknown) => {
+      db.deleted.push({ table: getTableName(table), where })
+    },
+  })
+  const transaction = async <T>(fn: (tx: unknown) => Promise<T>) => fn({ select, insert, delete: remove })
   return {
-    DB: { select, insert },
+    DB: { select, insert, delete: remove, transaction },
     SCHEMA: { AUTH: auth.schema, COMMON: common.schema, TG: tg.schema, WA: wa.schema, WEB: web.schema },
     VIEWS: { GROUPS: views.views },
   }
@@ -117,6 +124,10 @@ describe("app router", () => {
     expect(policyOf("azure.members.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:members:create" },
     })
+    expect(policyOf("azure.members.setAssocNumber")).toMatchObject({
+      policy: { user: { scope: "backend:admin", permission: "azure:members:write" } },
+      tokenOnly: true,
+    })
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
     })
@@ -155,10 +166,9 @@ describe("app router", () => {
 
   it("no longer has the procedures RFC v3 Phase 5 removes", () => {
     const paths = procedures().map(([path]) => path)
+    // azure.members.setAssocNumber is back as a token-only `dashboard` procedure, asserted above.
     const removed = paths.filter((path) =>
-      /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$|^azure\.members\.setAssocNumber$/.test(
-        path
-      )
+      /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$/.test(path)
     )
     expect(removed).toEqual([])
     expect(paths).toContain("groups.labels.getAll")
@@ -361,6 +371,7 @@ describe("tg.auditLog.record", () => {
 
   beforeEach(() => {
     db.inserted = []
+    db.deleted = []
     db.conflict = false
     db.rows = {}
   })
@@ -390,6 +401,21 @@ describe("tg.auditLog.record", () => {
     db.conflict = true
     db.rows = { tg_audit_log: [{ id: 41 }] }
     expect(await record(access(true, ["usr_10"]), {})).toEqual({ id: 41, duplicate: true })
+  })
+
+  it("deletes the records of the measures a revocation lifts", async () => {
+    await record(access(true, ["usr_10"]), {})
+    expect(db.deleted).toEqual([])
+
+    await record(access(true, ["usr_10"]), { type: "unban", idempotencyKey: "key-2" })
+    expect(db.deleted).toEqual([{ table: "tg_audit_log", where: expect.anything() }])
+  })
+
+  it("deletes nothing for a repeated revocation", async () => {
+    db.conflict = true
+    db.rows = { tg_audit_log: [{ id: 41 }] }
+    await record(access(true, ["usr_10"]), { type: "unban" })
+    expect(db.deleted).toEqual([])
   })
 
   it("needs an actor unless the action was automatic or made in Telegram's UI", async () => {
