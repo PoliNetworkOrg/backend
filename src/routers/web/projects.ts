@@ -1,14 +1,15 @@
-import { asc, eq } from "drizzle-orm"
+import { and, asc, eq } from "drizzle-orm"
 import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
-import { projectsCategories } from "@/db/schema/web/projects"
+import { projectResourceKinds, projectsCategories } from "@/db/schema/web/projects"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import { getImageExtension } from "@/utils/web"
 
 const PROJECTS = SCHEMA.WEB.projects
+const PROJECT_RESOURCES = SCHEMA.WEB.projectResources
 
 const logoFileSchema = z
   .file()
@@ -35,7 +36,30 @@ const projectSchema = z.object({
   category: z.enum(projectsCategories),
 })
 
+const resourceUrlSchema = z.url({ protocol: /^https?$/ })
+
+const projectResourceSchema = z.object({
+  id: z.number(),
+  kind: z.enum(projectResourceKinds),
+  url: z.string(),
+})
+
 export default createTRPCRouter({
+  getProject: policy(publicData)
+    .input(z.object({ id: z.number().int() }))
+    .output(projectSchema.extend({ resources: z.array(projectResourceSchema) }).nullable())
+    .query(async ({ input }) => {
+      const [project] = await DB.select().from(PROJECTS).where(eq(PROJECTS.id, input.id))
+      if (!project) return null
+
+      const resources = await DB.select()
+        .from(PROJECT_RESOURCES)
+        .where(eq(PROJECT_RESOURCES.projectId, project.id))
+        .orderBy(asc(PROJECT_RESOURCES.order), asc(PROJECT_RESOURCES.id))
+
+      return { ...project, resources }
+    }),
+
   getAllProjects: policy(publicData)
     .output(z.array(projectSchema))
     .query(async () => {
@@ -133,6 +157,95 @@ export default createTRPCRouter({
     .mutation(async ({ input }) => {
       const { id } = input
       const deleted = await DB.delete(PROJECTS).where(eq(PROJECTS.id, id)).returning()
+
+      if (deleted.length === 0) return { error: "NOT_FOUND" }
+      return { error: null }
+    }),
+
+  addProjectResource: policy(dashboard("web:content:write"), { tokenOnly: true })
+    .input(
+      z.object({
+        projectId: z.number().int(),
+        kind: z.enum(projectResourceKinds),
+        url: resourceUrlSchema,
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { projectId, kind, url } = input
+
+      const [project] = await DB.select({ id: PROJECTS.id }).from(PROJECTS).where(eq(PROJECTS.id, projectId))
+      if (!project) return { error: "NOT_FOUND" }
+
+      const existing = await DB.select({ id: PROJECT_RESOURCES.id })
+        .from(PROJECT_RESOURCES)
+        .where(eq(PROJECT_RESOURCES.projectId, projectId))
+
+      const [res] = await DB.insert(PROJECT_RESOURCES)
+        .values({
+          projectId,
+          kind,
+          url,
+          order: existing.length,
+          ...createdByColumns(authorOf(ctx.actor)),
+        })
+        .returning()
+
+      return res
+    }),
+
+  editProjectResource: policy(dashboard("web:content:write"), { tokenOnly: true })
+    .input(
+      z.object({
+        id: z.number().int(),
+        kind: z.enum(projectResourceKinds),
+        url: resourceUrlSchema,
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      const { id, kind, url } = input
+
+      const [res] = await DB.update(PROJECT_RESOURCES)
+        .set({ kind, url, ...modifiedByColumns(authorOf(ctx.actor)) })
+        .where(eq(PROJECT_RESOURCES.id, id))
+        .returning()
+
+      if (!res) return { error: "NOT_FOUND" }
+      return res
+    }),
+
+  reorderProjectResources: policy(dashboard("web:content:write"))
+    .input(
+      z.object({
+        projectId: z.number().int(),
+        resourceIds: z
+          .array(z.number().int())
+          .min(1)
+          .refine((resourceIds) => new Set(resourceIds).size === resourceIds.length),
+      })
+    )
+    .mutation(async ({ input }) => {
+      await DB.transaction(async (tx) => {
+        await Promise.all(
+          input.resourceIds.map((id, index) =>
+            tx
+              .update(PROJECT_RESOURCES)
+              .set({ order: index })
+              .where(and(eq(PROJECT_RESOURCES.id, id), eq(PROJECT_RESOURCES.projectId, input.projectId)))
+          )
+        )
+      })
+
+      return { error: null }
+    }),
+
+  deleteProjectResource: policy(dashboard("web:content:write"))
+    .input(
+      z.object({
+        id: z.number().int(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const deleted = await DB.delete(PROJECT_RESOURCES).where(eq(PROJECT_RESOURCES.id, input.id)).returning()
 
       if (deleted.length === 0) return { error: "NOT_FOUND" }
       return { error: null }
