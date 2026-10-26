@@ -33,7 +33,7 @@ function context(
   }
 }
 describe("People tRPC contract", () => {
-  it("refuses anonymous, service, Telegram and wrong-scope callers before reaching People", async () => {
+  it("refuses tokenless, service, Telegram and wrong-scope callers before reaching People", async () => {
     const h = harness()
     const r = makeRouter(h.service)
     await expect(r.createCaller({}).me.get()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
@@ -60,14 +60,13 @@ describe("People tRPC contract", () => {
     expect(Object.keys(rows[0]).sort()).toEqual(["account", "id", "member", "profile"])
     expect(rows[0].profile.personalEmail).toBeNull()
   })
-  it("mounts every procedure used by admin #100 with token-only policy", () => {
+  it("mounts every procedure used by admin #100 with a dashboard policy", () => {
     const r = makeRouter(harness().service)
     const procedures = (r as unknown as { _def: { procedures: Record<string, { _def: { meta: unknown } }> } })._def
       .procedures
     const defs = Object.entries(procedures)
     expect(defs.length).toBe(62)
-    for (const [, proc] of defs)
-      expect(proc._def.meta).toMatchObject({ policy: { user: { scope: "backend:admin" } }, tokenOnly: true })
+    for (const [, proc] of defs) expect(proc._def.meta).toMatchObject({ policy: { user: { scope: "backend:admin" } } })
     for (const path of [
       "persons.list",
       "members.list",

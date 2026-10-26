@@ -31,7 +31,7 @@ export default createTRPCRouter({
     return results
   }),
 
-  create: policy(dashboard("groups:labels:write"), { tokenOnly: true })
+  create: policy(dashboard("groups:labels:write"))
     .input(
       z.object({
         label,
@@ -86,7 +86,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  modify: policy(dashboard("groups:labels:write"), { tokenOnly: true })
+  modify: policy(dashboard("groups:labels:write"))
     .input(
       z.object({
         label,

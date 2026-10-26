@@ -31,11 +31,15 @@ const authenticator = (result: VerifiedToken | AuthKitError) => ({
 })
 
 describe("authenticate", () => {
-  it("treats a request without a token as anonymous", async () => {
-    expect(await authenticate({}, authenticator(bot))).toEqual({ kind: "anonymous" })
+  it("rejects a request without a token", async () => {
+    expect(await authenticate({}, authenticator(bot))).toEqual({
+      kind: "rejected",
+      status: 401,
+      reason: "Missing bearer token",
+    })
   })
 
-  it("never lets an actor header or a token fall back to the legacy path", async () => {
+  it("rejects an actor header without a token", async () => {
     expect(await authenticate({ actor: "telegram:123" }, authenticator(bot))).toMatchObject({
       kind: "rejected",
       status: 401,

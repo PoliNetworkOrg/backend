@@ -39,9 +39,7 @@ function parsePrivateKey(value: string): ServiceTokenSourceOptions["privateKey"]
 
 function configure() {
   if (!env.IDP_PUBLIC_URL || !env.OAUTH_BACKEND_RESOURCE_URI) {
-    logger.warn(
-      "[IDP] Token authentication is not configured: tokens are rejected, and only anonymous calls allowed by LEGACY_ANONYMOUS run"
-    )
+    logger.warn("[IDP] Token authentication is not configured: every request is rejected")
     return null
   }
   const endpoints = idpEndpoints({

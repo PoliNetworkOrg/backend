@@ -116,11 +116,6 @@ export const env = createEnv({
     /** The backend client's private signing key as a JWK (JSON), with `kid` and `alg`. */
     OAUTH_BACKEND_PRIVATE_JWK: z.string().min(1).optional(),
     IDP_SNAPSHOT_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
-    /**
-     * RFC v3 §13 rollback switch. "deny" (Phase 5) refuses requests and sockets without a token;
-     * "allow" lets anonymous requests run procedures that do not record an actor, with no permissions.
-     */
-    LEGACY_ANONYMOUS: z.enum(["allow", "deny"]).default("deny"),
 
     // env config
     NODE_ENV: NODE_ENV.default(nodeEnv),

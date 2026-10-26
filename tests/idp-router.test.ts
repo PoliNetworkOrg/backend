@@ -82,7 +82,7 @@ beforeAll(async () => {
   ;({ appRouter } = await import("@/routers"))
 })
 
-type ProcedureDef = { _def: { meta?: { policy?: unknown; tokenOnly?: boolean } } }
+type ProcedureDef = { _def: { meta?: { policy?: unknown } } }
 
 function procedures(): Array<[string, ProcedureDef]> {
   return Object.entries(
@@ -103,11 +103,9 @@ describe("app router", () => {
     const policyOf = (path: string) => procedures().find(([name]) => name === path)?.[1]._def.meta
     expect(policyOf("tg.auditLog.record")).toMatchObject({
       policy: { service: { scope: "backend:tg:audit" } },
-      tokenOnly: true,
     })
     expect(policyOf("tg.users.getCreationHistory")).toMatchObject({
       policy: { user: { scope: "backend:admin", permission: "tg:users:read" } },
-      tokenOnly: true,
     })
     expect(policyOf("tg.grants.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:grants:manage" },
@@ -124,7 +122,6 @@ describe("app router", () => {
     })
     expect(policyOf("azure.members.setAssocNumber")).toMatchObject({
       policy: { user: { scope: "backend:admin", permission: "azure:members:write" } },
-      tokenOnly: true,
     })
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
@@ -140,35 +137,18 @@ describe("app router", () => {
     })
   })
 
-  it("refuses anonymous callers on every write that records its actor, whatever LEGACY_ANONYMOUS says", () => {
-    const tokenOnly = new Set(
-      procedures()
-        .filter(([, procedure]) => procedure._def.meta?.tokenOnly)
-        .map(([path]) => path)
-    )
-    for (const path of [
-      "tg.grants.create",
-      "tg.grants.interrupt",
-      "tg.groups.leaveChat",
-      "groups.labels.create",
-      "groups.labels.modify",
-      "web.associations.addAssociation",
-      "web.associations.editAssociation",
-      "web.associations.editAssociationLinks",
-      "web.faqs.addFaqs",
-      "web.faqs.addFaqsCategory",
-      "web.faqs.editFaqs",
-      "web.faqs.editFaqsCategory",
-      "web.projects.addProject",
-      "web.projects.editProject",
-      "web.guides_matricole.addGuide",
-    ])
-      expect(tokenOnly).toContain(path)
+  it("refuses every procedure to a caller without a token", async () => {
+    const caller = appRouter.createCaller({}) as unknown as Record<string, unknown>
+    for (const [path] of procedures()) {
+      const procedure = path.split(".").reduce((node, key) => (node as Record<string, unknown>)[key], caller as unknown)
+      await expect((procedure as (input?: unknown) => Promise<unknown>)(), path).rejects.toMatchObject({
+        code: "UNAUTHORIZED",
+      })
+    }
   })
 
   it("no longer has the procedures RFC v3 Phase 5 removes", () => {
     const paths = procedures().map(([path]) => path)
-    // azure.members.setAssocNumber is back as a token-only `dashboard` procedure, asserted above.
     const removed = paths.filter((path) =>
       /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$/.test(path)
     )
@@ -204,8 +184,8 @@ describe("app router", () => {
     ])
   })
 
-  it("refuses anonymous label writes even while LEGACY_ANONYMOUS allows anonymous reads", async () => {
-    const caller = appRouter.createCaller({ legacyAnonymous: "allow" })
+  it("refuses label writes without a token", async () => {
+    const caller = appRouter.createCaller({})
     await expect(caller.groups.labels.create({ label: "students", color: "#3b82f6" })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     })
@@ -229,7 +209,6 @@ describe("groups.search", () => {
     dashboard: () =>
       appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access })
         .groups.search,
-    anonymous: () => appRouter.createCaller({ legacyAnonymous: "allow" }).groups.search,
   }
   /** Whether the last query filtered out hidden groups. */
   const hidesHidden = () => {
@@ -254,15 +233,14 @@ describe("groups.search", () => {
     expect(hidesHidden()).toBe(true)
   })
 
-  it("still gives hidden groups to the dashboard and to anonymous callers while allowed", async () => {
-    for (const caller of [callers.dashboard(), callers.anonymous()]) {
-      await caller.getAll()
-      expect(hidesHidden()).toBe(false)
-      await caller.search({ showHidden: true })
-      expect(hidesHidden()).toBe(false)
-      await caller.search({})
-      expect(hidesHidden()).toBe(true)
-    }
+  it("still gives hidden groups to the dashboard", async () => {
+    const caller = callers.dashboard()
+    await caller.getAll()
+    expect(hidesHidden()).toBe(false)
+    await caller.search({ showHidden: true })
+    expect(hidesHidden()).toBe(false)
+    await caller.search({})
+    expect(hidesHidden()).toBe(true)
   })
 
   it("refuses service tokens without backend:public:read", async () => {
@@ -321,7 +299,7 @@ describe("tg.access.resolve and me.access", () => {
     })
   })
 
-  it("refuses anonymous callers on the new procedures", async () => {
+  it("refuses the new procedures without a token", async () => {
     const caller = appRouter.createCaller({})
     await expect(caller.tg.access.resolve({ telegramIds: ["123"] })).rejects.toMatchObject({ code: "UNAUTHORIZED" })
     await expect(caller.me.access()).rejects.toMatchObject({ code: "UNAUTHORIZED" })

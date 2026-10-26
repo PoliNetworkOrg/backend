@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server"
-import { desc, eq, sql } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
@@ -43,7 +43,7 @@ export default createTRPCRouter({
    * action the snapshot does not back is stored and flagged for review instead. A repeated
    * `idempotencyKey` records nothing and returns the first record.
    */
-  record: policy({ service: { scope: SCOPE.tgAudit } }, { tokenOnly: true })
+  record: policy({ service: { scope: SCOPE.tgAudit } })
     .input(
       z
         .object({
@@ -88,7 +88,6 @@ export default createTRPCRouter({
         const [row] = await tx
           .insert(AUDIT_LOG)
           .values({
-            adminId: input.actorTelegramId,
             actorTgId: input.actorTelegramId,
             actorSub: subject?.sub ?? null,
             targetId: input.targetId,
@@ -134,8 +133,7 @@ export default createTRPCRouter({
         .from(AUDIT_LOG)
         .where((t) => eq(t.targetId, input.targetId))
         .leftJoin(SCHEMA.TG.groups, eq(AUDIT_LOG.groupId, SCHEMA.TG.groups.telegramId))
-        // Rows written by an older release during a rollback have only admin_id.
-        .leftJoin(admin, eq(sql`coalesce(${AUDIT_LOG.actorTgId}, ${AUDIT_LOG.adminId})`, admin.userId))
+        .leftJoin(admin, eq(AUDIT_LOG.actorTgId, admin.userId))
         .orderBy(desc(AUDIT_LOG.createdAt))
 
       return await Promise.all(

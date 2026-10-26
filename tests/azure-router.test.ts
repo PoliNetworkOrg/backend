@@ -264,7 +264,7 @@ describe("Azure tRPC routes without credentials", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 
-  it("refuses anonymous member number changes", async () => {
+  it("refuses member number changes without a token", async () => {
     const caller = await createCaller()
 
     await expect(
@@ -332,12 +332,8 @@ describe("Azure directory token authorization", () => {
     await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("refuses anonymous reads unless LEGACY_ANONYMOUS allows them", async () => {
-    for (const context of [{}, { legacyAnonymous: "deny" } as const]) {
-      const caller = await createCaller(context)
-      await expect(caller.members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
-    }
-    expect(await (await createCaller({ legacyAnonymous: "allow" })).members.getAll()).toHaveLength(3)
+  it("refuses calls without a token", async () => {
+    await expect((await createCaller({})).members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
   })
 })
 

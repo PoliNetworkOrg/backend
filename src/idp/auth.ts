@@ -10,13 +10,11 @@ import {
 export const ACT_AS_SCOPE = "backend:tg:act-as"
 
 /**
- * How a request authenticated (RFC v3 §6.4, §13):
- * - `anonymous`: no bearer token; refused unless `LEGACY_ANONYMOUS=allow` (rollback only);
+ * How a request authenticated (RFC v3 §6.4):
  * - `token`: a verified IdP access token and the actor it resolves to;
- * - `rejected`: a token or actor header was sent but cannot be accepted. Never falls back to legacy.
+ * - `rejected`: no token, or a token or actor header that cannot be accepted.
  */
 export type RequestAuth =
-  | { kind: "anonymous" }
   | { kind: "token"; actor: Actor; scopes: ReadonlySet<string> }
   | { kind: "rejected"; status: 401 | 403 | 503; reason: string }
 
@@ -36,7 +34,7 @@ export async function authenticate(
   const { authorization, actor: actorHeader } = headers
   if (!authorization) {
     if (actorHeader != null) return { kind: "rejected", status: 401, reason: "Actor header without a token" }
-    return { kind: "anonymous" }
+    return { kind: "rejected", status: 401, reason: "Missing bearer token" }
   }
   const token = BEARER.exec(authorization)?.[1]
   if (!token) return { kind: "rejected", status: 401, reason: "Malformed authorization header" }

@@ -17,8 +17,6 @@ export interface ToClient {
   logGrantCreate: (
     data: {
       userId: number
-      /** Superseded by `actor`; null when the actor has no Telegram ID. */
-      adminId: number | null
       actor: SocketActor
       validSince: Date
       validUntil: Date
@@ -29,8 +27,6 @@ export interface ToClient {
   logGrantInterrupt: (
     data: {
       userId: number
-      /** Superseded by `actor`; null when the actor has no Telegram ID. */
-      adminId: number | null
       actor: SocketActor
     },
     cb: (error: string | null) => void
@@ -38,8 +34,6 @@ export interface ToClient {
   leaveChat: (
     data: {
       chatId: number
-      /** Superseded by `performer`; null when the performer has no Telegram ID. */
-      performerId: number | null
       performer: SocketActor
     },
     cb: (ok: boolean) => void
