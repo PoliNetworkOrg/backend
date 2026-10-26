@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import {
   type AzureMember,
-  boundRoles,
   type PeopleRoles,
   type RoleChange,
   RoleChangeError,
@@ -20,24 +19,55 @@ const ROLES: RoleDirectory["roles"] = [
   { key: "odd", name: "Unknown team", binding: "team:chess:member" },
 ]
 
-/** An in-memory PoliNetwork Auth: `refuse` returns a reason to refuse a change. */
+/** Atomic, idempotent Auth contract fake. Individual assignment effects are exposed for assertions. */
 function fakeAuth(users: RoleDirectory["users"], refuse: (change: RoleChange) => string | null = () => null) {
-  const changes: RoleChange[] = []
+  const changes: { actor: string; sub: string; role: string; action: "assign" | "unassign"; reason: string }[] = []
+  const receipts = new Map<string, string>()
+  const result = (sub: string) => ({
+    roles: ROLES,
+    held: users.find((u) => u.sub === sub)?.roles ?? [],
+    assigned: users.find((u) => u.sub === sub)?.roles ?? [],
+  })
   const roles: PeopleRoles = {
     directory: vi.fn(async () => structuredClone({ roles: ROLES, users })),
-    change: vi.fn(async (change: RoleChange) => {
-      const reason = refuse(change)
+    change: vi.fn(async (command: RoleChange) => {
+      if (receipts.has(command.id)) return structuredClone(result(command.sub))
+      const reason = refuse(command)
       if (reason) throw new RoleChangeError(403, reason)
-      changes.push(change)
-      let user = users.find((u) => u.sub === change.sub)
+      let user = users.find((u) => u.sub === command.sub)
       if (!user) {
-        user = { sub: change.sub, name: change.sub, email: null, telegramId: null, telegramUsername: null, roles: [] }
+        user = { sub: command.sub, name: command.sub, email: null, telegramId: null, telegramUsername: null, roles: [] }
         users.push(user)
       }
-      user.roles =
-        change.action === "assign"
-          ? [...new Set([...user.roles, change.role])].sort()
-          : user.roles.filter((role) => role !== change.role)
+      const next = new Set(user.roles)
+      for (const change of command.changes) {
+        const prefix = change.kind === "admin" ? "admin" : `team:${change.team}:`
+        const bound = ROLES.filter((r) => r.binding.startsWith(prefix))
+        if (!bound.length) continue
+        for (const r of bound) next.delete(r.key)
+        const desired =
+          change.kind === "admin"
+            ? change.active
+              ? "admin"
+              : null
+            : change.role
+              ? `team:${change.team}:${change.role}`
+              : null
+        if (desired) {
+          const role = bound.find((r) => r.binding === desired)
+          if (!role) throw new RoleChangeError(409, "Missing binding")
+          next.add(role.key)
+        }
+      }
+      for (const role of user.roles)
+        if (!next.has(role))
+          changes.push({ actor: command.actor, sub: command.sub, role, action: "unassign", reason: command.reason })
+      for (const role of next)
+        if (!user.roles.includes(role))
+          changes.push({ actor: command.actor, sub: command.sub, role, action: "assign", reason: command.reason })
+      user.roles = [...next].sort()
+      receipts.set(command.id, JSON.stringify(command))
+      return structuredClone(result(command.sub))
     }),
   }
   return { roles, changes, users }
@@ -54,31 +84,14 @@ const user = (sub: string, roles: string[], extra: Partial<RoleDirectory["users"
 })
 
 describe("roleChanges", () => {
-  const bound = boundRoles({ roles: ROLES, users: [] })
-  it("ignores bindings to teams People doesn't have", () => {
-    expect(Object.values(bound.teams).flatMap((t) => [...t.member, ...t.lead])).not.toContain("odd")
-  })
-  it("gives the bound role for a new entry and takes back every role behind an ended one, Lead first", () => {
-    expect(roleChanges(bound, [], { admin: false, teams: {} }, { admin: true, teams: { it: "member" } })).toEqual([
-      { role: "admin", action: "assign" },
-      { role: "it-core", action: "assign" },
+  it("sends one desired state per changed concept, leaving concrete assignments to Auth", () => {
+    expect(roleChanges({ admin: false, teams: {} }, { admin: true, teams: { it: "member" } })).toEqual([
+      { kind: "admin", active: true },
+      { kind: "team", team: "it", role: "member" },
     ])
-    expect(
-      roleChanges(bound, ["it-core", "it-lead"], { admin: false, teams: { it: "lead" } }, { admin: false, teams: {} })
-    ).toEqual([
-      { role: "it-lead", action: "unassign" },
-      { role: "it-core", action: "unassign" },
+    expect(roleChanges({ admin: false, teams: { it: "lead" } }, { admin: false, teams: {} })).toEqual([
+      { kind: "team", team: "it", role: null },
     ])
-  })
-  it("takes back only roles given directly, not ones held through a parent", () => {
-    expect(
-      roleChanges(bound, ["it-core", "it-lead"], { admin: false, teams: { it: "lead" } }, { admin: false, teams: {} }, [
-        "it-lead",
-      ])
-    ).toEqual([{ role: "it-lead", action: "unassign" }])
-  })
-  it("doesn't give a role already held", () => {
-    expect(roleChanges(bound, ["admin"], { admin: false, teams: {} }, { admin: true, teams: {} })).toEqual([])
   })
 })
 
@@ -104,7 +117,6 @@ describe("People mirrors PoliNetwork Auth", () => {
       profile: { firstName: "Giulia", lastName: "Neri", campus: null, course: "", year: "", personalEmail: null },
       account: { status: "linked", via: "PoliNetwork Auth" },
       teams: [{ team: "design", role: "lead", endedOn: null }],
-      synced: { teams: ["design"] },
     })
     expect(h.state().persons["P-0003"]).toMatchObject({
       accountSub: "u-tg",
@@ -114,24 +126,23 @@ describe("People mirrors PoliNetwork Auth", () => {
     expect(rows.find((r) => r.id === giulia?.id)?.profile.campus).toBeNull()
   })
 
-  it("ends only the roles it mirrored when they are taken back", async () => {
+  it("Auth owns bound concepts on linked records, including legacy local roles", async () => {
     const auth = fakeAuth([user("president", ["admin", "it-core"])])
     const h = harness({ peopleRoles: auth.roles })
     await h.seed()
     await h.service.syncSources()
     expect(h.state().persons["P-0001"]).toMatchObject({
       admin: { status: "active" },
-      synced: { admin: true, teams: ["it"] },
+      teams: [{ team: "it", endedOn: null }],
     })
-    // Anna (vice) was an admin in People before; PoliNetwork Auth never held it, so it stays.
-    expect(h.state().persons["P-0002"].admin?.status).toBe("active")
+    // A local role cannot retain authority once its concept is owned by Auth.
+    expect(h.state().persons["P-0002"].admin?.status).toBe("former")
     auth.users[0].roles = []
     await h.service.syncSources()
     const p = h.state().persons["P-0001"]
-    expect(p.admin).toMatchObject({ status: "former", endReason: "Role taken back in PoliNetwork Auth" })
+    expect(p.admin).toMatchObject({ status: "former", endReason: "Not held in PoliNetwork Auth" })
     expect(p.teams[0].endedOn).toBe("2026-10-18")
-    expect(p.synced).toBeUndefined()
-    expect(h.state().persons["P-0002"].admin?.status).toBe("active")
+    expect(h.state().persons["P-0002"].admin?.status).toBe("former")
   })
 
   it("gives and takes back the role when the dashboard changes a linked record", async () => {
@@ -148,7 +159,7 @@ describe("People mirrors PoliNetwork Auth", () => {
     expect(auth.changes).toEqual([
       { actor: "president", sub: "member", role: "design-member", action: "assign", reason: expect.any(String) },
     ])
-    expect(h.state().persons["P-0003"].synced).toEqual({ teams: ["design"] })
+    expect(h.state().persons["P-0003"].teams).toMatchObject([{ team: "design", role: "member", endedOn: null }])
     await h.service.endTeamMembership(master, {
       teamId: "design",
       personId: "P-0003",
@@ -157,7 +168,7 @@ describe("People mirrors PoliNetwork Auth", () => {
       note: "",
     })
     expect(auth.changes.at(-1)).toMatchObject({ role: "design-member", action: "unassign", reason: "Moved on" })
-    expect(h.state().persons["P-0003"].synced).toBeUndefined()
+    expect(h.state().persons["P-0003"].teams).toMatchObject([{ team: "design", endedOn: "2026-10-18" }])
   })
 
   it("rolls the dashboard change back when PoliNetwork Auth refuses it", async () => {
@@ -218,9 +229,9 @@ describe("People mirrors PoliNetwork Auth", () => {
     })
     const p = h.state().persons["P-0003"]
     expect(p.census[0].answer).toBe("leaving")
-    expect(p.activity.some((a) => a.text.includes("Couldn't update PoliNetwork Auth: Refused for the test."))).toBe(
-      true
-    )
+    expect(
+      p.activity.some((a) => a.text.includes("PoliNetwork Auth refused the role change: Refused for the test."))
+    ).toBe(true)
   })
 })
 
@@ -243,7 +254,10 @@ describe("PoliNetwork Auth unreachable", () => {
     })
     const p = h.state().persons["P-0003"]
     expect(p.census[0].answer).toBe("leaving")
-    expect(p.activity.some((a) => a.text.includes("could not be reached"))).toBe(true)
+    expect(p.activity.some((a) => a.text.includes("didn't answer"))).toBe(true)
+    // Still a member until Auth answers: the sweep sends the same command again.
+    expect(p.teams[0]).toMatchObject({ team: "it", endedOn: null })
+    expect(p.roleCommand?.unanswered).toBe(true)
   })
 })
 
@@ -297,5 +311,228 @@ describe("People mirrors the Microsoft 365 Soci group", () => {
     h.advance(SYNC_INTERVAL_MS)
     await h.service.sweep()
     expect(azureMembers).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("Auth is the authority for People role commands", () => {
+  it("never leaves a refused linked Lead authorized, even after synchronization", async () => {
+    const auth = fakeAuth([], () => "Appointing a Lead requires people:appoint")
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.store.transaction(async ({ state }) => {
+      const p = state.persons["P-0003"]
+      p.accountSub = null
+      p.account = { status: "none" }
+      p.teams.push({ team: "it", role: "lead", since: "2026-10-01", endedOn: null, endReason: null, fields: {} })
+    })
+    await h.service.linkAccount(master, { personId: "P-0003", accountId: "member", reason: "Verified identity" })
+    // Ended, not deleted, and HR is asked to look at it.
+    expect(h.state().persons["P-0003"]).toMatchObject({
+      teams: [{ team: "it", role: "lead", since: "2026-10-01", endReason: "Not confirmed by PoliNetwork Auth" }],
+      discrepancies: [{ kind: "needs-review", message: expect.stringContaining("people:appoint") }],
+    })
+    await h.service.syncSources()
+    expect(h.state().persons["P-0003"].teams.some((t) => !t.endedOn)).toBe(false)
+    await expect(
+      h.service.listTeamCandidates(viewer("member", ["people:self"]), { teamId: "it" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+
+  it("sends a revocation as one atomic command and preserves confirmed roles when refused", async () => {
+    const auth = fakeAuth([user("member", ["it-core", "it-lead"])], () => "Refused")
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.service.syncSources()
+    await expect(
+      h.service.endTeamMembership(master, {
+        personId: "P-0003",
+        teamId: "it",
+        lastDay: "2026-10-18",
+        reason: "Leaving",
+        note: "",
+      })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    expect(auth.roles.change).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(auth.roles.change).mock.calls[0][0].changes).toEqual([{ kind: "team", team: "it", role: null }])
+    expect(auth.users[0].roles).toEqual(["it-core", "it-lead"])
+    expect(h.state().persons["P-0003"].teams[0]).toMatchObject({ role: "lead", endedOn: null })
+  })
+
+  it("recovers a lost response after restart using the persisted command ID, without granting pending roles", async () => {
+    const auth = fakeAuth([])
+    const change = auth.roles.change
+    auth.roles.change = vi.fn(async (command) => {
+      await change(command)
+      throw new RoleChangeError(503, "Response lost after commit")
+    })
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await expect(
+      h.service.addTeamMember(master, {
+        teamId: "it",
+        personId: "P-0003",
+        role: "member",
+        since: "2026-10-01",
+        fields: {},
+      })
+    ).rejects.toMatchObject({ message: expect.stringContaining("don't repeat") })
+    const pending = h.state().persons["P-0003"].roleCommand
+    expect(pending).toBeDefined()
+    expect(h.state().persons["P-0003"].teams).toEqual([])
+    auth.roles.change = vi.fn(change)
+    const restarted = harness({ store: h.store, peopleRoles: auth.roles })
+    await restarted.service.sweep()
+    expect(vi.mocked(auth.roles.change).mock.calls[0][0].id).toBe(pending?.request.id)
+    expect(auth.changes).toHaveLength(1)
+    expect(h.state().persons["P-0003"].roleCommand).toBeUndefined()
+    expect(h.state().persons["P-0003"].teams[0]).toMatchObject({ team: "it", role: "member", endedOn: null })
+  })
+
+  it("does not confirm an inherited revocation refused by Auth", async () => {
+    const auth = fakeAuth([user("member", ["it-core"])])
+    auth.roles.change = vi.fn(async () => {
+      throw new RoleChangeError(409, "The role is inherited. Change its granting role in Auth.")
+    })
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.service.syncSources()
+    await expect(
+      h.service.endTeamMembership(master, {
+        personId: "P-0003",
+        teamId: "it",
+        lastDay: "2026-10-18",
+        reason: "Leaving",
+        note: "",
+      })
+    ).rejects.toMatchObject({ message: expect.stringContaining("inherited") })
+    expect(h.state().persons["P-0003"].teams[0].endedOn).toBeNull()
+  })
+
+  it("refreshes linked identities before importing Microsoft 365 and avoids a duplicate person", async () => {
+    const auth = fakeAuth([user("member", ["it-core"], { email: "luca@gmail.com" })])
+    let members: AzureMember[] = []
+    const h = harness({ peopleRoles: auth.roles, azureMembers: async () => members })
+    await h.seed()
+    await h.service.syncSources()
+    auth.users[0].email = "luca@polinetwork.org"
+    auth.users[0].azureId = "azure-luca"
+    members = [
+      {
+        id: "azure-luca",
+        mail: "luca@polinetwork.org",
+        givenName: "Luca",
+        surname: "Verdi",
+        displayName: "Luca Verdi",
+        employeeId: "42",
+        createdOn: "2020-01-01",
+      },
+    ]
+    await h.service.syncSources()
+    expect(Object.values(h.state().persons)).toHaveLength(3)
+    expect(h.state().persons["P-0003"]).toMatchObject({
+      azureId: "azure-luca",
+      member: { number: "0042" },
+      account: { email: "luca@polinetwork.org" },
+    })
+  })
+
+  it("does not hold the People transaction open while contacting Auth", async () => {
+    const auth = fakeAuth([])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    const change = auth.roles.change
+    auth.roles.change = async (command) => {
+      await h.service.listPeople(master)
+      return change(command)
+    }
+    await h.service.addTeamMember(master, {
+      teamId: "it",
+      personId: "P-0003",
+      role: "member",
+      since: "2026-10-01",
+      fields: {},
+    })
+  }, 2000)
+
+  it("does not overwrite a confirmed command with a snapshot fetched before it", async () => {
+    const auth = fakeAuth([])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    const old = await auth.roles.directory()
+    let release!: (value: RoleDirectory) => void
+    let fetched!: () => void
+    const started = new Promise<void>((resolve) => {
+      fetched = resolve
+    })
+    vi.mocked(auth.roles.directory).mockImplementationOnce(() => {
+      fetched()
+      return new Promise((resolve) => {
+        release = resolve
+      })
+    })
+    const sync = h.service.syncSources()
+    await started
+    await h.service.addTeamMember(master, {
+      teamId: "it",
+      personId: "P-0003",
+      role: "member",
+      since: "2026-10-01",
+      fields: {},
+    })
+    release(old)
+    await sync
+    expect(h.state().persons["P-0003"].teams[0].endedOn).toBeNull()
+  })
+
+  it("keeps reads working and refuses other edits of the person while a command waits for Auth", async () => {
+    const auth = fakeAuth([user("member", ["admin", "it-core"])])
+    const h = harness({
+      peopleRoles: auth.roles,
+      telegramGroups: async () => [{ chatId: "-100", title: "Analisi 1", admins: ["103"] }],
+    })
+    await h.seed()
+    await h.service.syncSources()
+    vi.mocked(auth.roles.change).mockRejectedValueOnce(new RoleChangeError(503, "Timed out"))
+    const end = { personId: "P-0003", teamId: "it" as const, lastDay: "2026-10-18", reason: "Leaving", note: "" }
+    await expect(h.service.endTeamMembership(master, end)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
+    // Reading refreshes the Telegram groups of the pending admin: it must not be refused.
+    expect((await h.service.getPerson(master, { id: "P-0003" })).admin?.groups).toEqual([
+      { chatId: "-100", title: "Analisi 1" },
+    ])
+    await expect(
+      h.service.updateTeamFields(master, { personId: "P-0003", teamId: "it", fields: {} })
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003" })).rejects.toMatchObject({ code: "CONFLICT" })
+    await expect(h.service.endTeamMembership(master, end)).rejects.toMatchObject({ code: "CONFLICT" })
+    await h.service.sweep()
+    const p = h.state().persons["P-0003"]
+    expect(p.roleCommand).toBeUndefined()
+    expect(p.teams[0]).toMatchObject({ endedOn: "2026-10-18", endReason: "Leaving" })
+    expect(p.admin).toMatchObject({ status: "active", groups: [{ chatId: "-100" }] })
+    expect(p.activity.filter((a) => a.text.includes("didn't answer"))).toHaveLength(1)
+  })
+
+  it("refreshes a linked record's identities without rewriting how it was linked", async () => {
+    const auth = fakeAuth([user("member", [], { email: "luca@polinetwork.org", azureId: "azure-luca" })])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.service.syncSources()
+    expect(h.state().persons["P-0003"]).toMatchObject({
+      azureId: "azure-luca",
+      account: { status: "linked", email: "luca@polinetwork.org", via: "IdP", linkedOn: "2026-10-01", how: "test" },
+    })
+  })
+
+  it("asks HR instead of guessing when Auth and Microsoft 365 identities match different records", async () => {
+    const auth = fakeAuth([user("member", ["it-core"], { telegramId: "101" })])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.service.syncSources()
+    // P-0001 holds Telegram 101 but is linked to another account: neither record changes hands.
+    expect(h.state().persons["P-0001"]).toMatchObject({
+      accountSub: "president",
+      discrepancies: [{ kind: "needs-review", message: expect.stringContaining("member") }],
+    })
+    expect(h.state().persons["P-0003"].discrepancies).toHaveLength(1)
   })
 })

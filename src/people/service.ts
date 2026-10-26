@@ -36,14 +36,15 @@ import { receiptPdf } from "./pdf"
 import {
   type AzureMember,
   boundRoles,
-  markSynced,
+  flagForReview,
   type PeopleRoles,
   RoleChangeError,
-  type RoleView,
+  type RoleResult,
   roleChanges,
   roleView,
   syncDirectory,
   syncMembers,
+  syncPersonRoles,
   wantedView,
 } from "./roles"
 import type {
@@ -88,72 +89,174 @@ export type PeopleOptions = {
 
 /** How often the sweep mirrors PoliNetwork Auth and Microsoft 365 into the register. */
 export const SYNC_INTERVAL_MS = 5 * 60_000
-const NO_ROLES: RoleView = { admin: false, teams: {} }
+type RoleSnapshot = Pick<Person, "admin" | "teams">
+const PENDING_ROLES = "A role change for this person is waiting for PoliNetwork Auth; try again in a moment."
+const AWAITING_AUTH = "Awaiting confirmation from PoliNetwork Auth"
+
+/**
+ * The roles of a record about to be linked that PoliNetwork Auth has confirmed: none. Its active roles are ended until
+ * Auth confirms them, so a role Auth refuses never grants access; their history and details are kept.
+ */
+function unconfirmed(p: Person, on: string): RoleSnapshot {
+  const ended = { endedOn: on, endReason: AWAITING_AUTH }
+  return structuredClone({
+    admin:
+      p.admin?.status === "active" ? { ...p.admin, ...ended, status: "former" as const, capoScope: null } : p.admin,
+    teams: p.teams.map((t) => (t.endedOn ? t : { ...t, ...ended })),
+  })
+}
 
 export function createPeopleService(options: PeopleOptions) {
   const { store, config } = options
   const now = options.now ?? (() => new Date())
   const date = () => today(now())
   const year = () => academicYear(date())
-  const tx = <T>(fn: (u: UnitOfWork) => Promise<T> | T) => store.transaction(async (u) => fn(u))
+  /**
+   * A People transaction. Role commands it records for PoliNetwork Auth are delivered after it commits, so the People
+   * lock is never held across a call to Auth; a refused direct dashboard change (`strict`) then fails the call.
+   */
+  const tx = async <T>(fn: (u: UnitOfWork) => Promise<T> | T): Promise<T> => {
+    let queued: { personId: string; strict: boolean }[] = []
+    const result = await store.transaction(async (u) => {
+      const known = new Set(Object.values(u.state.persons).flatMap((p) => p.roleCommand?.request.id ?? []))
+      const result = await fn(u)
+      queued = Object.values(u.state.persons).flatMap((p) =>
+        p.roleCommand && !known.has(p.roleCommand.request.id) ? [{ personId: p.id, strict: p.roleCommand.strict }] : []
+      )
+      return result
+    })
+    for (const command of queued) {
+      const error = await deliverRoleCommand(command.personId)
+      if (error && command.strict)
+        fail(
+          error.status === 403 ? "FORBIDDEN" : error.status === 404 ? "NOT_FOUND" : "PRECONDITION_FAILED",
+          error.message
+        )
+    }
+    return result
+  }
   let lastSync = Number.NEGATIVE_INFINITY
   const currentFee = (p: Person) => fee(p, config, date()) ?? fail("CONFLICT", "This person is not a current member")
-  const roleViews = (s: PeopleState) => new Map(Object.values(s.persons).map((p) => [p.id, roleView(p)]))
-  const sameView = (a: RoleView, b: RoleView) =>
-    a.admin === b.admin && C.TEAM_IDS.every((team) => a.teams[team] === b.teams[team])
+  const roleViews = (s: PeopleState) =>
+    new Map<string, RoleSnapshot>(
+      Object.values(s.persons).map((p) => [p.id, structuredClone({ admin: p.admin, teams: p.teams })])
+    )
+  /** Lets a sync tell whether a role changed while it read PoliNetwork Auth. */
+  const bumpRoles = (s: PeopleState) => {
+    s.counters.roleRevision = (s.counters.roleRevision ?? 0) + 1
+  }
+  const settled = (p: Person) => {
+    if (p.roleCommand) fail("CONFLICT", PENDING_ROLES)
+  }
+
   /**
-   * Makes PoliNetwork Auth follow the roles just changed on linked records, acting as `actor`, who must be allowed to
-   * there too. `strict` (a direct dashboard action) fails the whole change on a refusal; otherwise (census, import,
-   * linking) a refusal is noted on the record and the next sync restores whatever PoliNetwork Auth still says.
+   * Turns the roles just changed on linked records into one command each for PoliNetwork Auth, acting as `actor`, who
+   * must be allowed to there too. Until Auth confirms it, the record keeps the roles it had (`before`): a requested
+   * role grants nothing. `strict` (a direct dashboard action) fails the call on a refusal; otherwise (census, import,
+   * linking) the refusal is noted on the record for HR.
    */
-  async function pushRoles(
+  function pushRoles(
     s: PeopleState,
-    before: Map<string, RoleView>,
+    before: Map<string, RoleSnapshot>,
     actor: string,
     reason: string,
     strict: boolean
   ) {
-    const roles = options.peopleRoles
-    if (!roles) return
-    const changed = Object.values(s.persons).filter((p) => {
+    if (!options.peopleRoles) return
+    for (const p of Object.values(s.persons)) {
       const was = before.get(p.id)
-      return was && p.accountSub && p.account.status === "linked" && !sameView(was, roleView(p))
-    })
-    if (!changed.length) return
-    let directory: Awaited<ReturnType<PeopleRoles["directory"]>>
-    try {
-      directory = await roles.directory()
-    } catch {
-      if (strict) fail("PRECONDITION_FAILED", "PoliNetwork Auth is unavailable; try again later")
-      for (const p of changed) log(p, actor, "Couldn't update PoliNetwork Auth: it was unavailable", now())
-      return
-    }
-    const bound = boundRoles(directory)
-    const names = new Map(directory.roles.map((r) => [r.key, r.name]))
-    for (const p of changed) {
-      const sub = p.accountSub as string
-      const account = directory.users.find((u) => u.sub === sub)
-      const held = new Set(account?.roles ?? [])
-      const assigned = account?.assigned ?? account?.roles ?? []
-      try {
-        for (const change of roleChanges(bound, [...held], before.get(p.id) as RoleView, roleView(p), assigned)) {
-          await roles.change({ actor, sub, role: change.role, action: change.action, reason })
-          change.action === "assign" ? held.add(change.role) : held.delete(change.role)
-          const name = names.get(change.role) ?? change.role
-          log(p, actor, `${change.action === "assign" ? "Gave" : "Took back"} ${name} in PoliNetwork Auth`, now())
-        }
-      } catch (error) {
-        if (!(error instanceof RoleChangeError)) throw error
-        if (strict)
-          fail(
-            error.status === 403 ? "FORBIDDEN" : error.status === 404 ? "NOT_FOUND" : "PRECONDITION_FAILED",
-            `PoliNetwork Auth: ${error.message}`
-          )
-        log(p, actor, `Couldn't update PoliNetwork Auth: ${error.message}`, now())
-      } finally {
-        markSynced(p, bound, wantedView(bound, [...held]))
+      if (!was || !p.accountSub || p.account.status !== "linked") continue
+      const changes = roleChanges(roleView(was), roleView(p))
+      if (!changes.length) continue
+      settled(p)
+      p.roleCommand = {
+        // PoliNetwork Auth keeps reasons of up to 500 characters.
+        request: { id: randomUUID(), actor, sub: p.accountSub, reason: reason.slice(0, 500), changes },
+        desired: structuredClone({ admin: p.admin, teams: p.teams }),
+        strict,
       }
+      for (const change of changes)
+        if (change.kind === "admin") p.admin = structuredClone(was.admin)
+        else
+          p.teams = [
+            ...p.teams.filter((t) => t.team !== change.team),
+            ...structuredClone(was.teams.filter((t) => t.team === change.team)),
+          ]
+      log(p, actor, `Asked PoliNetwork Auth to change roles: ${reason}`, now())
+      bumpRoles(s)
     }
+  }
+
+  /**
+   * Sends a person's pending role command and applies Auth's answer. A refusal drops it; no answer (Auth unreachable,
+   * failing, or the response lost) keeps it for the sweep to send again with the same ID, which Auth applies once.
+   */
+  async function deliverRoleCommand(personId: string): Promise<RoleChangeError | null> {
+    const pending = await tx((u) => structuredClone(u.state.persons[personId]?.roleCommand))
+    if (!pending || !options.peopleRoles) return null
+    const { request } = pending
+    let result: RoleResult
+    try {
+      result = await options.peopleRoles.change(request)
+    } catch (error) {
+      if (!(error instanceof RoleChangeError)) console.error(error)
+      const failure = error instanceof RoleChangeError ? error : new RoleChangeError(503, "No answer")
+      const unanswered = failure.status >= 500 || failure.status === 408 || failure.status === 429
+      await tx((u) => {
+        const p = u.state.persons[personId]
+        if (p?.roleCommand?.request.id !== request.id) return
+        if (unanswered) {
+          if (!pending.unanswered)
+            log(
+              p,
+              request.actor,
+              `PoliNetwork Auth didn't answer (${failure.message}); the change will be retried`,
+              now()
+            )
+          p.roleCommand.unanswered = true
+          return
+        }
+        delete p.roleCommand
+        for (const t of p.teams) if (t.endReason === AWAITING_AUTH) t.endReason = "Not confirmed by PoliNetwork Auth"
+        if (p.admin?.endReason === AWAITING_AUTH) p.admin.endReason = "Not confirmed by PoliNetwork Auth"
+        log(p, request.actor, `PoliNetwork Auth refused the role change: ${failure.message}`, now())
+        if (!pending.strict)
+          flagForReview(
+            p,
+            `PoliNetwork Auth refused a role change (${request.reason}): ${failure.message} Its roles stay as Auth holds them: change them again from People or in Auth.`
+          )
+        bumpRoles(u.state)
+      })
+      return new RoleChangeError(
+        failure.status,
+        unanswered
+          ? "PoliNetwork Auth didn't answer. The change is saved and will be retried automatically: don't repeat it."
+          : `PoliNetwork Auth: ${failure.message}`
+      )
+    }
+    await tx((u) => {
+      const p = u.state.persons[personId]
+      if (p?.roleCommand?.request.id !== request.id) return
+      for (const change of request.changes)
+        if (change.kind === "admin")
+          // Telegram groups are refreshed on every read: keep the current ones.
+          p.admin = pending.desired.admin && {
+            ...pending.desired.admin,
+            groups: p.admin?.groups ?? pending.desired.admin.groups,
+          }
+        else
+          p.teams = [
+            ...p.teams.filter((t) => t.team !== change.team),
+            ...pending.desired.teams.filter((t) => t.team === change.team),
+          ]
+      delete p.roleCommand
+      log(p, request.actor, `PoliNetwork Auth confirmed the role change: ${request.reason}`, now())
+      // What Auth holds after the command wins, for example a role it kept through a parent role.
+      const bound = boundRoles({ roles: result.roles, users: [] })
+      syncPersonRoles(p, bound, wantedView(bound, result.held), { date: date(), now: now() })
+      bumpRoles(u.state)
+    })
+    return null
   }
   function hydrateGroups(s: PeopleState, groups: TelegramGroup[]) {
     for (const p of Object.values(s.persons))
@@ -296,10 +399,12 @@ export function createPeopleService(options: PeopleOptions) {
     if (Object.values(s.persons).some((other) => other.id !== p.id && other.accountSub === account.sub))
       fail("CONFLICT", "This account is already linked to another person")
     if (p.accountSub && p.accountSub !== account.sub) fail("CONFLICT", "Unlink the existing account first")
+    const wasLinked = !!p.accountSub
     p.accountSub = account.sub
     p.account = { status: "linked", email: account.email ?? "", via: "IdP", linkedOn: date(), how: reason }
     p.invite = null
     log(p, actor, `Linked account ${account.sub}: ${reason}`, now())
+    if (!wasLinked) pushRoles(s, new Map([[p.id, unconfirmed(p, date())]]), actor, `Linked in People: ${reason}`, false)
   }
   function candidate(s: PeopleState, v: Viewer, account: Account | undefined) {
     if (!account) return null
@@ -540,13 +645,14 @@ export function createPeopleService(options: PeopleOptions) {
         if (p.admin.capoScope) requireGeneral(v, "people:appoint")
         Object.assign(p.admin, { status: "former", endedOn: date(), endReason: input.reason, capoScope: null })
         log(p, v.sub, `Ended admin role: ${input.reason}`, now())
-        await pushRoles(u.state, before, v.sub, input.reason, true)
+        pushRoles(u.state, before, v.sub, input.reason, true)
       })
     },
     async setCapoScope(v: Viewer, input: C.CapoScopeInput) {
       requireGeneral(v, "people:appoint")
       return tx((u) => {
         const p = find(u.state, input.personId)
+        settled(p)
         if (p.admin?.status !== "active") fail("CONFLICT", "Not an active admin")
         p.admin.capoScope = input.scope || null
         log(p, v.sub, `Set Capo Admin scope: ${input.scope ?? "none"}`, now())
@@ -556,6 +662,7 @@ export function createPeopleService(options: PeopleOptions) {
       requireGeneral(v, "people:write")
       return tx((u) => {
         const p = find(u.state, input.personId)
+        settled(p)
         if (p.admin?.status !== "active") fail("CONFLICT", "Not an active admin")
         const capo = input.capoId ? find(u.state, input.capoId) : null
         if (capo && (capo.id === p.id || capo.admin?.status !== "active" || !capo.admin.capoScope))
@@ -603,7 +710,13 @@ export function createPeopleService(options: PeopleOptions) {
         validateFields(input.teamId, input.fields)
         const p = find(u.state, input.personId)
         if (p.teams.some((t) => t.team === input.teamId && !t.endedOn)) fail("CONFLICT", "Already active in this team")
-        if (input.role === "lead" && Object.values(u.state.persons).some((p) => leads(p, input.teamId).length))
+        // Including a Lead appointment PoliNetwork Auth hasn't confirmed yet.
+        if (
+          input.role === "lead" &&
+          Object.values(u.state.persons).some(
+            (p) => leads(p, input.teamId).length || (p.roleCommand && leads(p.roleCommand.desired, input.teamId).length)
+          )
+        )
           fail("CONFLICT", "End the existing Lead appointment first")
         if (input.since > date()) fail("BAD_REQUEST", "Start date is in the future")
         p.teams.push({
@@ -615,7 +728,7 @@ export function createPeopleService(options: PeopleOptions) {
           fields: input.fields,
         })
         log(p, v.sub, `Joined ${input.teamId} as ${input.role}`, now())
-        await pushRoles(u.state, before, v.sub, `Added to ${C.TEAMS[input.teamId].name} from People`, true)
+        pushRoles(u.state, before, v.sub, `Added to ${C.TEAMS[input.teamId].name} from People`, true)
         activeCampaign(u.state)
       })
     },
@@ -624,6 +737,7 @@ export function createPeopleService(options: PeopleOptions) {
         teamAccess(u.state, v, input.teamId, true)
         validateFields(input.teamId, input.fields)
         const p = find(u.state, input.personId)
+        settled(p)
         const t = p.teams.find((t) => t.team === input.teamId && !t.endedOn)
         if (!t) fail("CONFLICT", "No active team membership")
         t.fields = input.fields
@@ -641,7 +755,7 @@ export function createPeopleService(options: PeopleOptions) {
         if (input.lastDay < t.since || input.lastDay > date()) fail("BAD_REQUEST", "Invalid last day")
         Object.assign(t, { endedOn: input.lastDay, endReason: input.reason })
         log(p, v.sub, `Ended ${input.teamId}: ${input.reason}${input.note ? `; ${input.note}` : ""}`, now())
-        await pushRoles(u.state, before, v.sub, input.reason, true)
+        pushRoles(u.state, before, v.sub, input.reason, true)
       })
     },
     async listCampaigns(v: Viewer) {
@@ -979,7 +1093,7 @@ export function createPeopleService(options: PeopleOptions) {
           imported++
         }
         batch.committed = true
-        await pushRoles(u.state, before, v.sub, `Census ${c.year} import`, false)
+        pushRoles(u.state, before, v.sub, `Census ${c.year} import`, false)
         return { imported }
       })
     },
@@ -1083,12 +1197,19 @@ export function createPeopleService(options: PeopleOptions) {
           const second = find(u.state, r.other.id)
           if ([first.accountSub, second.accountSub].some((sub) => sub && sub !== account.sub))
             fail("CONFLICT", "Unlink the other account before merging")
+          settled(first)
+          settled(second)
+          const before = roleViews(u.state)
+          const linked = !!first.accountSub
           r.mergedRecord = structuredClone(second)
           mergePeople(u.state, first, second, v, config, now())
           link(u.state, first, account, v.sub, input.reason)
+          // Roles merged into an already linked record reach PoliNetwork Auth like any other change.
+          if (linked) pushRoles(u.state, before, v.sub, `Merged ${second.id}: ${input.reason}`, false)
         } else if (input.resolution === "unlink" && r.record) {
           const p = find(u.state, r.record.id)
           if (p.accountSub === r.sub) {
+            settled(p)
             p.accountSub = null
             p.account = { status: "none" }
             log(p, v.sub, `Unlinked account: ${input.reason}`, now())
@@ -1178,8 +1299,6 @@ export function createPeopleService(options: PeopleOptions) {
       return tx(async (u) => {
         const p = find(u.state, input.personId)
         link(u.state, p, account, v.sub, input.reason)
-        // The record's roles reach PoliNetwork Auth now that it knows whose they are.
-        await pushRoles(u.state, new Map([[p.id, NO_ROLES]]), v.sub, `Linked in People: ${input.reason}`, false)
       })
     },
     async unlinkAccount(v: Viewer, input: { personId: string }) {
@@ -1187,10 +1306,10 @@ export function createPeopleService(options: PeopleOptions) {
       return tx((u) => {
         const p = find(u.state, input.personId)
         if (!p.accountSub) fail("CONFLICT", "Account not linked")
+        settled(p)
         p.accountSub = null
         p.account = { status: "none" }
         // Without an account its roles can't follow PoliNetwork Auth: People owns them from now on.
-        delete p.synced
         log(p, v.sub, "Unlinked account", now())
       })
     },
@@ -1397,7 +1516,7 @@ export function createPeopleService(options: PeopleOptions) {
           v.sub
         )
         // Giving up one's own roles is always allowed in PoliNetwork Auth.
-        await pushRoles(u.state, before, v.sub, `Census ${c.year}: ${input.answer}`, false)
+        pushRoles(u.state, before, v.sub, `Census ${c.year}: ${input.answer}`, false)
       })
     },
     async requestCorrection(v: Viewer, input: C.CorrectionInput) {
@@ -1980,13 +2099,15 @@ export function createPeopleService(options: PeopleOptions) {
     },
     /** Mirrors PoliNetwork Auth's bound roles and the Microsoft 365 Soci group into the register. */
     async syncSources() {
+      const revision = await tx((u) => u.state.counters.roleRevision ?? 0)
       const [directory, members] = await Promise.allSettled([
         options.peopleRoles ? options.peopleRoles.directory() : null,
         options.azureMembers ? options.azureMembers() : null,
       ])
       await tx((u) => {
         const at = { date: date(), now: now() }
-        if (directory.status === "fulfilled" && directory.value) syncDirectory(u.state, directory.value, at)
+        if (directory.status === "fulfilled" && directory.value && revision === (u.state.counters.roleRevision ?? 0))
+          syncDirectory(u.state, directory.value, at)
         if (members.status === "fulfilled" && members.value) syncMembers(u.state, members.value, at)
         activeCampaign(u.state)
       })
@@ -1994,6 +2115,12 @@ export function createPeopleService(options: PeopleOptions) {
       if (failures.length) throw new AggregateError(failures, "People sources could not be read")
     },
     async sweep() {
+      const pending = await tx((u) =>
+        Object.values(u.state.persons)
+          .filter((p) => p.roleCommand)
+          .map((p) => p.id)
+      )
+      for (const id of pending) await deliverRoleCommand(id)
       let syncError: unknown = null
       if (now().getTime() - lastSync >= SYNC_INTERVAL_MS) {
         lastSync = now().getTime()

@@ -13,6 +13,7 @@ export type RoleDirectory = {
     sub: string
     name: string
     email: string | null
+    azureId?: string | null
     telegramId: string | null
     telegramUsername: string | null
     /** Bound roles held, including through a parent role. */
@@ -21,10 +22,17 @@ export type RoleDirectory = {
     assigned?: string[]
   }[]
 }
-export type RoleChange = { actor: string; sub: string; role: string; action: "assign" | "unassign"; reason: string }
+export type RoleChange = {
+  id: string
+  actor: string
+  sub: string
+  reason: string
+  changes: ({ kind: "admin"; active: boolean } | { kind: "team"; team: C.TeamId; role: "member" | "lead" | null })[]
+}
+export type RoleResult = { roles: RoleDirectory["roles"]; held: string[]; assigned: string[] }
 export type PeopleRoles = {
   directory(): Promise<RoleDirectory>
-  change(change: RoleChange): Promise<void>
+  change(change: RoleChange): Promise<RoleResult>
 }
 /** A member of the Microsoft 365 Soci group. */
 export type AzureMember = {
@@ -83,57 +91,19 @@ export function wantedView(bound: Bound, held: readonly string[]): RoleView {
   return view
 }
 
-export function roleView(p: Person): RoleView {
+export function roleView(p: Pick<Person, "admin" | "teams">): RoleView {
   const view: RoleView = { admin: p.admin?.status === "active", teams: {} }
   for (const t of p.teams) if (!t.endedOn) view.teams[t.team] = t.role
   return view
 }
 
-/**
- * The changes in PoliNetwork Auth that turn `before` into `after` for an account holding `held`. Ending a role takes
- * back every bound role behind it, Lead roles first so a refused Lead change leaves the membership untouched.
- */
-export function roleChanges(
-  bound: Bound,
-  held: readonly string[],
-  before: RoleView,
-  after: RoleView,
-  assigned: readonly string[] = held
-): { role: string; action: RoleChange["action"] }[] {
-  const changes: { role: string; action: RoleChange["action"] }[] = []
-  const holds = (keys: string[]) => keys.some((key) => held.includes(key))
-  // A role held only through a parent can't be taken back on its own: the next sync shows what remains.
-  const take = (keys: string[]) => {
-    for (const role of keys) if (assigned.includes(role)) changes.push({ role, action: "unassign" })
-  }
-  if (bound.admin.length && before.admin !== after.admin) {
-    if (after.admin && !holds(bound.admin)) changes.push({ role: bound.admin[0], action: "assign" })
-    if (!after.admin) take(bound.admin)
-  }
-  for (const team of C.TEAM_IDS) {
-    const { member, lead } = bound.teams[team]
-    const [was, now] = [before.teams[team], after.teams[team]]
-    if (!teamBound(bound, team) || was === now) continue
-    if (!now) {
-      take(lead)
-      take(member)
-      continue
-    }
-    if (was === "lead") take(lead)
-    const keys = now === "lead" && lead.length ? lead : member
-    if (keys.length && !holds(keys)) changes.push({ role: keys[0], action: "assign" })
-  }
+/** Send desired organizational states; Auth chooses and validates the actual role assignments. */
+export function roleChanges(before: RoleView, after: RoleView): RoleChange["changes"] {
+  const changes: RoleChange["changes"] = []
+  if (before.admin !== after.admin) changes.push({ kind: "admin", active: after.admin })
+  for (const team of C.TEAM_IDS)
+    if (before.teams[team] !== after.teams[team]) changes.push({ kind: "team", team, role: after.teams[team] ?? null })
   return changes
-}
-
-/** Records which of the person's active roles now mirror PoliNetwork Auth. */
-export function markSynced(p: Person, bound: Bound, view: RoleView) {
-  const teams = new Set(p.synced?.teams ?? [])
-  let admin = !!p.synced?.admin
-  if (bound.admin.length) admin = view.admin
-  for (const team of C.TEAM_IDS) if (teamBound(bound, team)) view.teams[team] ? teams.add(team) : teams.delete(team)
-  p.synced = { ...(admin ? { admin: true as const } : {}), ...(teams.size ? { teams: [...teams].sort() } : {}) }
-  if (!p.synced.admin && !p.synced.teams) delete p.synced
 }
 
 /** A record with only a name, for someone People hears of from PoliNetwork Auth or Microsoft 365. */
@@ -165,12 +135,17 @@ function splitName(name: string) {
 const lower = (value: string | null | undefined) => value?.trim().toLowerCase() || null
 
 type Clock = { date: string; now: Date }
+/** Asks HR to look at the record, once per distinct reason. */
+export function flagForReview(p: Person, message: string) {
+  if (!p.discrepancies.some((d) => d.message === message))
+    p.discrepancies.push({ kind: "needs-review", message, suggestedTelegram: null })
+}
 
 /**
  * Mirrors PoliNetwork Auth's bound roles on People records:
  * - everyone holding one gets a record, found by account, then by Telegram ID or Microsoft 365 address, and linked;
  * - on linked records, a bound role's entry starts when the role is held and ends when it was mirrored and is no
- *   longer held. Entries People added itself (census, dashboard before linking) are left alone.
+ *   longer held. Previously local entries on linked records also follow Auth.
  * Concepts with no bound role (for example a team nobody bound yet) stay owned by People.
  */
 export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Clock) {
@@ -179,75 +154,96 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
   const users = new Map(directory.users.map((u) => [u.sub, u]))
   for (const u of directory.users) {
     const wanted = wantedView(bound, u.roles)
-    if (!wanted.admin && !Object.keys(wanted.teams).length) continue
-    if (persons().some((p) => p.accountSub === u.sub)) continue
+    const existing = persons().find((p) => p.accountSub === u.sub)
+    // Accounts without a bound role only refresh the identities of the record already linked to them.
+    if (!existing && !wanted.admin && !Object.keys(wanted.teams).length) continue
     const email = lower(u.email)
-    const match =
-      persons().find((p) => !p.accountSub && u.telegramId && p.profile.telegramId === u.telegramId) ??
-      persons().find(
-        (p) => !p.accountSub && email?.endsWith("@polinetwork.org") && lower(p.member?.m365Email) === email
-      )
-    const p = match ?? blankPerson(s, splitName(u.name), at.date)
-    if (!match) log(p, "system", "Created from a role held in PoliNetwork Auth", at.now)
-    p.accountSub = u.sub
-    p.account = {
-      status: "linked",
-      email: u.email ?? "",
-      via: "PoliNetwork Auth",
-      linkedOn: at.date,
-      how: "Holds a People role in PoliNetwork Auth",
+    const matches = persons().filter(
+      (p) =>
+        p === existing ||
+        (u.azureId && p.azureId === u.azureId) ||
+        (u.telegramId && p.profile.telegramId === u.telegramId) ||
+        (email?.endsWith("@polinetwork.org") && lower(p.member?.m365Email) === email)
+    )
+    // Never guess between records, or move an identity off the record holding it: HR decides.
+    if (
+      matches.length > 1 ||
+      matches.some((p) => p.accountSub && p.accountSub !== u.sub) ||
+      (existing?.azureId && u.azureId && existing.azureId !== u.azureId)
+    ) {
+      for (const p of matches)
+        flagForReview(p, `PoliNetwork Auth account ${u.sub} matches more than one record: check their account links.`)
+      continue
     }
-    p.invite = null
-    if (!p.profile.telegramId && u.telegramId && !persons().some((other) => other.profile.telegramId === u.telegramId))
-      p.profile.telegramId = u.telegramId
+    const p = matches[0] ?? blankPerson(s, splitName(u.name), at.date)
+    if (!matches.length) log(p, "system", "Created from a role held in PoliNetwork Auth", at.now)
+    if (existing) {
+      if (existing.account.status === "linked") existing.account.email = u.email ?? existing.account.email
+    } else {
+      p.accountSub = u.sub
+      p.account = {
+        status: "linked",
+        email: u.email ?? "",
+        via: "PoliNetwork Auth",
+        linkedOn: at.date,
+        how: "Holds a People role in PoliNetwork Auth",
+      }
+      p.invite = null
+      log(p, "system", `Linked account ${u.sub}: holds a People role in PoliNetwork Auth`, at.now)
+    }
+    // Microsoft 365 members are matched by this ID, so a later PoliNetwork address doesn't make a second record.
+    if (u.azureId) p.azureId = u.azureId
+    if (!p.profile.telegramId && u.telegramId) p.profile.telegramId = u.telegramId
     p.profile.telegramUsername ||= u.telegramUsername
-    log(p, "system", `Linked account ${u.sub}: holds a People role in PoliNetwork Auth`, at.now)
   }
 
   for (const p of persons()) {
-    if (!p.accountSub || p.account.status !== "linked") continue
-    const wanted = wantedView(bound, users.get(p.accountSub)?.roles ?? [])
-    if (bound.admin.length) {
-      if (wanted.admin && p.admin?.status !== "active") {
-        p.admin = {
-          groups: [],
-          requested: [],
-          availableAsCapo: false,
-          capoOfReference: null,
-          capoScope: null,
-          ...p.admin,
-          status: "active",
-          since: at.date,
-          endedOn: null,
-          endReason: null,
-        }
-        log(p, "system", "Started admin role: held in PoliNetwork Auth", at.now)
-      } else if (!wanted.admin && p.admin?.status === "active" && p.synced?.admin) {
-        Object.assign(p.admin, {
-          status: "former",
-          endedOn: at.date,
-          endReason: "Role taken back in PoliNetwork Auth",
-          capoScope: null,
-        })
-        log(p, "system", "Ended admin role: taken back in PoliNetwork Auth", at.now)
+    if (!p.accountSub || p.account.status !== "linked" || p.roleCommand) continue
+    syncPersonRoles(p, bound, wantedView(bound, users.get(p.accountSub)?.roles ?? []), at)
+  }
+}
+
+/** For linked records Auth owns every bound concept, including previously local entries. */
+export function syncPersonRoles(p: Person, bound: Bound, wanted: RoleView, at: Clock) {
+  if (bound.admin.length) {
+    if (wanted.admin && p.admin?.status !== "active") {
+      p.admin = {
+        groups: [],
+        requested: [],
+        availableAsCapo: false,
+        capoOfReference: null,
+        capoScope: null,
+        ...p.admin,
+        status: "active",
+        since: at.date,
+        endedOn: null,
+        endReason: null,
       }
+      log(p, "system", "Started admin role: held in PoliNetwork Auth", at.now)
+    } else if (!wanted.admin && p.admin?.status === "active") {
+      Object.assign(p.admin, {
+        status: "former",
+        endedOn: at.date,
+        endReason: "Not held in PoliNetwork Auth",
+        capoScope: null,
+      })
+      log(p, "system", "Ended admin role: not held in PoliNetwork Auth", at.now)
     }
-    for (const team of C.TEAM_IDS) {
-      if (!teamBound(bound, team)) continue
-      const role = wanted.teams[team]
-      const active = p.teams.find((t) => t.team === team && !t.endedOn)
-      if (role && !active) {
-        p.teams.push({ team, role, since: at.date, endedOn: null, endReason: null, fields: {} })
-        log(p, "system", `Joined ${team} as ${role}: held in PoliNetwork Auth`, at.now)
-      } else if (role && active && active.role !== role) {
-        active.role = role
-        log(p, "system", `Became ${role} of ${team}: held in PoliNetwork Auth`, at.now)
-      } else if (!role && active && p.synced?.teams?.includes(team)) {
-        Object.assign(active, { endedOn: at.date, endReason: "Role taken back in PoliNetwork Auth" })
-        log(p, "system", `Ended ${team}: taken back in PoliNetwork Auth`, at.now)
-      }
+  }
+  for (const team of C.TEAM_IDS) {
+    if (!teamBound(bound, team)) continue
+    const role = wanted.teams[team]
+    const active = p.teams.find((t) => t.team === team && !t.endedOn)
+    if (role && !active) {
+      p.teams.push({ team, role, since: at.date, endedOn: null, endReason: null, fields: {} })
+      log(p, "system", `Joined ${team} as ${role}: held in PoliNetwork Auth`, at.now)
+    } else if (role && active && active.role !== role) {
+      active.role = role
+      log(p, "system", `Became ${role} of ${team}: held in PoliNetwork Auth`, at.now)
+    } else if (!role && active) {
+      Object.assign(active, { endedOn: at.date, endReason: "Not held in PoliNetwork Auth" })
+      log(p, "system", `Ended ${team}: not held in PoliNetwork Auth`, at.now)
     }
-    markSynced(p, bound, wanted)
   }
 }
 
@@ -261,10 +257,18 @@ export function syncMembers(s: PeopleState, members: AzureMember[], at: Clock) {
   for (const m of members) {
     const mail = lower(m.mail)
     if (!mail) continue
-    const match =
-      persons().find((p) => p.azureId === m.id) ??
-      persons().find((p) => lower(p.member?.m365Email) === mail) ??
-      persons().find((p) => p.account.status === "linked" && lower(p.account.email) === mail)
+    const matches = persons().filter(
+      (p) =>
+        p.azureId === m.id ||
+        lower(p.member?.m365Email) === mail ||
+        (p.account.status === "linked" && lower(p.account.email) === mail)
+    )
+    if (matches.length > 1 || matches.some((p) => p.azureId && p.azureId !== m.id)) {
+      for (const p of matches)
+        flagForReview(p, "Microsoft 365 identities match conflicting People records; review the account links.")
+      continue
+    }
+    const match = matches[0]
     const p =
       match ??
       blankPerson(
@@ -283,9 +287,7 @@ export function syncMembers(s: PeopleState, members: AzureMember[], at: Clock) {
     const digits = m.employeeId?.trim() ?? ""
     const number = /^\d{1,4}$/.test(digits) ? digits.padStart(4, "0") : null
     if (!number || persons().some((other) => other.member?.number === number)) {
-      const message = `In the Microsoft 365 Soci group without a usable member number (${digits || "none"})`
-      if (!p.discrepancies.some((d) => d.message === message))
-        p.discrepancies.push({ kind: "needs-review", message, suggestedTelegram: null })
+      flagForReview(p, `In the Microsoft 365 Soci group without a usable member number (${digits || "none"})`)
       continue
     }
     p.member = {
@@ -296,6 +298,11 @@ export function syncMembers(s: PeopleState, members: AzureMember[], at: Clock) {
       m365Email: m.mail,
     }
     p.importedFeeYear = academicYear(at.date)
-    log(p, "system", `Imported member ${number} from the Microsoft 365 Soci group`, at.now)
+    log(
+      p,
+      "system",
+      `Imported member ${number} from the Microsoft 365 Soci group${m.createdOn ? "; admission date taken from the account's creation" : ""}`,
+      at.now
+    )
   }
 }

@@ -28,12 +28,19 @@ const peopleDirectory = z.object({
       sub: z.string(),
       name: z.string(),
       email: z.string().nullable(),
+      azureId: z.string().nullish(),
       telegramId: z.string().nullable(),
       telegramUsername: z.string().nullable(),
       roles: z.array(z.string()),
       assigned: z.array(z.string()).optional(),
     })
   ),
+})
+/** The person's bound roles after a role command, as `POST /api/internal/people-roles` answers. */
+const roleResult = z.object({
+  roles: peopleDirectory.shape.roles,
+  held: z.array(z.string()),
+  assigned: z.array(z.string()),
 })
 /** Lets the backend give and take back the roles bound to People, for the dashboard user it authenticated. */
 const PEOPLE_ROLES_SCOPE = "idp:people:roles"
@@ -144,7 +151,12 @@ function configure() {
           throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
         }
         if (response.status === 401) roleTokens.invalidate()
-        if (response.ok) return
+        if (response.ok) {
+          // The command was applied, but without a readable answer People can't confirm it: retry it by ID.
+          const result = roleResult.safeParse(await response.json().catch(() => null))
+          if (!result.success) throw new RoleChangeError(503, "PoliNetwork Auth sent an unreadable answer")
+          return result.data
+        }
         const body = (await response.json().catch(() => null)) as { error?: unknown } | null
         throw new RoleChangeError(
           response.status,
