@@ -21,8 +21,6 @@ export type WebSocketServerOptions = {
 
 /** A missing acknowledgement must not hang the request that triggered the emit. */
 const ACK_TIMEOUT_MS = 10_000
-/** People pages wait on this read: without the bot, they show groups without admins instead of hanging. */
-const READ_TIMEOUT_MS = 3_000
 
 export const engine = new Engine()
 
@@ -120,23 +118,6 @@ export class WebSocketServer {
           res(false)
         } else {
           res(true)
-        }
-      })
-    })
-  }
-
-  /** Each group's Telegram admins as the bot knows them, or null when the bot does not answer. */
-  async getGroupAdmins(chatIds: number[]): Promise<Map<number, number[]> | null> {
-    const tgSocket = this.telegramSocket("getGroupAdmins")
-    if (!tgSocket) return null
-
-    return new Promise((res) => {
-      tgSocket.timeout(READ_TIMEOUT_MS).emit("getGroupAdmins", { chatIds }, (timeout, groups) => {
-        if (timeout) {
-          logger.error({ err: timeout }, "[WS] Cannot read the groups' admins from the bot")
-          res(null)
-        } else {
-          res(new Map(groups.map((group) => [group.chatId, group.userIds])))
         }
       })
     })

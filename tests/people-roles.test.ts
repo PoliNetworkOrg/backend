@@ -1,3 +1,4 @@
+import assert from "node:assert/strict"
 import { describe, expect, it, vi } from "vitest"
 import {
   type AzureMember,
@@ -145,6 +146,38 @@ describe("People mirrors PoliNetwork Auth", () => {
     expect(h.state().persons["P-0002"].admin?.status).toBe("former")
   })
 
+  it("scopes the Capo area to assigned Auth admins without Telegram group data", async () => {
+    const auth = fakeAuth([user("president", ["admin"]), user("member", ["admin"])])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.seed()
+    await h.service.syncSources()
+    await h.store.transaction(async ({ state }) => {
+      const capo = state.persons["P-0001"].admin
+      const former = state.persons["P-0002"].admin
+      const active = state.persons["P-0003"].admin
+      assert.ok(capo && former && active)
+      capo.capoScope = "Ingegneria Informatica"
+      const reference = { id: "P-0001", name: "Mario Rossi" }
+      former.capoOfReference = reference
+      active.capoOfReference = reference
+    })
+    const capo = viewer("president", ["people:self"])
+    const area = await h.service.getCapoArea(capo)
+    expect(Object.keys(area).sort()).toEqual(["admins", "scope"])
+    expect(area.admins.map((p) => p.id)).toEqual(["P-0003"])
+    expect(area.admins[0].profile.personalEmail).toBeNull()
+    expect(area.admins[0].member).toBeNull()
+    expect(area.admins[0].admin).not.toHaveProperty("groups")
+    expect(area.admins[0].admin).not.toHaveProperty("requested")
+
+    auth.users[1].roles = []
+    await h.service.syncSources()
+    expect((await h.service.getCapoArea(capo)).admins).toEqual([])
+    auth.users[0].roles = []
+    await h.service.syncSources()
+    await expect(h.service.getCapoArea(capo)).rejects.toMatchObject({ code: "FORBIDDEN" })
+  })
+
   it("gives and takes back the role when the dashboard changes a linked record", async () => {
     const auth = fakeAuth([])
     const h = harness({ peopleRoles: auth.roles })
@@ -222,7 +255,6 @@ describe("People mirrors PoliNetwork Auth", () => {
       course: "Ingegneria Informatica",
       year: "3rd year",
       campus: "Leonardo",
-      keepGroups: [],
       keepTeams: [],
       reason: "Graduating",
       note: "",
@@ -247,7 +279,6 @@ describe("PoliNetwork Auth unreachable", () => {
       course: "Ingegneria Informatica",
       year: "3rd year",
       campus: "Leonardo",
-      keepGroups: [],
       keepTeams: [],
       reason: "Graduating",
       note: "",
@@ -560,19 +591,14 @@ describe("Auth is the authority for People role commands", () => {
 
   it("keeps reads working and refuses other edits of the person while a command waits for Auth", async () => {
     const auth = fakeAuth([user("member", ["admin", "it-core"])])
-    const h = harness({
-      peopleRoles: auth.roles,
-      telegramGroups: async () => [{ chatId: "-100", title: "Analisi 1", admins: ["103"] }],
-    })
+    const h = harness({ peopleRoles: auth.roles })
     await h.seed()
     await h.service.syncSources()
     vi.mocked(auth.roles.change).mockRejectedValueOnce(new RoleChangeError(503, "Timed out"))
     const end = { personId: "P-0003", teamId: "it" as const, lastDay: "2026-10-18", reason: "Leaving", note: "" }
     await expect(h.service.endTeamMembership(master, end)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
-    // Reading refreshes the Telegram groups of the pending admin: it must not be refused.
-    expect((await h.service.getPerson(master, { id: "P-0003" })).admin?.groups).toEqual([
-      { chatId: "-100", title: "Analisi 1" },
-    ])
+    // Reading the pending person must not be refused.
+    expect((await h.service.getPerson(master, { id: "P-0003" })).admin).toMatchObject({ status: "active" })
     await expect(
       h.service.updateTeamFields(master, { personId: "P-0003", teamId: "it", fields: {} })
     ).rejects.toMatchObject({ code: "CONFLICT" })
@@ -582,7 +608,7 @@ describe("Auth is the authority for People role commands", () => {
     const p = h.state().persons["P-0003"]
     expect(p.roleCommand).toBeUndefined()
     expect(p.teams[0]).toMatchObject({ endedOn: "2026-10-18", endReason: "Leaving" })
-    expect(p.admin).toMatchObject({ status: "active", groups: [{ chatId: "-100" }] })
+    expect(p.admin).toMatchObject({ status: "active" })
     expect(p.activity.filter((a) => a.text.includes("didn't answer"))).toHaveLength(1)
   })
 

@@ -94,7 +94,6 @@ describe("People census imports", () => {
       course: "New course",
       year: "3rd year",
       campus: "Bovisa",
-      keepGroups: [],
       keepTeams: [],
       reason: "",
       note: "",

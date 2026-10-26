@@ -6,7 +6,7 @@ import { decryptUser } from "@/utils/users"
 import { provisionMember, setMemberNumber } from "./azure-members"
 import { peopleConfig } from "./config"
 import { transferType } from "./files"
-import { fail, receiptEligible, telegramGroupsWithAdmins } from "./model"
+import { fail, receiptEligible } from "./model"
 import { createPeopleService } from "./service"
 import { createPeoplePgStore } from "./store-pg"
 
@@ -26,12 +26,6 @@ export const people = createPeopleService({
       emailVerified: a.emailVerified === true,
       telegramId: idp?.snapshot?.current()?.bySub(a.sub)?.telegramId ?? null,
     }))
-  },
-  // Group admins are native Telegram status (RFC v3 decision 2): the bot reads them, the backend never stores them.
-  async telegramGroups() {
-    const groups = await DB.select().from(SCHEMA.TG.groups)
-    const { WSS } = await import("@/server")
-    return telegramGroupsWithAdmins(groups, await WSS.getGroupAdmins(groups.map((g) => g.telegramId)))
   },
   async telegramUsers() {
     const users = await DB.select().from(SCHEMA.TG.users)

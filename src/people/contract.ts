@@ -59,7 +59,6 @@ export type PhotoConsent = (typeof PHOTO_CONSENTS)[number]
 export type Signer = (typeof SIGNERS)[number]
 
 const personRefSchema = z.object({ id: z.string(), name: z.string() })
-const groupSchema = z.object({ chatId: z.string(), title: z.string() })
 
 export const profileSchema = z.object({
   firstName: z.string(),
@@ -93,9 +92,6 @@ export const adminRoleSchema = z.object({
   since: z.string(),
   endedOn: z.string().nullable(),
   endReason: z.string().nullable(),
-  /** Detected by the bot. */
-  groups: z.array(groupSchema),
-  requested: z.array(groupSchema.extend({ requestedOn: z.string() })),
   availableAsCapo: z.boolean(),
   capoOfReference: personRefSchema.nullable(),
   /** Set when this person is a Capo Admin, e.g. "Ingegneria Informatica". */
@@ -161,6 +157,7 @@ export const personRowSchema = z.object({
 })
 
 export const discrepancySchema = z.object({
+  /** `admin-removal` is only on older records: People no longer tracks which Telegram groups an admin keeps. */
   kind: z.enum(["declared-member", "telegram-mismatch", "needs-review", "admin-removal"]),
   message: z.string(),
   suggestedTelegram: z.string().nullable(),
@@ -389,9 +386,7 @@ export type ImportPreview = z.infer<typeof importPreviewSchema>
 
 export const capoAreaSchema = z.object({
   scope: z.string(),
-  groups: z.array(groupSchema.extend({ admins: z.number().int().nullable() })),
   admins: z.array(personRowSchema),
-  requests: z.array(z.object({ id: z.string(), person: personRefSchema, group: groupSchema, requestedOn: z.string() })),
 })
 export type CapoArea = z.infer<typeof capoAreaSchema>
 
@@ -659,8 +654,6 @@ export const linkAccountInputSchema = z.object({
   reason: reasonSchema,
 })
 
-export const joinRequestInputSchema = z.object({ requestId: opaqueIdSchema })
-
 export const askToBeAddedInputSchema = z.object({
   roles: z
     .array(z.enum(["admin", "team", "member"]))
@@ -674,7 +667,6 @@ export const answerCensusInputSchema = z.object({
   course: z.string().trim().min(1).max(120),
   year: z.enum(YEARS),
   campus: campusSchema,
-  keepGroups: z.array(z.string().max(120)).max(100),
   keepTeams: z.array(teamIdSchema).max(TEAM_IDS.length),
   reason: z.string().trim().max(200),
   note: z.string().trim().max(500),

@@ -164,7 +164,6 @@ const aliases: Record<string, string[]> = {
   answeredOn: ["answeredOn", "completiontime", "oradicompletamento"],
   admin: ["admin", "amministratore"],
   teams: ["teams", "team"],
-  requestedGroups: ["requestedGroups", "gruppirichiesti"],
   availableAsCapo: ["availableAsCapo", "disponibilecomecapo"],
   otherAssociations: ["otherAssociations", "altreassociazioni"],
   studentRepresentative: ["studentRepresentative", "rappresentantestudenti"],
@@ -175,7 +174,6 @@ const aliases: Record<string, string[]> = {
 const volunteerInput = z.object({
   admin: z.boolean(),
   teams: z.array(teamIdSchema).max(5),
-  requestedGroups: z.array(z.string().regex(/^-\d{1,16}$/)).max(100),
   availableAsCapo: z.boolean(),
   otherAssociations: z.array(z.string().max(100)).max(20).optional(),
   studentRepresentative: z.string().max(200).optional(),
@@ -223,7 +221,6 @@ export async function parseImport(file: File) {
     const volunteer = volunteerInput.safeParse({
       admin: yes("admin"),
       teams: split("teams").map((t) => t.toLowerCase()),
-      requestedGroups: split("requestedGroups"),
       availableAsCapo: yes("availableAsCapo"),
       otherAssociations: indexes.otherAssociations >= 0 ? split("otherAssociations") : undefined,
       studentRepresentative: indexes.studentRepresentative >= 0 ? get("studentRepresentative") : undefined,

@@ -1,16 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { TRPCError } from "@trpc/server"
 import * as C from "./contract"
-import type {
-  Officer,
-  PeopleConfig,
-  PeopleState,
-  Person,
-  StoredReceipt,
-  TelegramGroup,
-  UnitOfWork,
-  Viewer,
-} from "./types"
+import type { Officer, PeopleConfig, PeopleState, Person, StoredReceipt, UnitOfWork, Viewer } from "./types"
 
 export function fail(
   code: "BAD_REQUEST" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "PRECONDITION_FAILED",
@@ -109,14 +100,10 @@ export function row(
 export function record(s: PeopleState, p: Person, v: Viewer, config: PeopleConfig, date: string): C.PersonRecord {
   const self = own(s, v)?.id === p.id
   const read = general(v, "people:read")
-  const pendingMessages = new Set(p.pendingGroupRemovals?.map((pending) => pending.message))
-  const discrepancies: C.Discrepancy[] = p.discrepancies.map((item) =>
-    pendingMessages.has(item.message) ? { ...item, kind: "admin-removal" } : item
-  )
   return C.personRecordSchema.parse({
     ...row(s, p, v, config, date),
     notes: read ? p.notes : null,
-    discrepancies: read ? discrepancies : self ? discrepancies.filter((d) => pendingMessages.has(d.message)) : [],
+    discrepancies: read ? p.discrepancies : [],
     activity: read
       ? p.activity
       : self
@@ -155,8 +142,6 @@ export function newPerson(s: PeopleState, input: C.CreatePersonInput, date: stri
           since: date,
           endedOn: null,
           endReason: null,
-          groups: [],
-          requested: [],
           availableAsCapo: false,
           capoOfReference: null,
           capoScope: null,
@@ -260,19 +245,4 @@ export function validateFields(team: C.TeamId, fields: C.TeamFields) {
 }
 export function newFileId() {
   return randomUUID()
-}
-
-/**
- * Telegram groups with their native admins (RFC v3 decision 2), which only Telegram owns: the bot reads them and the
- * backend asks it, without storing them. A group the bot has not read yet, or every group while the bot does not
- * answer, has `admins: null`, so People keeps what it last knew instead of reading "no admins".
- */
-export function telegramGroupsWithAdmins(
-  groups: { telegramId: number; title: string }[],
-  admins: ReadonlyMap<number, number[]> | null
-): TelegramGroup[] {
-  return groups.map((g) => {
-    const userIds = admins?.get(g.telegramId)
-    return { chatId: String(g.telegramId), title: g.title, admins: userIds ? userIds.map(String) : null }
-  })
 }

@@ -224,8 +224,6 @@ export function syncPersonRoles(p: Person, bound: Bound, wanted: RoleView, at: C
   if (bound.admin.length) {
     if (wanted.admin && p.admin?.status !== "active") {
       p.admin = {
-        groups: [],
-        requested: [],
         availableAsCapo: false,
         capoOfReference: null,
         capoScope: null,

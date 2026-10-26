@@ -8,7 +8,6 @@ export type Person = Omit<PersonRecord, "fees" | "isMember"> & {
   answers: Record<string, { question: string; answer: string }[]>
   reminders: Record<string, string>
   invite: { hash: string; expiresAt: string } | null
-  pendingGroupRemovals?: { chatId: string; message: string }[]
   /** The fee year whose membership came from Microsoft 365: its automatic reminders are skipped. */
   importedFeeYear?: string
   /**
@@ -42,7 +41,6 @@ export type ImportRow = {
   volunteer: {
     admin: boolean
     teams: import("./contract").TeamId[]
-    requestedGroups: string[]
     availableAsCapo: boolean
     otherAssociations?: string[]
     studentRepresentative?: string
@@ -153,5 +151,3 @@ export type Account = {
   emailVerified?: boolean
 }
 export type TelegramUser = { id: string; name: string; username: string | null }
-/** `admins` is null while the bot cannot tell the group's Telegram admins: People then keeps the groups it last knew. */
-export type TelegramGroup = { chatId: string; title: string; admins: string[] | null }

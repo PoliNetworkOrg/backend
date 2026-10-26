@@ -94,7 +94,6 @@ try {
     store,
     config,
     directory: async () => directory,
-    telegramGroups: async () => [],
     telegramUsers: async () => [],
     provisionMember: async (p) => ({
       id: `azure-${p.id}`,

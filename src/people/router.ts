@@ -167,12 +167,6 @@ export function createPeopleRouter(people: PeopleService) {
     }),
     capo: createTRPCRouter({
       get: self.output(C.capoAreaSchema).query(({ ctx }) => people.getCapoArea(ctx.viewer)),
-      approve: self
-        .input(C.joinRequestInputSchema)
-        .mutation(({ ctx, input }) => people.handleJoinRequest(ctx.viewer, input, true)),
-      decline: self
-        .input(C.joinRequestInputSchema)
-        .mutation(({ ctx, input }) => people.handleJoinRequest(ctx.viewer, input, false)),
     }),
     me: createTRPCRouter({
       roles: self.output(C.myRolesSchema).query(({ ctx }) => people.getMyRoles(ctx.viewer)),

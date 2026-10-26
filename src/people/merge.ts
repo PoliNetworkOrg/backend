@@ -47,10 +47,6 @@ export function mergePeople(
     first.admin.capoScope ??= second.admin.capoScope
     first.admin.capoOfReference ??= second.admin.capoOfReference
     first.admin.availableAsCapo ||= second.admin.availableAsCapo
-    for (const g of second.admin.groups)
-      if (!first.admin.groups.some((t) => t.chatId === g.chatId)) first.admin.groups.push(g)
-    for (const g of second.admin.requested)
-      if (!first.admin.requested.some((t) => t.chatId === g.chatId)) first.admin.requested.push(g)
   }
   first.profile.telegramId ??= second.profile.telegramId
   first.profile.phone ||= second.profile.phone
@@ -93,7 +89,6 @@ export function mergePeople(
   if (second.notes) first.notes = [first.notes, `${second.id}: ${second.notes}`].filter(Boolean).join("\n")
   first.activity = [...first.activity, ...second.activity].sort((a, b) => b.at.localeCompare(a.at))
   first.discrepancies.push(...second.discrepancies)
-  first.pendingGroupRemovals = [...(first.pendingGroupRemovals ?? []), ...(second.pendingGroupRemovals ?? [])]
   for (const p of Object.values(s.persons))
     if (p.admin?.capoOfReference?.id === second.id)
       p.admin.capoOfReference = { id: first.id, name: `${first.profile.firstName} ${first.profile.lastName}` }

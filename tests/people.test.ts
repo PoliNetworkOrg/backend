@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { myAreaSchema } from "@/people/contract"
 import { isValidIban } from "@/people/iban"
-import { academicYear, csvCell, telegramGroupsWithAdmins, today } from "@/people/model"
+import { academicYear, csvCell, today } from "@/people/model"
 import { samplePdf } from "./esign-fixtures"
 import { admit, harness, issue, master, permissions, vice, viewer } from "./people-fixtures"
 
@@ -409,105 +409,36 @@ describe("People payments, receipt ownership and delivery", () => {
   })
 })
 
-it("retains deselected census groups as pending HR work until Telegram confirms removal", async () => {
-  const groups = [{ chatId: "-1001", title: "Test group", admins: ["103"] }]
-  const h = harness({ telegramGroups: async () => groups })
+it("shows a Capo Admin their admins, and records an admin's census answer without Telegram groups", async () => {
+  const h = harness()
   await h.seed()
-  await h.service.listPeople(master)
-  await h.service.answerCensus(viewer("member", ["people:self"], "103"), {
-    answer: "continues",
-    course: "Computer science",
-    year: "2nd year",
-    campus: "Leonardo",
-    keepGroups: [],
-    keepTeams: [],
-    reason: "",
-    note: "",
-  })
-  let person = await h.service.getPerson(master, { id: "P-0003" })
-  expect(person.admin?.groups).toHaveLength(1)
-  expect(person.discrepancies).toContainEqual(
-    expect.objectContaining({
-      kind: "admin-removal",
-      message: expect.stringContaining("Telegram admin removal pending: Test group (-1001)"),
-    })
-  )
-  expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(1)
   await h.store.transaction(async ({ state }) => {
-    state.persons["P-0003"].discrepancies[0].kind = "needs-review"
-    state.persons["P-0003"].discrepancies.push({
-      kind: "needs-review",
-      message: "HR-only identity review",
-      suggestedTelegram: null,
+    const admin = (capoScope: string | null, capoOfReference: { id: string; name: string } | null) => ({
+      status: "active" as const,
+      since: "2026-10-01",
+      endedOn: null,
+      endReason: null,
+      availableAsCapo: false,
+      capoOfReference,
+      capoScope,
     })
+    state.persons["P-0001"].admin = admin("Ingegneria Informatica", null)
+    state.persons["P-0003"].admin = admin(null, { id: "P-0001", name: "Mario Rossi" })
   })
-  const ownArea = await h.service.getMyArea(viewer("member", ["people:self"], "103"))
-  expect(ownArea).toMatchObject({
-    state: "linked",
-    person: {
-      discrepancies: [
-        expect.objectContaining({
-          kind: "admin-removal",
-          message: expect.stringContaining("Telegram admin removal pending:"),
-        }),
-      ],
-    },
-  })
-  groups[0].admins = []
-  person = await h.service.getPerson(master, { id: "P-0003" })
-  expect(person.admin?.groups).toHaveLength(0)
-  expect(person.discrepancies).not.toContainEqual(
-    expect.objectContaining({ message: expect.stringContaining("Telegram admin removal pending:") })
-  )
-  expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(0)
-  expect(await h.service.getMyArea(viewer("member", ["people:self"], "103"))).toMatchObject({
-    state: "linked",
-    person: { discrepancies: [] },
-  })
-})
-
-it("keeps groups and pending removals while Telegram group admins are unknown", async () => {
-  const groups: { chatId: string; title: string; admins: string[] | null }[] = [
-    { chatId: "-1001", title: "Test group", admins: ["103"] },
-  ]
-  const h = harness({ telegramGroups: async () => groups })
-  await h.seed()
-  await h.service.listPeople(master)
+  const area = await h.service.getCapoArea(viewer("president", ["people:self"], "101"))
+  expect(Object.keys(area).sort()).toEqual(["admins", "scope"])
+  expect(area.scope).toBe("Ingegneria Informatica")
+  expect(area.admins.map((a) => a.id)).toEqual(["P-0003"])
   await h.service.answerCensus(viewer("member", ["people:self"], "103"), {
     answer: "continues",
     course: "Computer science",
     year: "2nd year",
     campus: "Leonardo",
-    keepGroups: [],
     keepTeams: [],
     reason: "",
     note: "",
   })
-  groups[0].admins = null
   const person = await h.service.getPerson(master, { id: "P-0003" })
-  expect(person.admin?.groups).toEqual([{ chatId: "-1001", title: "Test group" }])
-  expect(person.discrepancies).toContainEqual(expect.objectContaining({ kind: "admin-removal" }))
-  expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(1)
-})
-
-it("reads Telegram group admins from the bot, and none while it does not answer", () => {
-  const groups = [
-    { telegramId: -1001, title: "Read" },
-    { telegramId: -1002, title: "Read, no admins" },
-    { telegramId: -1003, title: "Not read yet" },
-  ]
-  expect(
-    telegramGroupsWithAdmins(
-      groups,
-      new Map([
-        [-1001, [103, 104]],
-        [-1002, []],
-      ])
-    )
-  ).toEqual([
-    { chatId: "-1001", title: "Read", admins: ["103", "104"] },
-    { chatId: "-1002", title: "Read, no admins", admins: [] },
-    { chatId: "-1003", title: "Not read yet", admins: null },
-  ])
-  expect(telegramGroupsWithAdmins(groups, null).map((g) => g.admins)).toEqual([null, null, null])
+  expect(person.admin).toMatchObject({ status: "active" })
+  expect(person.discrepancies).toEqual([])
 })

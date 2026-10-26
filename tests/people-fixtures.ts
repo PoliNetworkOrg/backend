@@ -117,7 +117,6 @@ export function harness(overrides: Partial<PeopleOptions> = {}) {
     config,
     now: () => clock,
     directory: async () => accounts,
-    telegramGroups: async () => [],
     telegramUsers: async () => [],
     provisionMember,
     setMemberNumber,

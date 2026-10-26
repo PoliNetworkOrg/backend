@@ -56,7 +56,6 @@ import type {
   PeopleStore,
   Person,
   StoredReceipt,
-  TelegramGroup,
   TelegramUser,
   UnitOfWork,
   Viewer,
@@ -67,7 +66,6 @@ export type PeopleOptions = {
   config: PeopleConfig
   now?: () => Date
   directory: () => Promise<Account[]>
-  telegramGroups: () => Promise<TelegramGroup[]>
   telegramUsers: () => Promise<TelegramUser[]>
   provisionMember: (person: Person, number: string) => Promise<{ id: string; email: string }>
   setMemberNumber: (person: Person, number: string) => Promise<void>
@@ -296,12 +294,7 @@ export function createPeopleService(options: PeopleOptions) {
       const p = u.state.persons[personId]
       if (p?.roleCommand?.request.id !== request.id) return
       for (const change of request.changes)
-        if (change.kind === "admin")
-          // Telegram groups are refreshed on every read: keep the current ones.
-          p.admin = pending.desired.admin && {
-            ...pending.desired.admin,
-            groups: p.admin?.groups ?? pending.desired.admin.groups,
-          }
+        if (change.kind === "admin") p.admin = pending.desired.admin
         else
           p.teams = [
             ...p.teams.filter((t) => t.team !== change.team),
@@ -316,23 +309,6 @@ export function createPeopleService(options: PeopleOptions) {
     })
     directoryRead = null
     return null
-  }
-  function hydrateGroups(s: PeopleState, groups: TelegramGroup[]) {
-    for (const p of Object.values(s.persons))
-      if (p.admin && p.profile.telegramId) {
-        const telegramId = p.profile.telegramId
-        const known = new Set(groups.filter((g) => g.admins).map((g) => g.chatId))
-        p.admin.groups = [
-          ...p.admin.groups.filter((g) => !known.has(g.chatId)),
-          ...groups.filter((g) => g.admins?.includes(telegramId)).map(({ chatId, title }) => ({ chatId, title })),
-        ]
-        p.pendingGroupRemovals = p.pendingGroupRemovals?.filter((pending) => {
-          if (!known.has(pending.chatId) || p.admin?.groups.some((g) => g.chatId === pending.chatId)) return true
-          p.discrepancies = p.discrepancies.filter((d) => d.message !== pending.message)
-          log(p, "system", `Telegram confirmed admin removal from ${pending.chatId}`, now())
-          return false
-        })
-      }
   }
   function assertReceiptConfig(s: PeopleState) {
     if (!config.legalName || !config.address || !config.taxCode)
@@ -564,18 +540,14 @@ export function createPeopleService(options: PeopleOptions) {
   return {
     async listPeople(v: Viewer) {
       requireGeneral(v, "people:read")
-      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
-        hydrateGroups(u.state, telegramGroups)
         activeCampaign(u.state)
         return Object.values(u.state.persons).map((p) => row(u.state, p, v, config, date()))
       })
     },
     async getPerson(v: Viewer, input: { id: string }) {
       requireGeneral(v, "people:read")
-      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
-        hydrateGroups(u.state, telegramGroups)
         return record(u.state, find(u.state, input.id), v, config, date())
       })
     },
@@ -1032,7 +1004,6 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async importCommit(v: Viewer, input: C.ImportCommitInput) {
       requireGeneral(v, "people:write")
-      const telegramGroups = await options.telegramGroups()
       return tx(async (u) => {
         const before = roleViews(u.state)
         const batch = u.state.imports[input.importId]
@@ -1102,25 +1073,11 @@ export function createPeopleService(options: PeopleOptions) {
                 since: r.entry.answeredOn ?? date(),
                 endedOn: null,
                 endReason: null,
-                groups: [],
-                requested: [],
                 availableAsCapo: false,
                 capoOfReference: null,
                 capoScope: null,
               }
-            if (p.admin) {
-              p.admin.availableAsCapo = r.volunteer.availableAsCapo
-              for (const id of r.volunteer.requestedGroups) {
-                const group = telegramGroups.find((g) => g.chatId === id)
-                if (!group) fail("BAD_REQUEST", `Unknown requested Telegram group: ${id}`)
-                if (!p.admin.requested.some((g) => g.chatId === id))
-                  p.admin.requested.push({
-                    chatId: group.chatId,
-                    title: group.title,
-                    requestedOn: r.entry.answeredOn ?? date(),
-                  })
-              }
-            }
+            if (p.admin) p.admin.availableAsCapo = r.volunteer.availableAsCapo
             for (const team of r.volunteer.teams)
               if (!p.teams.some((t) => t.team === team && !t.endedOn))
                 p.teams.push({
@@ -1543,22 +1500,9 @@ export function createPeopleService(options: PeopleOptions) {
         if (c.status !== "open" || c.closesOn < date()) fail("CONFLICT", "Census is closed")
         if (!p.census.some((e) => e.year === c.year)) fail("FORBIDDEN", "Not expected in this campaign")
         if (p.census.some((e) => e.year === c.year && e.answer)) fail("CONFLICT", "Census already answered")
-        if (
-          input.keepTeams.some((id) => !p.teams.some((t) => t.team === id && !t.endedOn)) ||
-          input.keepGroups.some((id) => !p.admin?.groups.some((g) => g.chatId === id))
-        )
-          fail("BAD_REQUEST", "You can only retain your own roles and groups")
+        if (input.keepTeams.some((id) => !p.teams.some((t) => t.team === id && !t.endedOn)))
+          fail("BAD_REQUEST", "You can only retain your own roles")
         if (input.answer === "leaving" && !input.reason) fail("BAD_REQUEST", "A leaving reason is required")
-        for (const group of p.admin?.groups ?? []) {
-          if (input.answer === "continues" && input.keepGroups.includes(group.chatId)) continue
-          p.pendingGroupRemovals ??= []
-          const pending = p.pendingGroupRemovals
-          if (pending.some((g) => g.chatId === group.chatId)) continue
-          const message = `Telegram admin removal pending: ${group.title} (${group.chatId}). HR must remove the admin rights; requested in census ${c.year}.`
-          pending.push({ chatId: group.chatId, message })
-          p.discrepancies.push({ kind: "admin-removal", message, suggestedTelegram: null })
-          log(p, v.sub, message, now())
-        }
         Object.assign(p.profile, { course: input.course, year: input.year, campus: input.campus })
         if (input.answer === "continues") {
           for (const t of p.teams)
@@ -1607,73 +1551,21 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async getCapoArea(v: Viewer): Promise<C.CapoArea> {
       requireSelf(v)
-      const telegramGroups = await options.telegramGroups()
       return tx((u) => {
-        hydrateGroups(u.state, telegramGroups)
         const p = requireOwn(u.state, v)
         const scope = p.admin?.status === "active" ? p.admin.capoScope : null
         if (!scope) fail("FORBIDDEN", "No active Capo Admin scope")
         const scoped = Object.values(u.state.persons).filter(
           (other) => other.admin?.status === "active" && other.admin.capoOfReference?.id === p.id
         )
-        const ids = new Set(
-          [...(p.admin?.groups ?? []), ...scoped.flatMap((p) => p.admin?.groups ?? [])].map((g) => g.chatId)
-        )
-        const groups = telegramGroups.filter((g) => ids.has(g.chatId))
-        const allowed = new Set(groups.map((g) => g.chatId))
         return {
           scope,
-          groups: groups.map((g) => ({ chatId: g.chatId, title: g.title, admins: g.admins?.length ?? null })),
           admins: scoped.map((p) => {
             const r = row(u.state, p, v, config, date(), true)
             r.profile.personalEmail = null
             return r
           }),
-          requests: scoped.flatMap(
-            (p) =>
-              p.admin?.requested
-                .filter((g) => allowed.has(g.chatId))
-                .map((g) => ({
-                  id: `${p.id}:${g.chatId}`,
-                  person: ref(p),
-                  group: { chatId: g.chatId, title: g.title },
-                  requestedOn: g.requestedOn,
-                })) ?? []
-          ),
         }
-      })
-    },
-    async handleJoinRequest(v: Viewer, input: { requestId: string }, approve: boolean) {
-      requireSelf(v)
-      const telegramGroups = await options.telegramGroups()
-      return tx((u) => {
-        hydrateGroups(u.state, telegramGroups)
-        const me = requireOwn(u.state, v)
-        if (me.admin?.status !== "active" || !me.admin.capoScope) fail("FORBIDDEN", "No active Capo Admin scope")
-        const p = Object.values(u.state.persons).find(
-          (p) =>
-            p.admin?.status === "active" &&
-            p.admin.capoOfReference?.id === me.id &&
-            p.admin.requested.some((g) => `${p.id}:${g.chatId}` === input.requestId)
-        )
-        const g = p?.admin?.requested.find((g) => `${p.id}:${g.chatId}` === input.requestId)
-        const groupIds = new Set(
-          [
-            ...me.admin.groups,
-            ...Object.values(u.state.persons)
-              .filter((p) => p.admin?.status === "active" && p.admin.capoOfReference?.id === me.id)
-              .flatMap((p) => p.admin?.groups ?? []),
-          ].map((g) => g.chatId)
-        )
-        if (!p?.admin || !g || !groupIds.has(g.chatId)) fail("CONFLICT", "Request already handled")
-        p.admin.requested = p.admin.requested.filter((r) => r !== g)
-        if (approve)
-          p.discrepancies.push({
-            kind: "needs-review",
-            message: `Approved for ${g.title}; awaiting bot confirmation of Telegram administration`,
-            suggestedTelegram: null,
-          })
-        log(p, v.sub, `${approve ? "Approved" : "Declined"} request to join ${g.title}`, now())
       })
     },
 
