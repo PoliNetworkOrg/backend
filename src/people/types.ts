@@ -9,13 +9,20 @@ export type Person = Omit<PersonRecord, "fees" | "isMember"> & {
   reminders: Record<string, string>
   invite: { hash: string; expiresAt: string } | null
   pendingGroupRemovals?: { chatId: string; message: string }[]
-  /**
-   * Active roles that mirror a role held in PoliNetwork Auth (see `roles.ts`): they end when the role is taken back
-   * there, and ending them here takes the role back there. Roles not listed are owned by People alone.
-   */
-  synced?: { admin?: true; teams?: import("./contract").TeamId[] }
   /** The fee year whose membership came from Microsoft 365: its automatic reminders are skipped. */
   importedFeeYear?: string
+  /**
+   * A role change sent to PoliNetwork Auth and not yet answered. `admin` and `teams` keep the roles Auth confirmed;
+   * `desired` replaces them for the changed concepts once Auth confirms, so a requested role never grants access.
+   */
+  roleCommand?: {
+    request: import("./roles").RoleChange
+    desired: Pick<Person, "admin" | "teams">
+    /** A direct dashboard action, whose caller sees a refusal; otherwise HR is asked to review it. */
+    strict: boolean
+    /** Auth didn't answer at least once; the sweep sends it again with the same ID. */
+    unanswered?: true
+  }
 }
 export type StoredReceipt = Receipt & {
   officerPersonId: string

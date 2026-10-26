@@ -44,7 +44,7 @@ export function requireOwn(s: PeopleState, v: Viewer) {
   requireSelf(v)
   return own(s, v) ?? fail("FORBIDDEN", "Confirm your account link first")
 }
-export function leads(p: Person | null, team?: C.TeamId) {
+export function leads(p: Pick<Person, "teams"> | null, team?: C.TeamId) {
   return p?.teams.filter((m) => !m.endedOn && m.role === "lead" && (!team || m.team === team)).map((m) => m.team) ?? []
 }
 export function teamAccess(s: PeopleState, v: Viewer, team: C.TeamId, write: boolean) {
