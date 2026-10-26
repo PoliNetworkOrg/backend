@@ -1,21 +1,19 @@
-import { and, gt, inArray, isNull, lte, type SQL } from "drizzle-orm"
-import type { PgColumn } from "drizzle-orm/pg-core"
+import { and, gt, inArray, isNull, lte } from "drizzle-orm"
 import { DB, SCHEMA } from "@/db"
 
-const LEGACY = SCHEMA.TG.grants
-const GRANTS = SCHEMA.TG.grantsV2
+const GRANTS = SCHEMA.TG.grants
 
-/**
- * A grant from either table. Legacy grants were made by Telegram ID (`grantedBy`), new ones by
- * IdP subject (`grantedBySub`). Ids are unique only within a `source`; `key` is unique overall.
- */
+/** A grant, made by an IdP subject (RFC v3 §9.3). */
 export type Grant = {
+  /** @deprecated Always `idp:<id>`; kept for dashboards built against SDK v2. Use `id`. */
   key: string
   id: number
-  source: "legacy" | "idp"
+  /** @deprecated Always `"idp"`: the legacy grants table was dropped in Phase 6. */
+  source: "idp"
   userId: number
-  grantedBy: number | null
-  grantedBySub: string | null
+  /** @deprecated Always null: grants are made by IdP subjects. Use `grantedBySub`. */
+  grantedBy: null
+  grantedBySub: string
   validSince: Date
   validUntil: Date
   reason: string | null
@@ -30,17 +28,6 @@ export type GrantWindow =
   /** Not started yet. */
   | "scheduled"
 
-function windowOf(columns: { validSince: PgColumn; validUntil: PgColumn }) {
-  return (window: GrantWindow, now: Date): SQL | undefined => {
-    if (window === "active") return and(lte(columns.validSince, now), gt(columns.validUntil, now))
-    return gt(columns.validSince, now)
-  }
-}
-
-/**
- * Grants from the legacy table and the new one, until the legacy table is dropped in Phase 6. A
- * legacy grant interrupted by either path is excluded; who interrupted never matters.
- */
 export async function listGrants(
   window: GrantWindow,
   options: { userIds?: number[]; now?: Date } = {}
@@ -49,60 +36,31 @@ export async function listGrants(
   const { userIds } = options
   if (userIds?.length === 0) return []
 
-  const [legacy, current] = await Promise.all([
-    DB.select()
-      .from(LEGACY)
-      .where(
-        and(
-          windowOf(LEGACY)(window, now),
-          isNull(LEGACY.interruptedBy),
-          isNull(LEGACY.interruptedAt),
-          userIds ? inArray(LEGACY.userId, userIds) : undefined
-        )
-      ),
-    DB.select()
-      .from(GRANTS)
-      .where(
-        and(
-          windowOf(GRANTS)(window, now),
-          isNull(GRANTS.interruptedAt),
-          userIds ? inArray(GRANTS.telegramUserId, userIds) : undefined
-        )
-      ),
-  ])
+  const rows = await DB.select()
+    .from(GRANTS)
+    .where(
+      and(
+        window === "active" ? and(lte(GRANTS.validSince, now), gt(GRANTS.validUntil, now)) : gt(GRANTS.validSince, now),
+        isNull(GRANTS.interruptedAt),
+        userIds ? inArray(GRANTS.telegramUserId, userIds) : undefined
+      )
+    )
 
-  return [
-    ...legacy.map(
-      (row): Grant => ({
-        key: `legacy:${row.id}`,
-        id: row.id,
-        source: "legacy",
-        userId: row.userId,
-        grantedBy: row.grantedBy,
-        grantedBySub: null,
-        validSince: row.validSince,
-        validUntil: row.validUntil,
-        reason: row.reason,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      })
-    ),
-    ...current.map(
-      (row): Grant => ({
-        key: `idp:${row.id}`,
-        id: row.id,
-        source: "idp",
-        userId: row.telegramUserId,
-        grantedBy: null,
-        grantedBySub: row.grantedBySub,
-        validSince: row.validSince,
-        validUntil: row.validUntil,
-        reason: row.reason,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      })
-    ),
-  ]
+  return rows.map(
+    (row): Grant => ({
+      key: `idp:${row.id}`,
+      id: row.id,
+      source: "idp",
+      userId: row.telegramUserId,
+      grantedBy: null,
+      grantedBySub: row.grantedBySub,
+      validSince: row.validSince,
+      validUntil: row.validUntil,
+      reason: row.reason,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    })
+  )
 }
 
 /** Each user's active grant that lasts longest, if any. */

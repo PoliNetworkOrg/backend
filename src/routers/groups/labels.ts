@@ -48,7 +48,6 @@ export default createTRPCRouter({
           label,
           description,
           color,
-          createdBy: author.id,
           createdBySub: author.sub,
         })
         .returning()
@@ -108,7 +107,7 @@ export default createTRPCRouter({
           label: newLabel,
           description,
           color,
-          updatedBy: author.id,
+          legacyModifiedByTgId: null,
           updatedBySub: author.sub,
           updatedAt: new Date(),
         })

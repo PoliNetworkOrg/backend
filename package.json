@@ -21,10 +21,7 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check",
     "check:fix": "biome check --write --unsafe",
-    "seed:user": "bun ./scripts/seed-user.ts",
-    "seed:db": "bun ./scripts/seed-db.ts",
-    "idp:export": "bun ./scripts/idp-migration-export.ts",
-    "idp:reconcile": "bun ./scripts/idp-migration-reconcile.ts"
+    "seed:db": "bun ./scripts/seed-db.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",
@@ -49,8 +46,6 @@
   "dependencies": {
     "@azure/identity": "^4.13.0",
     "@azure/storage-blob": "^12.31.0",
-    "@better-auth/drizzle-adapter": "1.5.5",
-    "@better-auth/passkey": "1.5.5",
     "@hono/trpc-server": "^0.4.2",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@polinetwork/auth-kit": "^1.2.0",
@@ -59,7 +54,6 @@
     "@socket.io/devalue-parser": "^0.1.0",
     "@t3-oss/env-core": "^0.13.8",
     "@trpc/server": "11.5.1",
-    "better-auth": "1.5.5",
     "croner": "^9.1.0",
     "drizzle-orm": "^0.44.7",
     "fast-xml-parser": "^5.11.2",

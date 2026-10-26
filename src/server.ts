@@ -1,11 +1,9 @@
 import { trpcServer } from "@hono/trpc-server"
 import { ACTOR_HEADER } from "@polinetwork/auth-kit"
 import { Hono } from "hono"
-import { cors } from "hono/cors"
 import { logger as loggerMiddlware } from "hono/logger"
-import { auth } from "./auth"
 import "./azure/blob"
-import { AUTH_PATH, TRPC_PATH, WS_PATH } from "./constants"
+import { TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
 import { env } from "./env"
@@ -52,20 +50,6 @@ app.use(
     }),
   })
 )
-
-app.use(
-  `${AUTH_PATH}/*`,
-  cors({
-    origin: env.TRUSTED_ORIGINS,
-    allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["POST", "GET", "OPTIONS"],
-    exposeHeaders: ["Content-Length"],
-    maxAge: 600,
-    credentials: true,
-  })
-)
-
-app.on(["GET", "POST"], `${AUTH_PATH}/*`, (c) => auth.handler(c.req.raw))
 
 app.get("/", (c) => c.text("hi"))
 
