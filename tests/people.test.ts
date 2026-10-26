@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { myAreaSchema } from "@/people/contract"
 import { isValidIban } from "@/people/iban"
-import { academicYear, csvCell, today } from "@/people/model"
+import { academicYear, csvCell, telegramGroupsWithAdmins, today } from "@/people/model"
 import { samplePdf } from "./esign-fixtures"
 import { admit, harness, issue, master, permissions, vice, viewer } from "./people-fixtures"
 
@@ -488,4 +488,26 @@ it("keeps groups and pending removals while Telegram group admins are unknown", 
   expect(person.admin?.groups).toEqual([{ chatId: "-1001", title: "Test group" }])
   expect(person.discrepancies).toContainEqual(expect.objectContaining({ kind: "admin-removal" }))
   expect(h.state().persons["P-0003"].pendingGroupRemovals).toHaveLength(1)
+})
+
+it("reads Telegram group admins from the bot, and none while it does not answer", () => {
+  const groups = [
+    { telegramId: -1001, title: "Read" },
+    { telegramId: -1002, title: "Read, no admins" },
+    { telegramId: -1003, title: "Not read yet" },
+  ]
+  expect(
+    telegramGroupsWithAdmins(
+      groups,
+      new Map([
+        [-1001, [103, 104]],
+        [-1002, []],
+      ])
+    )
+  ).toEqual([
+    { chatId: "-1001", title: "Read", admins: ["103", "104"] },
+    { chatId: "-1002", title: "Read, no admins", admins: [] },
+    { chatId: "-1003", title: "Not read yet", admins: null },
+  ])
+  expect(telegramGroupsWithAdmins(groups, null).map((g) => g.admins)).toEqual([null, null, null])
 })

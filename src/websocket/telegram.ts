@@ -31,6 +31,11 @@ export interface ToClient {
     },
     cb: (error: string | null) => void
   ) => void
+  /**
+   * The native Telegram admins of the given groups (RFC v3 decision 2), from the bot's cache of Telegram. Groups the
+   * bot has not read yet are left out.
+   */
+  getGroupAdmins: (data: { chatIds: number[] }, cb: (groups: { chatId: number; userIds: number[] }[]) => void) => void
   leaveChat: (
     data: {
       chatId: number

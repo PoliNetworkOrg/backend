@@ -1,7 +1,16 @@
 import { createHash, randomUUID } from "node:crypto"
 import { TRPCError } from "@trpc/server"
 import * as C from "./contract"
-import type { Officer, PeopleConfig, PeopleState, Person, StoredReceipt, UnitOfWork, Viewer } from "./types"
+import type {
+  Officer,
+  PeopleConfig,
+  PeopleState,
+  Person,
+  StoredReceipt,
+  TelegramGroup,
+  UnitOfWork,
+  Viewer,
+} from "./types"
 
 export function fail(
   code: "BAD_REQUEST" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "PRECONDITION_FAILED",
@@ -251,4 +260,19 @@ export function validateFields(team: C.TeamId, fields: C.TeamFields) {
 }
 export function newFileId() {
   return randomUUID()
+}
+
+/**
+ * Telegram groups with their native admins (RFC v3 decision 2), which only Telegram owns: the bot reads them and the
+ * backend asks it, without storing them. A group the bot has not read yet, or every group while the bot does not
+ * answer, has `admins: null`, so People keeps what it last knew instead of reading "no admins".
+ */
+export function telegramGroupsWithAdmins(
+  groups: { telegramId: number; title: string }[],
+  admins: ReadonlyMap<number, number[]> | null
+): TelegramGroup[] {
+  return groups.map((g) => {
+    const userIds = admins?.get(g.telegramId)
+    return { chatId: String(g.telegramId), title: g.title, admins: userIds ? userIds.map(String) : null }
+  })
 }

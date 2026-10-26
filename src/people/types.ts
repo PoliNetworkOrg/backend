@@ -139,5 +139,5 @@ export type Account = {
   emailVerified?: boolean
 }
 export type TelegramUser = { id: string; name: string; username: string | null }
-/** `admins` is null while the group's admin list is unknown: People then keeps the groups it last knew. */
+/** `admins` is null while the bot cannot tell the group's Telegram admins: People then keeps the groups it last knew. */
 export type TelegramGroup = { chatId: string; title: string; admins: string[] | null }
