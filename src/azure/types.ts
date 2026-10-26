@@ -73,6 +73,4 @@ export type AzureDirectory = {
   setMemberNumber(userId: string, assocNumber: number): Promise<{ error: string | null }>
   createMember(input: CreateMemberInput): Promise<CreatedMember>
   getAllGroups(): Promise<ParsedGroup[]>
-  addGroupMember(groupId: string, userId: string): Promise<boolean>
-  removeGroupMember(groupId: string, userId: string): Promise<boolean>
 }

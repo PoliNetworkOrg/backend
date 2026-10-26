@@ -1,6 +1,6 @@
 import { logger } from "@/logger"
 import { azureCredentials } from "./config"
-import { addGroupMember, getAllGroups, removeGroupMember } from "./functions/groups"
+import { getAllGroups } from "./functions/groups"
 import {
   createMember,
   findByMail,
@@ -20,8 +20,6 @@ const graphAzureDirectory: AzureDirectory = {
   setMemberNumber,
   createMember,
   getAllGroups,
-  addGroupMember,
-  removeGroupMember,
 }
 
 export const azureDirectory: AzureDirectory = azureCredentials ? graphAzureDirectory : createMockAzureDirectory()

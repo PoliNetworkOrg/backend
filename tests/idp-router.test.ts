@@ -131,8 +131,12 @@ describe("app router", () => {
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
     })
-    for (const path of ["azure.groups.addMember", "azure.groups.removeMember"])
-      expect(policyOf(path)?.policy).toEqual({ user: { scope: "backend:admin", permission: "azure:groups:write" } })
+    // Group membership is read-only: no procedure may add or remove members of an arbitrary group.
+    expect(
+      procedures()
+        .filter(([name]) => name.startsWith("azure.groups."))
+        .map(([name]) => name)
+    ).toEqual(["azure.groups.getAll"])
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })
