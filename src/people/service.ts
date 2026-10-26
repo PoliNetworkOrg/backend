@@ -39,6 +39,7 @@ import {
   flagForReview,
   type PeopleRoles,
   RoleChangeError,
+  type RoleDirectory,
   type RoleResult,
   roleChanges,
   roleView,
@@ -87,8 +88,13 @@ export type PeopleOptions = {
   azureMembers?: () => Promise<AzureMember[]>
 }
 
-/** How often the sweep mirrors PoliNetwork Auth and Microsoft 365 into the register. */
-export const SYNC_INTERVAL_MS = 5 * 60_000
+/**
+ * How long People reuses what it read from its sources, in memory only: it stores no copy of them. PoliNetwork Auth
+ * decides who holds which role, Microsoft 365 who is a member and their number, Telegram who administers a group.
+ */
+export const SOURCE_TTL_MS = { directory: 15_000, members: 5 * 60_000 }
+/** Past this, People refuses to work rather than decide who leads or administers from an old answer. */
+export const DIRECTORY_MAX_AGE_MS = 60 * 60_000
 type RoleSnapshot = Pick<Person, "admin" | "teams">
 const PENDING_ROLES = "A role change for this person is waiting for PoliNetwork Auth; try again in a moment."
 const AWAITING_AUTH = "Awaiting confirmation from PoliNetwork Auth"
@@ -112,10 +118,11 @@ export function createPeopleService(options: PeopleOptions) {
   const date = () => today(now())
   const year = () => academicYear(date())
   /**
-   * A People transaction. Role commands it records for PoliNetwork Auth are delivered after it commits, so the People
-   * lock is never held across a call to Auth; a refused direct dashboard change (`strict`) then fails the call.
+   * A People transaction on the register alone. Role commands it records for PoliNetwork Auth are delivered after it
+   * commits, so the People lock is never held across a call to Auth; a refused direct dashboard change (`strict`) then
+   * fails the call. Only internal work (deliveries, the sweep) uses it directly: everything else goes through `tx`.
    */
-  const tx = async <T>(fn: (u: UnitOfWork) => Promise<T> | T): Promise<T> => {
+  const commit = async <T>(fn: (u: UnitOfWork) => Promise<T> | T): Promise<T> => {
     let queued: { personId: string; strict: boolean }[] = []
     const result = await store.transaction(async (u) => {
       const known = new Set(Object.values(u.state.persons).flatMap((p) => p.roleCommand?.request.id ?? []))
@@ -135,7 +142,58 @@ export function createPeopleService(options: PeopleOptions) {
     }
     return result
   }
-  let lastSync = Number.NEGATIVE_INFINITY
+  type SourceRead<T> = { value: T; at: number; revision: number }
+  let directoryRead: SourceRead<RoleDirectory> | null = null
+  let membersRead: SourceRead<AzureMember[]> | null = null
+  /** Who holds the roles bound to People, from PoliNetwork Auth; null when People has no Auth to ask. */
+  async function readDirectory(force = false): Promise<SourceRead<RoleDirectory> | null> {
+    if (!options.peopleRoles) return null
+    const at = now().getTime()
+    if (!force && directoryRead && at - directoryRead.at < SOURCE_TTL_MS.directory) return directoryRead
+    // A role command confirmed while Auth answers would make this answer older than the register's history.
+    const revision = await commit((u) => u.state.counters.roleRevision ?? 0)
+    try {
+      directoryRead = { value: await options.peopleRoles.directory(), at, revision }
+    } catch (error) {
+      if (!directoryRead || at - directoryRead.at > DIRECTORY_MAX_AGE_MS)
+        fail("PRECONDITION_FAILED", "PoliNetwork Auth can't be reached: People can't tell who holds which role")
+      console.error(error)
+    }
+    return directoryRead
+  }
+  /** The Microsoft 365 Soci group; null without Microsoft 365, or while it has never answered. */
+  async function readMembers(force = false): Promise<SourceRead<AzureMember[]> | null> {
+    if (!options.azureMembers) return null
+    const at = now().getTime()
+    if (!force && membersRead && at - membersRead.at < SOURCE_TTL_MS.members) return membersRead
+    try {
+      membersRead = { value: await options.azureMembers(), at, revision: 0 }
+    } catch (error) {
+      console.error(error)
+    }
+    return membersRead
+  }
+  /** Lays the sources over the register: their answer wins, and the register keeps only history and its own data. */
+  function applySources(
+    s: PeopleState,
+    directory: SourceRead<RoleDirectory> | null,
+    members: SourceRead<AzureMember[]> | null
+  ) {
+    const at = { date: date(), now: now() }
+    if (directory) {
+      if (directory.revision === (s.counters.roleRevision ?? 0)) syncDirectory(s, directory.value, at)
+      else directoryRead = null
+    }
+    if (members) syncMembers(s, members.value, at)
+  }
+  /** A People transaction that first lays PoliNetwork Auth and Microsoft 365 over the register. */
+  const tx = async <T>(fn: (u: UnitOfWork) => Promise<T> | T): Promise<T> => {
+    const [directory, members] = await Promise.all([readDirectory(), readMembers()])
+    return commit((u) => {
+      applySources(u.state, directory, members)
+      return fn(u)
+    })
+  }
   const currentFee = (p: Person) => fee(p, config, date()) ?? fail("CONFLICT", "This person is not a current member")
   const roleViews = (s: PeopleState) =>
     new Map<string, RoleSnapshot>(
@@ -192,7 +250,7 @@ export function createPeopleService(options: PeopleOptions) {
    * failing, or the response lost) keeps it for the sweep to send again with the same ID, which Auth applies once.
    */
   async function deliverRoleCommand(personId: string): Promise<RoleChangeError | null> {
-    const pending = await tx((u) => structuredClone(u.state.persons[personId]?.roleCommand))
+    const pending = await commit((u) => structuredClone(u.state.persons[personId]?.roleCommand))
     if (!pending || !options.peopleRoles) return null
     const { request } = pending
     let result: RoleResult
@@ -202,7 +260,7 @@ export function createPeopleService(options: PeopleOptions) {
       if (!(error instanceof RoleChangeError)) console.error(error)
       const failure = error instanceof RoleChangeError ? error : new RoleChangeError(503, "No answer")
       const unanswered = failure.status >= 500 || failure.status === 408 || failure.status === 429
-      await tx((u) => {
+      await commit((u) => {
         const p = u.state.persons[personId]
         if (p?.roleCommand?.request.id !== request.id) return
         if (unanswered) {
@@ -234,7 +292,7 @@ export function createPeopleService(options: PeopleOptions) {
           : `PoliNetwork Auth: ${failure.message}`
       )
     }
-    await tx((u) => {
+    await commit((u) => {
       const p = u.state.persons[personId]
       if (p?.roleCommand?.request.id !== request.id) return
       for (const change of request.changes)
@@ -256,6 +314,7 @@ export function createPeopleService(options: PeopleOptions) {
       syncPersonRoles(p, bound, wantedView(bound, result.held), { date: date(), now: now() })
       bumpRoles(u.state)
     })
+    directoryRead = null
     return null
   }
   function hydrateGroups(s: PeopleState, groups: TelegramGroup[]) {
@@ -572,6 +631,8 @@ export function createPeopleService(options: PeopleOptions) {
           assertReceiptConfig(u.state)
         }
         const azure = await options.provisionMember(p, input.number)
+        // Microsoft 365 now lists the new member: read the Soci group again.
+        membersRead = null
         p.azureId = azure.id
         p.member = {
           number: input.number,
@@ -612,6 +673,7 @@ export function createPeopleService(options: PeopleOptions) {
         if (Object.values(u.state.persons).some((o) => o.id !== p.id && o.member?.number === input.number))
           fail("CONFLICT", "Member number already used")
         await options.setMemberNumber(p, input.number)
+        membersRead = null
         p.member.number = input.number
         log(p, v.sub, `Changed member number to ${input.number}`, now())
       })
@@ -2030,7 +2092,7 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async deliverPending(onlyIds?: readonly string[]) {
       // Claim and record intent before network I/O. Unknown outcomes require an explicit retry.
-      const claimed = await tx((u) => {
+      const claimed = await commit((u) => {
         for (const mail of Object.values(u.state.outbox))
           if (
             mail.status === "sending" &&
@@ -2060,13 +2122,13 @@ export function createPeopleService(options: PeopleOptions) {
         let error: string | null = null
         try {
           const fileId = mail.fileId
-          const file = fileId ? await tx((u) => u.getFile(fileId)) : null
+          const file = fileId ? await commit((u) => u.getFile(fileId)) : null
           if (mail.fileId && !file) throw new Error("Attachment is missing")
           await options.sendMail({ id: mail.id, to: mail.to, subject: mail.subject, text: mail.text, attachment: file })
         } catch (err) {
           error = err instanceof Error ? err.message : String(err)
         }
-        await tx((u) => {
+        await commit((u) => {
           const current = u.state.outbox[mail.id]
           if (current.status !== "sending" || current.attemptedAt !== mail.attemptedAt) return
           current.status = error ? "failed" : "sent"
@@ -2102,38 +2164,28 @@ export function createPeopleService(options: PeopleOptions) {
         })
       }
     },
-    /** Mirrors PoliNetwork Auth's bound roles and the Microsoft 365 Soci group into the register. */
+    /** Reads PoliNetwork Auth and the Microsoft 365 Soci group now, without the cache, and lays them over the register. */
     async syncSources() {
-      const revision = await tx((u) => u.state.counters.roleRevision ?? 0)
-      const [directory, members] = await Promise.allSettled([
-        options.peopleRoles ? options.peopleRoles.directory() : null,
-        options.azureMembers ? options.azureMembers() : null,
-      ])
-      await tx((u) => {
-        const at = { date: date(), now: now() }
-        if (directory.status === "fulfilled" && directory.value && revision === (u.state.counters.roleRevision ?? 0))
-          syncDirectory(u.state, directory.value, at)
-        if (members.status === "fulfilled" && members.value) syncMembers(u.state, members.value, at)
+      const [directory, members] = await Promise.all([readDirectory(true), readMembers(true)])
+      await commit((u) => {
+        applySources(u.state, directory, members)
         activeCampaign(u.state)
       })
-      const failures = [directory, members].flatMap((r) => (r.status === "rejected" ? [r.reason] : []))
-      if (failures.length) throw new AggregateError(failures, "People sources could not be read")
     },
     async sweep() {
-      const pending = await tx((u) =>
+      const pending = await commit((u) =>
         Object.values(u.state.persons)
           .filter((p) => p.roleCommand)
           .map((p) => p.id)
       )
       for (const id of pending) await deliverRoleCommand(id)
-      let syncError: unknown = null
-      if (now().getTime() - lastSync >= SYNC_INTERVAL_MS) {
-        lastSync = now().getTime()
-        await this.syncSources().catch((error: unknown) => {
-          syncError = error
-        })
-      }
-      await tx(async (u) => {
+      // Fee reminders follow the current members: lay the sources over the register when they answer.
+      const sources = await Promise.all([readDirectory(), readMembers()]).catch((error: unknown) => {
+        console.error(error)
+        return null
+      })
+      await commit(async (u) => {
+        if (sources) applySources(u.state, ...sources)
         activeCampaign(u.state)
         for (const [id, batch] of Object.entries(u.state.batches))
           if (batch.expiresAt < now().toISOString()) {
@@ -2162,7 +2214,6 @@ export function createPeopleService(options: PeopleOptions) {
         }
       })
       await this.deliverPending()
-      if (syncError) throw syncError
     },
   }
 }

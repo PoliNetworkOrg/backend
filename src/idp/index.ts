@@ -33,6 +33,7 @@ const peopleDirectory = z.object({
       telegramUsername: z.string().nullable(),
       roles: z.array(z.string()),
       assigned: z.array(z.string()).optional(),
+      since: z.record(z.string(), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
     })
   ),
 })

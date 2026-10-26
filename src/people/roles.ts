@@ -20,6 +20,8 @@ export type RoleDirectory = {
     roles: string[]
     /** Those given directly, the only ones a change can take back; all of `roles` when absent. */
     assigned?: string[]
+    /** When each held role was first given (`YYYY-MM-DD`), when Auth says. */
+    since?: Record<string, string>
   }[]
 }
 export type RoleChange = {
@@ -199,12 +201,26 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
 
   for (const p of persons()) {
     if (!p.accountSub || p.account.status !== "linked" || p.roleCommand) continue
-    syncPersonRoles(p, bound, wantedView(bound, users.get(p.accountSub)?.roles ?? []), at)
+    const u = users.get(p.accountSub)
+    syncPersonRoles(p, bound, wantedView(bound, u?.roles ?? []), at, u?.since)
   }
 }
 
-/** For linked records Auth owns every bound concept, including previously local entries. */
-export function syncPersonRoles(p: Person, bound: Bound, wanted: RoleView, at: Clock) {
+/** The earliest date Auth gave one of these roles, or today when it doesn't say. */
+function sinceOf(keys: readonly string[], since: Record<string, string> | undefined, today: string) {
+  return (
+    keys
+      .map((key) => since?.[key])
+      .filter((d): d is string => !!d)
+      .sort()[0] ?? today
+  )
+}
+
+/**
+ * For linked records Auth owns every bound concept, including previously local entries: an entry is active exactly
+ * while its role is held, starting when Auth gave it.
+ */
+export function syncPersonRoles(p: Person, bound: Bound, wanted: RoleView, at: Clock, since?: Record<string, string>) {
   if (bound.admin.length) {
     if (wanted.admin && p.admin?.status !== "active") {
       p.admin = {
@@ -215,7 +231,7 @@ export function syncPersonRoles(p: Person, bound: Bound, wanted: RoleView, at: C
         capoScope: null,
         ...p.admin,
         status: "active",
-        since: at.date,
+        since: sinceOf(bound.admin, since, at.date),
         endedOn: null,
         endReason: null,
       }
@@ -235,7 +251,14 @@ export function syncPersonRoles(p: Person, bound: Bound, wanted: RoleView, at: C
     const role = wanted.teams[team]
     const active = p.teams.find((t) => t.team === team && !t.endedOn)
     if (role && !active) {
-      p.teams.push({ team, role, since: at.date, endedOn: null, endReason: null, fields: {} })
+      p.teams.push({
+        team,
+        role,
+        since: sinceOf(bound.teams[team][role], since, at.date),
+        endedOn: null,
+        endReason: null,
+        fields: {},
+      })
       log(p, "system", `Joined ${team} as ${role}: held in PoliNetwork Auth`, at.now)
     } else if (role && active && active.role !== role) {
       active.role = role
@@ -247,13 +270,25 @@ export function syncPersonRoles(p: Person, bound: Bound, wanted: RoleView, at: C
   }
 }
 
+/** How long a member admitted from People may be missing from the Soci group listing before it counts. */
+const ADMISSION_GRACE_DAYS = 2
+
+const usableNumber = (employeeId: string | null) => {
+  const digits = employeeId?.trim() ?? ""
+  return { digits, number: /^\d{1,4}$/.test(digits) ? digits.padStart(4, "0") : null }
+}
+
 /**
- * Brings every member of the Microsoft 365 Soci group into the register: matched by Microsoft 365 account or address,
- * or by the PoliNetwork address of a linked account, otherwise as a new record. The member number is the account's
- * `employeeId`. Nothing is ended when someone leaves the group: the register's status stays with whoever keeps it.
+ * Applies the Microsoft 365 Soci group, which decides who is a member and their number (`employeeId`):
+ * - each group member is matched by Microsoft 365 account or address, or by the PoliNetwork address of a linked
+ *   account, otherwise gets a new record, and takes the account's number;
+ * - a member of the register who is no longer in the group becomes former, unless admitted in the last
+ *   {@link ADMISSION_GRACE_DAYS} days, which the group listing may not show yet.
+ * The register keeps only what Microsoft 365 doesn't: suspension or expiry, the admission date, fees and history.
  */
 export function syncMembers(s: PeopleState, members: AzureMember[], at: Clock) {
   const persons = () => Object.values(s.persons)
+  const inGroup = new Set<string>()
   for (const m of members) {
     const mail = lower(m.mail)
     if (!mail) continue
@@ -280,14 +315,20 @@ export function syncMembers(s: PeopleState, members: AzureMember[], at: Clock) {
       )
     if (!match) log(p, "system", "Created from the Microsoft 365 Soci group", at.now)
     p.azureId ??= m.id
-    if (p.member) {
-      p.member.m365Email ||= m.mail
+    inGroup.add(p.id)
+    const { digits, number } = usableNumber(m.employeeId)
+    if (!number || persons().some((other) => other !== p && other.member?.number === number)) {
+      flagForReview(p, `In the Microsoft 365 Soci group without a usable member number (${digits || "none"})`)
+      if (p.member) p.member.m365Email = m.mail
       continue
     }
-    const digits = m.employeeId?.trim() ?? ""
-    const number = /^\d{1,4}$/.test(digits) ? digits.padStart(4, "0") : null
-    if (!number || persons().some((other) => other.member?.number === number)) {
-      flagForReview(p, `In the Microsoft 365 Soci group without a usable member number (${digits || "none"})`)
+    if (p.member) {
+      if (p.member.number !== number) log(p, "system", `Member number ${number} in Microsoft 365`, at.now)
+      if (p.member.status === "former") {
+        p.member.status = "active"
+        log(p, "system", "Back in the Microsoft 365 Soci group", at.now)
+      }
+      Object.assign(p.member, { number, m365Email: m.mail })
       continue
     }
     p.member = {
@@ -301,8 +342,15 @@ export function syncMembers(s: PeopleState, members: AzureMember[], at: Clock) {
     log(
       p,
       "system",
-      `Imported member ${number} from the Microsoft 365 Soci group${m.createdOn ? "; admission date taken from the account's creation" : ""}`,
+      `Member ${number} in the Microsoft 365 Soci group${m.createdOn ? "; admission date taken from the account's creation" : ""}`,
       at.now
     )
   }
+
+  const grace = new Date(at.now.getTime() - ADMISSION_GRACE_DAYS * 86_400_000).toISOString().slice(0, 10)
+  for (const p of persons())
+    if (p.member && p.member.status !== "former" && !inGroup.has(p.id) && p.member.admittedOn < grace) {
+      p.member.status = "former"
+      log(p, "system", "Not in the Microsoft 365 Soci group: no longer a member", at.now)
+    }
 }

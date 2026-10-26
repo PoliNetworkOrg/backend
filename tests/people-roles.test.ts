@@ -7,7 +7,7 @@ import {
   type RoleDirectory,
   roleChanges,
 } from "@/people/roles"
-import { SYNC_INTERVAL_MS } from "@/people/service"
+import { DIRECTORY_MAX_AGE_MS, SOURCE_TTL_MS } from "@/people/service"
 import { harness, master, viewer } from "./people-fixtures"
 
 const ROLES: RoleDirectory["roles"] = [
@@ -302,15 +302,60 @@ describe("People mirrors the Microsoft 365 Soci group", () => {
     expect(Object.keys(h.state().outbox)).toEqual([])
   })
 
-  it("syncs from the sweep at most once per interval", async () => {
+  it("reads the Soci group again only after its cache expires", async () => {
     const azureMembers = vi.fn(async () => [])
     const h = harness({ azureMembers })
     await h.service.sweep()
-    await h.service.sweep()
+    await h.service.listPeople(master)
     expect(azureMembers).toHaveBeenCalledTimes(1)
-    h.advance(SYNC_INTERVAL_MS)
+    h.advance(SOURCE_TTL_MS.members)
     await h.service.sweep()
     expect(azureMembers).toHaveBeenCalledTimes(2)
+  })
+
+  it("takes who is a member and their number from the Soci group", async () => {
+    const members = [member("az-1", "marta.gialli@polinetwork.org", "42")]
+    const h = harness({ azureMembers: async () => members })
+    h.setDate("2026-10-10T08:00:00Z")
+    await h.service.syncSources()
+    const id = Object.keys(h.state().persons)[0]
+    members[0].employeeId = "43"
+    await h.service.syncSources()
+    expect(h.state().persons[id].member).toMatchObject({ number: "0043", status: "active" })
+
+    members.length = 0
+    await h.service.syncSources()
+    expect(h.state().persons[id].member).toMatchObject({ number: "0043", status: "former" })
+
+    members.push(member("az-1", "marta.gialli@polinetwork.org", "43"))
+    await h.service.syncSources()
+    expect(h.state().persons[id].member?.status).toBe("active")
+  })
+
+  it("keeps a member admitted in the last days whom the Soci group listing doesn't show yet", async () => {
+    const members = [member("az-1", "marta.gialli@polinetwork.org", "42", { createdOn: "2026-10-09" })]
+    const h = harness({ azureMembers: async () => members })
+    h.setDate("2026-10-10T08:00:00Z")
+    await h.service.syncSources()
+    const id = Object.keys(h.state().persons)[0]
+    members.length = 0
+    await h.service.syncSources()
+    expect(h.state().persons[id].member?.status).toBe("active")
+    h.setDate("2026-10-12T08:00:00Z")
+    await h.service.syncSources()
+    expect(h.state().persons[id].member?.status).toBe("former")
+  })
+
+  it("leaves memberships alone while Microsoft 365 has never answered", async () => {
+    const h = harness({
+      azureMembers: async () => {
+        throw new Error("Graph unavailable")
+      },
+    })
+    await h.seed()
+    const before = Object.values(h.state().persons).filter((p) => p.member?.status === "active").length
+    await h.service.syncSources()
+    expect(Object.values(h.state().persons).filter((p) => p.member?.status === "active")).toHaveLength(before)
   })
 })
 
@@ -563,5 +608,45 @@ describe("Auth is the authority for People role commands", () => {
       discrepancies: [{ kind: "needs-review", message: expect.stringContaining("member") }],
     })
     expect(h.state().persons["P-0003"].discrepancies).toHaveLength(1)
+  })
+})
+
+describe("People reads PoliNetwork Auth on every operation", () => {
+  it("shows a role given in Auth without any sync", async () => {
+    const auth = fakeAuth([user("u-giulia", ["it-lead"])])
+    const h = harness({ peopleRoles: auth.roles })
+    const rows = await h.service.listPeople(master)
+    expect(rows.find((r) => r.teams.some((t) => t.team === "it" && t.role === "lead" && !t.endedOn))).toBeTruthy()
+  })
+
+  it("starts a role when Auth gave it", async () => {
+    const auth = fakeAuth([
+      user("u-giulia", ["admin", "it-core"], { since: { admin: "2024-09-01", "it-core": "2025-02-10" } }),
+    ])
+    const h = harness({ peopleRoles: auth.roles })
+    const person = (await h.service.listPeople(master)).find((r) => r.admin)
+    expect(person?.admin?.since).toBe("2024-09-01")
+    expect(person?.teams).toMatchObject([{ team: "it", role: "member", since: "2025-02-10" }])
+  })
+
+  it("ends a role taken back in Auth on the next operation after the cache expires", async () => {
+    const auth = fakeAuth([user("u-giulia", ["it-lead"])])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.service.listPeople(master)
+    auth.users[0].roles = []
+    h.advance(SOURCE_TTL_MS.directory)
+    const rows = await h.service.listPeople(master)
+    expect(rows.flatMap((r) => r.teams).filter((t) => !t.endedOn)).toEqual([])
+  })
+
+  it("refuses to work when Auth has not answered for too long, but rides out a short outage", async () => {
+    const auth = fakeAuth([user("u-giulia", ["admin"])])
+    const h = harness({ peopleRoles: auth.roles })
+    await h.service.listPeople(master)
+    vi.mocked(auth.roles.directory).mockRejectedValue(new Error("down"))
+    h.advance(SOURCE_TTL_MS.directory)
+    await expect(h.service.listPeople(master)).resolves.toBeTruthy()
+    h.advance(DIRECTORY_MAX_AGE_MS)
+    await expect(h.service.listPeople(master)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
   })
 })
