@@ -3,7 +3,6 @@ import { outdatedAgent } from "./agent-version"
 import { type Drive, DriveError, MAX_PDF_BYTES } from "./drive/types"
 import { EsignError } from "./errors"
 import { identityOf, titleCase } from "./identity"
-import { assertSignatureOnlyUpdate } from "./pdf/diff"
 import { PdfError } from "./pdf/incremental"
 import { inspectPdf, type PdfInfo } from "./pdf/inspect"
 import { finalizeSignature, type PreparedSignature, prepareSignature, SignatureError } from "./pdf/pades"
@@ -25,9 +24,10 @@ import type {
 } from "./store"
 import { cieChain } from "./trust"
 import { checkRevocation, type RevocationResult } from "./trust/ocsp"
+import { inspectSignedUpload, validateUploadedRevision } from "./upload"
 
 /** Who is calling, and what the IdP lets them do. */
-export type Caller = { sub: string; canManage: boolean; canManageDrives?: boolean }
+export type Caller = { sub: string; canManage: boolean; canManageDrives?: boolean; peopleManual?: boolean }
 
 /** A dashboard user's roles and permissions, as the IdP reports them. */
 export type Access = { roles: string[]; permissions: string[] }
@@ -92,6 +92,9 @@ type Logger = {
 }
 
 export type ServiceOptions = {
+  /** Rechecked from People and the live permission snapshot, including agent completion without a browser. */
+  receiptEligible?: (requestId: string, sub: string, requireEsign: boolean) => Promise<boolean>
+  receiptCanView?: (receiptId: string, sub: string) => Promise<boolean>
   store: EsignStore
   /** Registered IdP users, including people who have not opened Signatures yet. */
   directory?: () => Promise<{ sub: string; name: string; email: string | null }[]>
@@ -320,14 +323,16 @@ export function createEsignService(options: ServiceOptions) {
   }
 
   /** Its creator and signers, and managers allowed on every drive it uses. */
-  function canView(rules: Rules, caller: Caller, request: SigningRequest) {
+  async function canView(rules: Rules, caller: Caller, request: SigningRequest) {
+    if (request.peopleReceipt)
+      return (await options.receiptCanView?.(request.peopleReceipt.receiptId, caller.sub)) === true
     if (request.createdBySub === caller.sub || request.signers.some((s) => s.sub === caller.sub)) return true
     return caller.canManage && request.drives.every((d) => mayRequest(rules, caller, d))
   }
 
   async function requestFor(caller: Caller, id: string): Promise<SigningRequest> {
     const request = await store.getRequest(id)
-    if (!request || !canView(await accessRules(), caller, request))
+    if (!request || !(await canView(await accessRules(), caller, request)))
       throw new EsignError("not_found", "Request not found")
     return request
   }
@@ -369,7 +374,10 @@ export function createEsignService(options: ServiceOptions) {
       ...request,
       signers,
       turn,
-      myTurn: turn.includes(caller.sub) && !signers.some((s) => s.sub === caller.sub && s.lostAccess),
+      myTurn:
+        turn.includes(caller.sub) &&
+        !signers.some((s) => s.sub === caller.sub && s.lostAccess) &&
+        (!request.peopleReceipt || (await options.receiptEligible?.(request.id, caller.sub, true)) === true),
       signedCount: request.signers.filter((s) => s.status === "signed").length,
       createdByName: await profileName(request.createdBySub),
     }
@@ -450,16 +458,17 @@ export function createEsignService(options: ServiceOptions) {
         accessRules(),
         options.directory ? options.directory() : store.listProfiles(),
       ])
-      return new Map(
-        people
-          .filter((p) => {
-            const held = options.access?.(p.sub)?.permissions ?? []
-            return (
-              held.includes(SIGN) && held.includes(MANAGE) && canView(rules, { sub: p.sub, canManage: true }, request)
-            )
-          })
-          .map((p) => [p.sub, { name: p.name, email: p.email }])
+      const allowed = await Promise.all(
+        people.map(async (p) => {
+          const held = options.access?.(p.sub)?.permissions ?? []
+          return (
+            held.includes(SIGN) &&
+            held.includes(MANAGE) &&
+            (await canView(rules, { sub: p.sub, canManage: true }, request))
+          )
+        })
       )
+      return new Map(people.filter((_, i) => allowed[i]).map((p) => [p.sub, { name: p.name, email: p.email }]))
     } catch (error) {
       logger.error({ error, requestId: request.id }, "[ESIGN] cannot list who may retry a delivery")
       return new Map()
@@ -562,6 +571,11 @@ export function createEsignService(options: ServiceOptions) {
     for (const item of items) {
       const request = await requestFor(caller, item.requestId)
       assertInProgress(request)
+      if (request.peopleReceipt) {
+        if (item.places !== undefined) throw new EsignError("forbidden", "Receipt signature placement is fixed")
+        if (!(await options.receiptEligible?.(request.id, caller.sub, true)))
+          throw new EsignError("forbidden", "This receipt is not assigned to you")
+      }
       const signer = turnOf(request).find((s) => s.sub === caller.sub)
       if (!signer) throw new EsignError("forbidden", `It is not your turn to sign “${request.title}”`)
       const denied = request.drives.find((d) => !maySign(rules, caller.sub, d))
@@ -699,6 +713,8 @@ export function createEsignService(options: ServiceOptions) {
     const request = await store.getRequest(job.requestId)
     const signer = request?.signers.find((s) => s.id === job.signerId)
     if (!request || !signer) throw new EsignError("ticket_invalid", "This signing link is not valid")
+    if (request.peopleReceipt && !(await options.receiptEligible?.(request.id, job.sub, true)))
+      throw new EsignError("forbidden", "This receipt is no longer assigned to you")
     if (request.status !== "in_progress" || signer.status !== "pending")
       throw new EsignError("job_done", "This request no longer needs your signature")
     const current = await store.latestDocument(request.id)
@@ -788,6 +804,8 @@ export function createEsignService(options: ServiceOptions) {
     identity: ReturnType<typeof identityOf>
     method: "agent" | "upload"
     revocation: RevocationResult | null
+    receiptEnvelope?: { content: Uint8Array; fileName: string }
+    receiptManual?: boolean
     /** The signer's last place: the signer is done. Otherwise the job moves on to the next place. */
     final: boolean
   }) {
@@ -795,6 +813,8 @@ export function createEsignService(options: ServiceOptions) {
     const remaining = request.signers.filter((s) => s.status === "pending" && (s.id !== signer.id || !final)).length
     const inTurnBefore = new Set(turnOf(request).map((s) => s.sub))
     const result = await store.commitSignature({
+      receiptEnvelope: input.receiptEnvelope,
+      receiptManual: input.receiptManual,
       jobId: job.id,
       requestId: request.id,
       baseVersion: job.baseVersion,
@@ -854,7 +874,48 @@ export function createEsignService(options: ServiceOptions) {
     return { status: "completed" as const, request: { status: updated?.status ?? request.status, remaining } }
   }
 
+  async function validateUploadIdentity(sub: string, cert: X509Certificate) {
+    const at = now()
+    if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
+      throw new EsignError("certificate_invalid", "The CIE certificate is expired")
+    const uploadTrust = (options.trust ?? cieChain)(cert, at)
+    if (!uploadTrust.trusted && !options.allowTestCertificates)
+      throw new EsignError("certificate_invalid", "The file was not signed with a CIE")
+    const identity = identityOf(cert)
+    if (!identity.fiscalCode && !options.allowTestCertificates)
+      throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
+    const revocation = await revocationOf(cert, uploadTrust.issuer)
+    const profile = await store.getProfile(sub)
+    if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
+      throw new EsignError("signer_mismatch", `This CIE does not belong to ${profile?.name ?? sub}`)
+
+    return { identity, revocation }
+  }
+
+  async function verifyUpload(caller: Caller, requestId: string, bytes: Uint8Array) {
+    const request = await requestFor(caller, requestId)
+    if (!turnOf(request).some((s) => s.sub === caller.sub))
+      throw new EsignError("forbidden", "It is not your turn to sign")
+    if (request.peopleReceipt && !(await options.receiptEligible?.(request.id, caller.sub, !caller.peopleManual)))
+      throw new EsignError("forbidden", "This receipt is not assigned to you")
+    const current = await store.latestDocument(requestId)
+    if (!current) throw new EsignError("not_found", "Document not found")
+    if (bytes.length > MAX_PDF_BYTES) throw new EsignError("pdf_invalid", "The file is larger than 30 MB")
+    const checked = await validateUploadedRevision(current.content, bytes, !!request.peopleReceipt)
+    return { ...checked, ...(await validateUploadIdentity(caller.sub, checked.certificate)) }
+  }
+
   return {
+    async inspectUpload(sub: string, bytes: Uint8Array) {
+      if (bytes.length > MAX_PDF_BYTES) throw new EsignError("pdf_invalid", "The file is too large")
+      const inspected = await inspectSignedUpload(bytes)
+      const verified = await validateUploadIdentity(sub, inspected.certificate)
+      return { signer: verified.identity.name }
+    },
+    async verifyUpload(caller: Caller, requestId: string, bytes: Uint8Array) {
+      const result = await verifyUpload(caller, requestId, bytes)
+      return { signer: result.identity.name, content: bytes }
+    },
     /** The drives the caller may request signatures with. */
     async drivesFor(caller: Caller) {
       const rules = await accessRules()
@@ -1111,7 +1172,8 @@ export function createEsignService(options: ServiceOptions) {
         scope === "inbox" ? { awaiting: caller.sub } : { involving: scope === "all" ? undefined : caller.sub }
       )
       const rules = await accessRules()
-      const visible = requests.filter((r) => canView(rules, caller, r))
+      const allowed = await Promise.all(requests.map((r) => canView(rules, caller, r)))
+      const visible = requests.filter((_, i) => allowed[i])
       const views = await Promise.all(visible.map((r) => view(caller, r, rules)))
       // A signer who may no longer sign a drive's documents can't act on them: they stay under Requests only.
       return scope === "inbox" ? views.filter((r) => r.myTurn) : views
@@ -1144,7 +1206,8 @@ export function createEsignService(options: ServiceOptions) {
     },
 
     async cancelRequest(caller: Caller, id: string) {
-      await requestFor(caller, id)
+      const request = await requestFor(caller, id)
+      if (request.peopleReceipt) throw new EsignError("forbidden", "Void receipts through People")
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can cancel requests")
       const result = await store.cancelRequest(
         id,
@@ -1160,6 +1223,7 @@ export function createEsignService(options: ServiceOptions) {
     /** Deletes a finished request and everything recorded about it, signed documents included. */
     async deleteRequest(caller: Caller, id: string) {
       const request = await requestFor(caller, id)
+      if (request.peopleReceipt) throw new EsignError("forbidden", "Receipt requests are retained permanently")
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can delete requests")
       if (request.status === "in_progress") throw new EsignError("conflict", "Cancel the request before deleting it")
       const result = await store.deleteRequest(id)
@@ -1192,6 +1256,7 @@ export function createEsignService(options: ServiceOptions) {
 
     async retryDelivery(caller: Caller, id: string) {
       const request = await requestFor(caller, id)
+      if (request.peopleReceipt) throw new EsignError("forbidden", "Retry receipt delivery through People")
       if (!caller.canManage) throw new EsignError("forbidden", "Only managers can retry the delivery")
       if (request.status !== "completed" || request.delivery?.status !== "failed")
         throw new EsignError("conflict", "Nothing to retry")
@@ -1408,49 +1473,11 @@ export function createEsignService(options: ServiceOptions) {
           throw new EsignError("conflict", "Someone is signing right now. Try again in a few minutes.")
       const current = await store.latestDocument(requestId)
       if (!current) throw new EsignError("not_found", "Document not found")
-      if (bytes.length > MAX_PDF_BYTES) throw new EsignError("pdf_invalid", "The PDF is larger than 30 MB")
-      const mismatch =
-        "This file isn't the current version with your signature added. Download the PDF again, sign it, then upload it."
-      if (
-        bytes.length <= current.size ||
-        !Buffer.from(bytes.subarray(0, current.size)).equals(Buffer.from(current.content))
-      )
-        throw new EsignError("pdf_invalid", mismatch)
-      const sha256 = sha256Hex(bytes)
-      let check: PdfInfo
-      let before: PdfInfo
-      try {
-        ;[check, before] = await Promise.all([info(sha256, bytes), info(current.sha256, current.content)])
-      } catch (error) {
-        if (error instanceof PdfError) throw new EsignError("pdf_invalid", error.message)
-        throw error
-      }
-      const last = check.signatures.at(-1)
-      if (check.signatures.length !== before.signatures.length + 1 || !last)
-        throw new EsignError("pdf_invalid", "The file must add exactly one signature")
-      if (!last.intact || !last.verified || !last.coversWholeDocument || !check.lastCertificate || !check.lastSignature)
-        throw new EsignError("signature_invalid", "The signature in the file is not valid")
-      try {
-        await assertSignatureOnlyUpdate(current.content, bytes, check.lastSignature)
-      } catch (error) {
-        if (error instanceof PdfError) throw new EsignError("pdf_invalid", error.message)
-        throw error
-      }
-      const cert = check.lastCertificate
+      const verified = await verifyUpload(caller, requestId, bytes)
+      const { identity, revocation: uploadRevocation } = verified
       const at = now()
-      if (at < new Date(cert.validFrom) || at > new Date(cert.validTo))
-        throw new EsignError("certificate_invalid", "The CIE certificate is expired")
-      const uploadTrust = (options.trust ?? cieChain)(cert, at)
-      if (!uploadTrust.trusted && !options.allowTestCertificates)
-        throw new EsignError("certificate_invalid", "The file was not signed with a CIE")
-      const identity = identityOf(cert)
-      if (!identity.fiscalCode && !options.allowTestCertificates)
-        throw new EsignError("certificate_invalid", "The certificate carries no fiscal code")
-      const uploadRevocation = await revocationOf(cert, uploadTrust.issuer)
-      const profile = await store.getProfile(signer.sub)
-      if (profile?.fiscalCode && identity.fiscalCode && profile.fiscalCode !== identity.fiscalCode)
-        throw new EsignError("signer_mismatch", `This CIE does not belong to ${signer.name}`)
-
+      const signedPdf = verified.pdf
+      const sha256 = sha256Hex(signedPdf)
       // A one-off job carries the upload through the same atomic commit as the agent's signatures.
       for (const job of await store.openJobs(requestId))
         await store.transitionJob(job.id, ["pending", "prepared"], { status: "cancelled" })
@@ -1470,7 +1497,9 @@ export function createEsignService(options: ServiceOptions) {
         signer,
         current,
         job,
-        signed: bytes,
+        signed: signedPdf,
+        receiptManual: caller.peopleManual === true,
+        receiptEnvelope: verified.envelope ? { content: bytes, fileName: `${current.fileName}.p7m` } : undefined,
         sha256,
         identity,
         method: "upload",

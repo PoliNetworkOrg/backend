@@ -3,6 +3,7 @@ import { azureRouter } from "./azure"
 import { esignRouter } from "./esign"
 import { groupsRouter } from "./groups"
 import { meRouter } from "./me"
+import { peopleRouter } from "./people"
 import { tgRouter } from "./tg"
 import { waRouter } from "./wa"
 import { webRouter } from "./web"
@@ -17,6 +18,7 @@ export const appRouter = createTRPCRouter({
   esign: esignRouter,
   groups: groupsRouter,
   me: meRouter,
+  people: peopleRouter,
   tg: tgRouter,
   wa: waRouter,
   web: webRouter,

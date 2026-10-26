@@ -58,6 +58,8 @@ export type Signer = {
 }
 
 export type SigningRequest = {
+  /** Set only by the backend's persistent People receipt association. */
+  peopleReceipt?: { receiptId: string; number: string; year: string } | null
   id: string
   title: string
   status: RequestStatus
@@ -139,6 +141,9 @@ export type RequestFilter = {
 
 /** The signature commit: a new document version, the signer's and the job's new state, atomically. */
 export type SignatureCommit = {
+  /** Original CAdES envelope, retained by People; the eSign revision shows its encapsulated PDF. */
+  receiptEnvelope?: { content: Uint8Array; fileName: string }
+  receiptManual?: boolean
   jobId: string
   requestId: string
   baseVersion: number

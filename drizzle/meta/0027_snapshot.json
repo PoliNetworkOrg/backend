@@ -1,5 +1,5 @@
 {
-  "id": "93df3534-3970-4908-b676-d7f6504047cf",
+  "id": "a5661fff-41d2-486d-b20a-cb623b805a5b",
   "prevId": "4cd59385-7abd-4ec9-8509-a7aac8e688df",
   "version": "7",
   "dialect": "postgresql",
@@ -1448,6 +1448,307 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.people_files": {
+      "name": "people_files",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "file_name": {
+          "name": "file_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.people_identities": {
+      "name": "people_identities",
+      "schema": "",
+      "columns": {
+        "person_id": {
+          "name": "person_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "account_sub": {
+          "name": "account_sub",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "member_number": {
+          "name": "member_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "telegram_id": {
+          "name": "telegram_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "people_identities_account_sub_unique": {
+          "name": "people_identities_account_sub_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "account_sub"
+          ]
+        },
+        "people_identities_member_number_unique": {
+          "name": "people_identities_member_number_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "member_number"
+          ]
+        },
+        "people_identities_telegram_id_unique": {
+          "name": "people_identities_telegram_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "telegram_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.people_receipt_requests": {
+      "name": "people_receipt_requests",
+      "schema": "",
+      "columns": {
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "receipt_id": {
+          "name": "receipt_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "officer_sub": {
+          "name": "officer_sub",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "original_hash": {
+          "name": "original_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "people_receipt_request_identity_idx": {
+          "name": "people_receipt_request_identity_idx",
+          "columns": [
+            {
+              "expression": "receipt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "people_receipt_requests_request_id_esign_requests_id_fk": {
+          "name": "people_receipt_requests_request_id_esign_requests_id_fk",
+          "tableFrom": "people_receipt_requests",
+          "tableTo": "esign_requests",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "people_receipt_requests_receipt_id_people_receipts_id_fk": {
+          "name": "people_receipt_requests_receipt_id_people_receipts_id_fk",
+          "tableFrom": "people_receipt_requests",
+          "tableTo": "people_receipts",
+          "columnsFrom": [
+            "receipt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.people_receipts": {
+      "name": "people_receipts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "people_receipts_request_id_esign_requests_id_fk": {
+          "name": "people_receipts_request_id_esign_requests_id_fk",
+          "tableFrom": "people_receipts",
+          "tableTo": "esign_requests",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "people_receipts_number_unique": {
+          "name": "people_receipts_number_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
+          ]
+        },
+        "people_receipts_request_id_unique": {
+          "name": "people_receipts_request_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "request_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.people_records": {
+      "name": "people_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "people_records_kind_idx": {
+          "name": "people_records_kind_idx",
+          "columns": [
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -3412,143 +3713,6 @@
         "web_guides_matricole_creator_check": {
           "name": "web_guides_matricole_creator_check",
           "value": "\"web_guides_matricole\".\"created_by_id\" IS NOT NULL OR \"web_guides_matricole\".\"created_by_sub\" IS NOT NULL"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.web_project_resources": {
-      "name": "web_project_resources",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "web_project_resources_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "order": {
-          "name": "order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_by_id": {
-          "name": "created_by_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "modified_by_id": {
-          "name": "modified_by_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_sub": {
-          "name": "created_by_sub",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "modified_by_sub": {
-          "name": "modified_by_sub",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp (0) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (0) with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "web_project_resources_project_id_web_projects_id_fk": {
-          "name": "web_project_resources_project_id_web_projects_id_fk",
-          "tableFrom": "web_project_resources",
-          "tableTo": "web_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "web_project_resources_created_by_id_tg_permissions_user_id_fk": {
-          "name": "web_project_resources_created_by_id_tg_permissions_user_id_fk",
-          "tableFrom": "web_project_resources",
-          "tableTo": "tg_permissions",
-          "columnsFrom": [
-            "created_by_id"
-          ],
-          "columnsTo": [
-            "user_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "web_project_resources_modified_by_id_tg_permissions_user_id_fk": {
-          "name": "web_project_resources_modified_by_id_tg_permissions_user_id_fk",
-          "tableFrom": "web_project_resources",
-          "tableTo": "tg_permissions",
-          "columnsFrom": [
-            "modified_by_id"
-          ],
-          "columnsTo": [
-            "user_id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "web_project_resources_creator_check": {
-          "name": "web_project_resources_creator_check",
-          "value": "\"web_project_resources\".\"created_by_id\" IS NOT NULL OR \"web_project_resources\".\"created_by_sub\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false

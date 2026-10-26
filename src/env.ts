@@ -1,6 +1,7 @@
 import { createEnv } from "@t3-oss/env-core"
 import { z } from "zod"
 import { TRUSTED_ORIGINS } from "./constants"
+import { isValidIban } from "./people/iban"
 
 const PORT = 3000
 const NODE_ENV = z.enum(["development", "production", "test"])
@@ -85,6 +86,29 @@ export const env = createEnv({
 
     /** OCSP for CIE certificates: require (refuse when unknown), prefer (refuse only revoked), off. */
     ESIGN_REVOCATION: z.enum(["require", "prefer", "off"]).default("prefer"),
+
+    // People configuration is backend-owned; no browser can choose officers, bank details or receipt identity.
+    PEOPLE_PRESIDENT_ID: z
+      .string()
+      .regex(/^P-\d{4}$/)
+      .optional(),
+    PEOPLE_VICE_PRESIDENT_ID: z
+      .string()
+      .regex(/^P-\d{4}$/)
+      .optional(),
+    PEOPLE_FEE_CENTS: z.coerce.number().int().min(1).max(100_000).default(1000),
+    PEOPLE_BENEFICIARY: z.string().max(200).default("PoliNetwork APS"),
+    PEOPLE_IBAN: z
+      .string()
+      .regex(/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/)
+      .refine(isValidIban, "PEOPLE_IBAN must have a valid country length and checksum")
+      .optional(),
+    PEOPLE_LEGAL_NAME: z.string().max(200).optional(),
+    PEOPLE_ADDRESS: z.string().max(300).optional(),
+    PEOPLE_TAX_CODE: z
+      .string()
+      .regex(/^\d{11}$/)
+      .optional(),
 
     // PoliNetwork IdP (RFC v3 §6, §12). Token authentication is enabled when IDP_PUBLIC_URL and
     // OAUTH_BACKEND_RESOURCE_URI are set; snapshot pulls also need the internal resource and the
