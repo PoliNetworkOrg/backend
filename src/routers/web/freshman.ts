@@ -57,7 +57,7 @@ export default createTRPCRouter({
       )
     }),
 
-  updateCard: policy(dashboard("web:content:write"), { tokenOnly: true })
+  updateCard: policy(dashboard("web:content:write"))
     .input(updateFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
       const { id, ...fields } = input
@@ -69,7 +69,7 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  moveCard: policy(dashboard("web:content:write"), { tokenOnly: true })
+  moveCard: policy(dashboard("web:content:write"))
     .input(moveFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
       const index = freshmanSlots.findIndex((slot) => slot.id === input.id)
@@ -102,7 +102,7 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  selectFaq: policy(dashboard("web:content:write"), { tokenOnly: true })
+  selectFaq: policy(dashboard("web:content:write"))
     .input(selectFreshmanFaqInput)
     .mutation(async ({ input, ctx }) => {
       const author = modifiedByColumns(authorOf(ctx.actor))

@@ -42,7 +42,7 @@ export default createTRPCRouter({
       return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
     }),
 
-  addProject: policy(dashboard("web:content:write"), { tokenOnly: true })
+  addProject: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
@@ -71,7 +71,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editProject: policy(dashboard("web:content:write"), { tokenOnly: true })
+  editProject: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)

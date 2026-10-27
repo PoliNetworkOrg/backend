@@ -46,7 +46,6 @@ app.use(
         actor: c.req.header(ACTOR_HEADER),
       }),
       access: idp?.snapshot ?? null,
-      legacyAnonymous: env.LEGACY_ANONYMOUS,
     }),
   })
 )

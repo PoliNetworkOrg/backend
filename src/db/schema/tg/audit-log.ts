@@ -47,8 +47,6 @@ export const auditLog = createTable.tg(
   "audit_log",
   {
     id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-    /** Superseded by `actorTgId`; still written for readers of the old shape. */
-    adminId: bigint("admin_id", { mode: "number" }),
     targetId: bigint("target_id", { mode: "number" }).notNull(),
     groupId: bigint("group_id", { mode: "number" }),
     type: varchar("type", { length: 32 }).$type<TAuditType>().notNull(),
@@ -66,7 +64,6 @@ export const auditLog = createTable.tg(
     ...timeColumns,
   },
   (t) => [
-    index("auditlog_adminid_idx").on(t.adminId),
     index("auditlog_actor_tg_id_idx").on(t.actorTgId),
     uniqueIndex("auditlog_idempotency_key_idx").on(t.idempotencyKey),
   ]

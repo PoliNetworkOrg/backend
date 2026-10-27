@@ -33,8 +33,6 @@ export default createTRPCRouter({
         isGranted: z.boolean(),
         grant: z.nullable(
           z.object({
-            /** @deprecated Always null: grants are made by IdP subjects. Use `grantedBySub`. */
-            grantedBy: z.null(),
             grantedBySub: z.string(),
             validSince: z.date(),
             validUntil: z.date(),
@@ -46,15 +44,15 @@ export default createTRPCRouter({
       const grant = (await activeGrantByUser([input.userId])).get(input.userId)
       if (!grant) return { isGranted: false, grant: null }
 
-      const { grantedBy, grantedBySub, validSince, validUntil } = grant
-      return { isGranted: true, grant: { grantedBy, grantedBySub, validSince, validUntil } }
+      const { grantedBySub, validSince, validUntil } = grant
+      return { isGranted: true, grant: { grantedBySub, validSince, validUntil } }
     }),
 
   /**
    * Escalating write: dashboard users only, never the bot acting for someone (RFC v3 §8.1). The
    * grantor is the token's user.
    */
-  create: policy(dashboard("tg:grants:manage"), { tokenOnly: true })
+  create: policy(dashboard("tg:grants:manage"))
     .input(
       z.object({
         userId: z.number(),
@@ -99,7 +97,6 @@ export default createTRPCRouter({
           const author = await describeActor(actor)
           await WSS.logGrantCreate({
             userId: input.userId,
-            adminId: author.telegramId ? Number(author.telegramId) : null,
             actor: author,
             validSince: input.since,
             validUntil: input.until,
@@ -118,13 +115,10 @@ export default createTRPCRouter({
    * De-escalating write: the bot's 🛑 button acting for a Telegram user, or the dashboard. Who
    * interrupted is the token's actor.
    */
-  interrupt: policy(
-    {
-      telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
-      ...dashboard("tg:grants:manage"),
-    },
-    { tokenOnly: true }
-  )
+  interrupt: policy({
+    telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
+    ...dashboard("tg:grants:manage"),
+  })
     .input(
       z.object({
         userId: z.number(),
@@ -171,7 +165,6 @@ export default createTRPCRouter({
           const author = await describeActor(actor)
           await WSS.logGrantInterrupt({
             userId: input.userId,
-            adminId: author.telegramId ? Number(author.telegramId) : null,
             actor: author,
           })
         }

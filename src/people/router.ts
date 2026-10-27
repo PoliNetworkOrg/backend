@@ -11,8 +11,8 @@ import type { Viewer } from "./types"
 
 /** Factory keeps policy and shape tests independent of databases and external services. */
 export function createPeopleRouter(people: PeopleService) {
-  const user = policy({ user: { scope: SCOPE.admin } }, { tokenOnly: true }).use(async ({ ctx, next }) => {
-    if (ctx.actor?.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
+  const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
+    if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
     const viewer: Viewer = { sub: ctx.actor.sub, telegramId: ctx.actor.telegramId, can: ctx.can }
     const result = await next({ ctx: { viewer } })
     if (!result.ok && result.error.cause instanceof EsignError) {

@@ -213,7 +213,7 @@ export default createTRPCRouter({
     }),
 
   /** The performer is the token's user. */
-  leaveChat: policy(dashboard("tg:groups:manage"), { tokenOnly: true })
+  leaveChat: policy(dashboard("tg:groups:manage"))
     .input(
       z.object({
         chatId: z.number(),
@@ -223,7 +223,6 @@ export default createTRPCRouter({
       const performer = await describeActor(ctx.actor)
       const left = await WSS.leaveChat({
         chatId: input.chatId,
-        performerId: performer.telegramId ? Number(performer.telegramId) : null,
         performer,
       })
       if (!left) return { error: "BOT_ERROR" }

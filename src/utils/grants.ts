@@ -5,14 +5,8 @@ const GRANTS = SCHEMA.TG.grants
 
 /** A grant, made by an IdP subject (RFC v3 §9.3). */
 export type Grant = {
-  /** @deprecated Always `idp:<id>`; kept for dashboards built against SDK v2. Use `id`. */
-  key: string
   id: number
-  /** @deprecated Always `"idp"`: the legacy grants table was dropped in Phase 6. */
-  source: "idp"
   userId: number
-  /** @deprecated Always null: grants are made by IdP subjects. Use `grantedBySub`. */
-  grantedBy: null
   grantedBySub: string
   validSince: Date
   validUntil: Date
@@ -48,11 +42,8 @@ export async function listGrants(
 
   return rows.map(
     (row): Grant => ({
-      key: `idp:${row.id}`,
       id: row.id,
-      source: "idp",
       userId: row.telegramUserId,
-      grantedBy: null,
       grantedBySub: row.grantedBySub,
       validSince: row.validSince,
       validUntil: row.validUntil,
