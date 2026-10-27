@@ -52,8 +52,9 @@ export default createTRPCRouter({
         hide: z.boolean().default(false),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const [created] = await DB.insert(GROUPS).values(input).returning()
+      ctx.audit.set({ target: { type: "wa.group", id: created.id, label: created.title }, after: created })
       return created
     }),
 
@@ -65,9 +66,15 @@ export default createTRPCRouter({
         link: z.url({ hostname: /^chat\.whatsapp\.com$/ }),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id, ...values } = input
+      const [before] = await DB.select().from(GROUPS).where(eq(GROUPS.id, id)).limit(1)
       const [updated] = await DB.update(GROUPS).set(values).where(eq(GROUPS.id, id)).returning()
+      ctx.audit.set({
+        target: { type: "wa.group", id, label: updated?.title ?? before?.title },
+        before,
+        after: updated,
+      })
       return updated
     }),
 
@@ -78,8 +85,9 @@ export default createTRPCRouter({
       })
     )
     .output(z.boolean())
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.id, input.id)).returning()
+      ctx.audit.set({ target: { type: "wa.group", id: input.id, label: rows[0]?.title }, before: rows[0] })
       return rows.length === 1
     }),
 
@@ -90,8 +98,14 @@ export default createTRPCRouter({
         hide: z.boolean(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const [before] = await DB.select({ hide: GROUPS.hide }).from(GROUPS).where(eq(GROUPS.id, input.id)).limit(1)
       const rows = await DB.update(GROUPS).set({ hide: input.hide }).where(eq(GROUPS.id, input.id)).returning()
+      ctx.audit.set({
+        target: { type: "wa.group", id: input.id, label: rows[0]?.title },
+        before,
+        after: rows[0] && { hide: rows[0].hide },
+      })
 
       return rows.length === 1
     }),

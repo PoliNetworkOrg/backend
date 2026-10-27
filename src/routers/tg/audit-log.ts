@@ -1,7 +1,9 @@
+import type { Actor } from "@polinetwork/auth-kit"
 import { TRPCError } from "@trpc/server"
 import { desc, eq, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
+import type { AuditNote } from "@/audit"
 import { DB, SCHEMA } from "@/db"
 import {
   ARRAY_AUDIT_TYPE,
@@ -35,6 +37,37 @@ const RECORDED_BASES = [
   AUDIT_BASIS.AUTOMATIC,
   AUDIT_BASIS.TELEGRAM_UI,
 ] as const
+
+/**
+ * A moderation action as an audit event. When the bot reports it, it was done by the Telegram user the bot names, not
+ * by the bot; automatic actions and changes made in Telegram's UI have no such user and stay the bot's.
+ */
+function moderationNote(
+  action: {
+    type: TAuditType
+    targetId: number
+    groupId: number | null
+    until: Date | null
+    reason?: string | null
+    actorTgId?: number | null
+    actorSub?: string | null
+    basis?: string
+    review?: TAuditReview | null
+  },
+  bot?: Actor
+): AuditNote {
+  const actor: AuditNote["actor"] =
+    bot && action.actorTgId != null
+      ? { kind: "telegram", tgId: action.actorTgId, sub: action.actorSub ?? null, client: bot.client }
+      : undefined
+  return {
+    action: `tg.moderation.${action.type}`,
+    actor,
+    target: { type: "tg.user", id: action.targetId },
+    after: { groupId: action.groupId, until: action.until, basis: action.basis, review: action.review ?? null },
+    reason: action.reason ?? null,
+  }
+}
 
 export default createTRPCRouter({
   /**
@@ -107,7 +140,13 @@ export default createTRPCRouter({
         if (revoked) await tx.delete(AUDIT_LOG).where(revoked)
         return row
       })
-      if (inserted) return { id: inserted.id, duplicate: false }
+      if (inserted) {
+        ctx.audit.set(
+          moderationNote({ ...input, actorTgId: input.actorTelegramId, actorSub: subject?.sub ?? null, review }, actor)
+        )
+        return { id: inserted.id, duplicate: false }
+      }
+      ctx.audit.skip()
 
       const [existing] = await DB.select({ id: AUDIT_LOG.id })
         .from(AUDIT_LOG)

@@ -204,6 +204,13 @@
       "when": 1792682679485,
       "tag": "0028_idp_phase6_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793124547175,
+      "tag": "0029_audit_events",
+      "breakpoints": true
     }
   ]
 }

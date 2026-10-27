@@ -75,6 +75,8 @@ vi.mock("@/db", async () => {
   }
 })
 vi.mock("@/server", () => ({ WSS: {} }))
+const audited = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("@/audit/store", () => ({ writeAuditEvent: async (event: Record<string, unknown>) => audited.push(event) }))
 
 let appRouter: typeof import("@/routers").appRouter
 
@@ -375,6 +377,7 @@ describe("tg.auditLog.record", () => {
     db.deleted = []
     db.conflict = false
     db.rows = {}
+    audited.length = 0
   })
 
   it("stores the actor's subject and the executing client", async () => {
@@ -402,6 +405,31 @@ describe("tg.auditLog.record", () => {
     db.conflict = true
     db.rows = { tg_audit_log: [{ id: 41 }] }
     expect(await record(access(true, ["usr_10"]), {})).toEqual({ id: 41, duplicate: true })
+    expect(audited).toEqual([])
+  })
+
+  it("adds the action to the audit log as done by the moderator, through the bot", async () => {
+    await record(access(true, ["usr_10"]), { reason: "spam" })
+    expect(audited).toEqual([
+      expect.objectContaining({
+        action: "tg.moderation.ban",
+        actorKind: "telegram",
+        actorTgId: 10,
+        actorSub: "usr_10",
+        actorClient: "telegram-bot",
+        targetType: "tg.user",
+        targetId: "777",
+        reason: "spam",
+        outcome: "success",
+        after: { groupId: -100, until: null, basis: "idp_permission", review: null },
+      }),
+    ])
+    expect(audited[0]?.input).toMatchObject({ idempotencyKey: "(hidden)", targetId: 777 })
+  })
+
+  it("leaves automatic actions to the bot", async () => {
+    await record(access(true, []), { basis: "automatic", actorTelegramId: null })
+    expect(audited[0]).toMatchObject({ actorKind: "service", actorTgId: null, actorClient: "telegram-bot" })
   })
 
   it("deletes the records of the measures a revocation lifts", async () => {
@@ -421,5 +449,81 @@ describe("tg.auditLog.record", () => {
 
   it("needs an actor unless the action was automatic or made in Telegram's UI", async () => {
     await expect(record(access(true, []), { actorTelegramId: null })).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+})
+
+describe("audit log", () => {
+  const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: "5" }
+  const caller = (permissions: string[], legacyAnonymous: "allow" | "deny" = "allow", token = true) =>
+    appRouter.createCaller({
+      auth: token ? { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) } : undefined,
+      legacyAnonymous,
+      access: {
+        has: (_actor, permission) => permissions.includes(permission),
+        current: () => null,
+        subjectBySub: () => undefined,
+        subjectByTelegramId: () => undefined,
+        status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+      },
+    })
+
+  beforeEach(() => {
+    db.inserted = []
+    db.rows = {}
+    audited.length = 0
+  })
+
+  it("is readable only with audit:read", () => {
+    const meta = procedures().find(([name]) => name === "audit.list")?.[1]._def.meta
+    expect(meta?.policy).toEqual({ user: { scope: "backend:admin", permission: "audit:read" } })
+  })
+
+  it("refuses anonymous readers outside development", async () => {
+    await expect(appRouter.createCaller({}).audit.list({})).rejects.toMatchObject({ code: "UNAUTHORIZED" })
+  })
+
+  it("records a denied mutation with the caller and the input", async () => {
+    await expect(caller([]).web.faqs.deleteFaqs({ id: 3 })).rejects.toMatchObject({ code: "FORBIDDEN" })
+    expect(audited).toEqual([
+      expect.objectContaining({
+        action: "web.faqs.deleteFaqs",
+        actorKind: "user",
+        actorSub: "usr_admin",
+        actorTgId: 5,
+        actorClient: "admin-dashboard",
+        outcome: "denied",
+        error: "Missing permission",
+        input: { id: 3 },
+        targetType: null,
+      }),
+    ])
+  })
+
+  it("records a returned error as a failure, with what the handler adds", async () => {
+    db.rows = { tg_grants: [{ telegramUserId: 456, validUntil: new Date(Date.now() + 3_600_000) }] }
+    const since = new Date()
+    const until = new Date(Date.now() + 7_200_000)
+    expect(
+      await caller(["tg:grants:manage"]).tg.grants.create({ userId: 456, since, until, reason: "exam week" })
+    ).toEqual({ success: false, error: "ALREADY_EXISTING" })
+    expect(audited).toEqual([
+      expect.objectContaining({
+        action: "tg.grants.create",
+        outcome: "failure",
+        error: "ALREADY_EXISTING",
+        targetType: "tg.user",
+        targetId: "456",
+        reason: "exam week",
+        after: { validSince: since.toISOString(), validUntil: until.toISOString() },
+      }),
+    ])
+  })
+
+  it("does not record calls refused before the caller is known, nor queries", async () => {
+    await expect(caller([], "deny", false).web.faqs.deleteFaqs({ id: 3 })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    })
+    await caller(["admin:access"]).me.access()
+    expect(audited).toEqual([])
   })
 })

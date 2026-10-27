@@ -50,10 +50,12 @@ export default createTRPCRouter({
     .output(z.object({ error: z.nullable(z.string()), notificationSent: z.nullable(z.boolean()) }))
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
+      ctx.audit.set({ target: { type: "azure.member", id: input.userId }, after: { assocNumber: input.assocNumber } })
       try {
         const changed = await serializeMemberWrite(async () => {
           const member = await currentMember(input.userId)
           if (!member) return { error: "This member no longer exists in the directory." }
+          ctx.audit.set({ before: { assocNumber: member.employeeId } })
           if (member.employeeId === input.assocNumber.toString())
             return { error: `The member already has number ${input.assocNumber}.` }
 
@@ -140,6 +142,8 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
+      const name = `${input.firstName} ${input.lastName}`
+      ctx.audit.set({ target: { type: "azure.member", id: input.assocNumber, label: name } })
       const localPart = mailboxLocalPart(input.firstName, input.lastName, input.mailbox)
       if (localPart === null) return { error: "This name cannot form a standard address: choose a custom one." }
       const mail = `${localPart}@${MAIL_DOMAIN}`
@@ -179,6 +183,10 @@ export default createTRPCRouter({
         if (created.error !== null) return { error: created.error }
         const { member } = created
         logger.info({ by, memberId: member.id, assocNumber: input.assocNumber }, "[AZURE] member created")
+        ctx.audit.set({
+          target: { type: "azure.member", id: member.id, label: name },
+          after: { id: member.id, email: member.mail, assocNumber: input.assocNumber },
+        })
 
         let mailOk = false
         try {

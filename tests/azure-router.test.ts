@@ -6,6 +6,9 @@ const mailer = vi.hoisted(() => ({
   sendWelcomeEmail: vi.fn().mockResolvedValue(true),
   sendMemberNumberChangedEmail: vi.fn().mockResolvedValue(true),
 }))
+const audited = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("@/audit/store", () => ({ writeAuditEvent: async (event: Record<string, unknown>) => audited.push(event) }))
+
 const logger = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }))
 
 vi.mock("@/emails/mailer", () => mailer)
@@ -122,6 +125,15 @@ describe("Azure tRPC routes without credentials", () => {
       displayName: "Katherine Johnson",
       employeeId: "2043",
       isMember: true,
+    })
+    expect(audited.at(-1)).toMatchObject({
+      action: "members.create",
+      actorKind: "user",
+      outcome: "success",
+      targetType: "azure.member",
+      targetId: result.id,
+      targetLabel: "Katherine Johnson",
+      after: { id: result.id, email: "katherine.johnson@polinetwork.org", assocNumber: 2043 },
     })
   })
 

@@ -99,6 +99,7 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.association", id: res.id, label: res.name }, after: res })
       return formatAssociation(res)
     }),
 
@@ -120,6 +121,7 @@ export default createTRPCRouter({
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
 
+      const [before] = await DB.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1)
       const [res] = await DB.update(ASSOCIATIONS)
         .set({
           name,
@@ -131,6 +133,11 @@ export default createTRPCRouter({
         .where(eq(ASSOCIATIONS.id, id))
         .returning()
 
+      ctx.audit.set({
+        target: { type: "web.association", id, label: res?.name ?? before?.name },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return formatAssociation(res)
     }),
@@ -146,6 +153,7 @@ export default createTRPCRouter({
       const { id, links } = input
       const { email, website, facebook, instagram, tiktok, x, youtube, telegram, linkedin, spotify } = links
 
+      const [before] = await DB.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1)
       const [res] = await DB.update(ASSOCIATIONS)
         .set({
           email,
@@ -163,6 +171,11 @@ export default createTRPCRouter({
         .where(eq(ASSOCIATIONS.id, id))
         .returning()
 
+      ctx.audit.set({
+        target: { type: "web.association", id, label: res?.name ?? before?.name },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return formatAssociation(res)
     }),
@@ -173,9 +186,10 @@ export default createTRPCRouter({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       const deleted = await DB.delete(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).returning()
+      ctx.audit.set({ target: { type: "web.association", id, label: deleted[0]?.name }, before: deleted[0] })
 
       if (deleted.length === 0) return { error: "NOT_FOUND" }
       return { error: null }
