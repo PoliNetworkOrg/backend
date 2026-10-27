@@ -1,10 +1,12 @@
 import { getAzureClient } from "@/azure/client"
 import { azureCredentials } from "@/azure/config"
 import { DB } from "@/db"
-import { sendSignatureRequestEmail, sendSignedDocumentEmail } from "@/emails/mailer"
+import { sendRequestUpdateEmail, sendSignatureRequestEmail, sendSignedDocumentEmail } from "@/emails/mailer"
 import { env } from "@/env"
 import { idp } from "@/idp"
 import { logger } from "@/logger"
+import { eligibleAtCommit, receiptEligibility, receiptVisibility } from "@/people"
+import { completeReceiptSignature, guardReceiptSignature } from "@/people/store-pg"
 import { createGraphDrive } from "./drive/graph"
 import { createMockDrive } from "./drive/mock"
 import { type Access, type AccessCatalog, createEsignService } from "./service"
@@ -56,10 +58,19 @@ function catalog(): AccessCatalog {
 }
 
 export const esign = createEsignService({
-  store: createPgStore(DB),
+  store: createPgStore(DB, {
+    beforeSignature: (tx, commit) => guardReceiptSignature(tx, commit, eligibleAtCommit),
+    afterSignature: completeReceiptSignature,
+  }),
+  receiptEligible: receiptEligibility,
+  receiptCanView: receiptVisibility,
   directory: idp?.directory ?? undefined,
   drives: resolveDrives(),
-  mailer: { signatureRequest: sendSignatureRequestEmail, signedDocument: sendSignedDocumentEmail },
+  mailer: {
+    signatureRequest: sendSignatureRequestEmail,
+    signedDocument: sendSignedDocumentEmail,
+    requestUpdate: sendRequestUpdateEmail,
+  },
   logger,
   dashboardUrl: env.ESIGN_DASHBOARD_URL.replace(/\/$/, ""),
   allowTestCertificates: env.ESIGN_ALLOW_TEST_CERTIFICATES,

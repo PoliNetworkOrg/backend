@@ -22,7 +22,9 @@ const failBody = z.object({ code: z.string().max(60), message: z.string().max(50
 
 /**
  * The sign agent's endpoints, mounted at `/esign/agent` and reached through the dashboard's proxy. The ticket in
- * the path is the only credential: a single-use, ten-minute capability for one signature.
+ * the path is the only credential: a single-use, ten-minute capability for one signature. The proxy passes on the
+ * agent's `User-Agent: PoliNetwork-eSign/<version>` (`PoliNetwork-Sign-Agent/<version>` before 0.2.0), which loading
+ * a job and preparing a signature check.
  */
 export function agentRoutes(service: EsignService) {
   const app = new Hono()
@@ -47,10 +49,20 @@ export function agentRoutes(service: EsignService) {
     return result.data
   }
 
-  app.get("/jobs/:ticket", async (c) => c.json({ job: await service.agentJob(c.req.param("ticket")) }))
+  app.get("/jobs/:ticket", async (c) =>
+    c.json({ job: await service.agentJob(c.req.param("ticket"), c.req.header("user-agent") ?? null) })
+  )
   app.post("/jobs/:ticket/prepare", async (c) => {
     const body = await parse(prepareBody, c.req.json())
-    return c.json(await service.agentPrepare(c.req.param("ticket"), body.certificate, body.chain, body.protocol ?? 1))
+    return c.json(
+      await service.agentPrepare(
+        c.req.param("ticket"),
+        body.certificate,
+        body.chain,
+        body.protocol ?? 1,
+        c.req.header("user-agent") ?? null
+      )
+    )
   })
   app.post("/jobs/:ticket/complete", async (c) => {
     const body = await parse(completeBody, c.req.json())

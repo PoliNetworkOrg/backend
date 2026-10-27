@@ -1,9 +1,8 @@
-import { TRPCError } from "@trpc/server"
 import { and, eq, exists, ilike, inArray, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { describeActor } from "@/idp/actor-info"
-import { botReadOrDashboard, dashboard, SCOPE } from "@/idp/policies"
+import { botReadOrDashboard, dashboard, SCOPE, seesHiddenGroups } from "@/idp/policies"
 import { logger } from "@/logger"
 import { WSS } from "@/server"
 import { createTRPCRouter, policy } from "@/trpc"
@@ -82,8 +81,7 @@ export default createTRPCRouter({
         if (queryWhere) conditions.push(queryWhere) // or(...) returns undefined? idk
       }
 
-      // Hidden groups are dashboard data (RFC v3 §8); legacy callers keep the old behaviour.
-      const showHidden = input.showHidden && (ctx.actor === null || ctx.actor.kind === "user")
+      const showHidden = input.showHidden && seesHiddenGroups(ctx.actor)
       if (showHidden === false) {
         conditions.push(not(GROUPS.hide))
       }
@@ -256,18 +254,15 @@ export default createTRPCRouter({
       return rows.length === 1
     }),
 
-  leaveChat: policy(dashboard("tg:groups:manage"))
+  /** The performer is the token's user. */
+  leaveChat: policy(dashboard("tg:groups:manage"), { tokenOnly: true })
     .input(
       z.object({
         chatId: z.number(),
-        /** Legacy callers only; token callers are taken from the token. */
-        performerId: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      if (!ctx.actor && input.performerId === undefined)
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Missing performerId" })
-      const performer = await describeActor(ctx.actor, input.performerId)
+      const performer = await describeActor(ctx.actor)
       const [group] = await DB.select().from(GROUPS).where(eq(GROUPS.telegramId, input.chatId)).limit(1)
       ctx.audit.set({ target: { type: "tg.group", id: input.chatId, label: group?.title }, before: group })
       const left = await WSS.leaveChat({

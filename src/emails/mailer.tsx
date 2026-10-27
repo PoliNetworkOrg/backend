@@ -1,12 +1,14 @@
 import { render } from "@react-email/components"
 import { createTestAccount, createTransport, getTestMessageUrl } from "nodemailer"
 import type { JSX } from "react"
-import { sendEmail as azureSendEmail, type EmailAttachment } from "@/azure/functions/emails"
+import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } from "@/azure/functions/emails"
 import { env } from "@/env"
+import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
-import OtpEmail from "./templates/otp"
+import MemberNumberChanged from "./templates/member-number-changed"
+import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
-import SignedDocumentEmail from "./templates/signed-document"
+import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
 import Welcome from "./templates/welcome"
 
 const makeSubject = (subject: string) => (env.NODE_ENV === "development" ? `[DEV] ${subject}` : subject)
@@ -26,11 +28,13 @@ async function devSendMail(
   to: string | string[],
   subject: string,
   component: JSX.Element,
-  attachments: EmailAttachment[] = []
+  attachments: EmailAttachment[] = [],
+  options: EmailOptions = {}
 ) {
   const html = await render(component)
   const res = await transporter.sendMail({
     to,
+    replyTo: options.replyTo,
     subject,
     html,
     attachments: attachments.map((a) => ({ ...a, content: Buffer.from(a.content) })),
@@ -40,11 +44,6 @@ async function devSendMail(
 }
 
 const sendEmail = env.NODE_ENV === "development" && env.USE_DEV_MAILER ? devSendMail : azureSendEmail
-
-export async function sendLoginOtpEmail(toAddress: string, otp: string, expiresInMinutes?: number) {
-  const subject = makeSubject("Your login code for PoliNetwork")
-  return sendEmail(toAddress, subject, <OtpEmail otp={otp} expiresInMinutes={expiresInMinutes} />)
-}
 
 export async function sendWelcomeEmail(
   toAddress: string,
@@ -64,27 +63,87 @@ export async function sendWelcomeEmail(
   )
 }
 
+export async function sendMemberNumberChangedEmail(
+  toAddress: string,
+  memberInfo: {
+    firstName: string | null
+    assocNumber: number
+    previousAssocNumber: string | null
+    email: string | null
+  }
+) {
+  const subject = makeSubject("Your PoliNetwork member number has changed")
+  return sendEmail(
+    toAddress,
+    subject,
+    <MemberNumberChanged
+      firstName={memberInfo.firstName}
+      assocNum={memberInfo.assocNumber}
+      previousAssocNum={memberInfo.previousAssocNumber}
+      email={memberInfo.email}
+    />
+  )
+}
+
 export async function sendSignatureRequestEmail(
   toAddress: string,
-  props: { signerName: string; requestedBy: string; title: string; role: string | null; url: string }
+  props: {
+    signerName: string
+    requestedBy: string
+    title: string
+    role: string | null
+    ordered: boolean
+    url: string
+    setupUrl: string
+  }
 ) {
   return sendEmail(toAddress, makeSubject(`Signature needed: ${props.title}`), <SignatureRequestEmail {...props} />)
 }
 
+export async function sendRequestUpdateEmail(toAddress: string, props: RequestUpdate) {
+  return sendEmail(toAddress, makeSubject(requestUpdateSubject(props)), <RequestUpdateEmail {...props} />)
+}
+
+/** In Italian: it goes to offices and people outside PoliNetwork. Replies reach whoever sent the request. */
 export async function sendSignedDocumentEmail(
   to: string[],
-  props: {
-    title: string
-    signers: { name: string; role: string | null }[]
-    message: string | null
-    link: string | null
-  },
+  props: SignedDocumentProps,
   attachment: EmailAttachment | null
 ) {
+  const { sentBy } = props
   return sendEmail(
     to,
-    makeSubject(`Signed: ${props.title}`),
+    makeSubject(`Documento firmato: ${props.title}`),
     <SignedDocumentEmail {...props} />,
-    attachment ? [attachment] : []
+    attachment ? [attachment] : [],
+    sentBy?.email ? { replyTo: { name: sentBy.name, address: sentBy.email } } : {}
   )
+}
+
+/** People retains the provider's error and records a stable Message-ID for delivery reconciliation. */
+export async function sendPeopleEmail(input: {
+  id: string
+  to: string
+  subject: string
+  text: string
+  attachment: { fileName: string; contentType: string; content: Uint8Array } | null
+}) {
+  const component = <div style={{ whiteSpace: "pre-wrap" }}>{input.text}</div>
+  const attachments = input.attachment
+    ? [
+        {
+          filename: input.attachment.fileName,
+          contentType: input.attachment.contentType,
+          content: input.attachment.content,
+        },
+      ]
+    : []
+  if (env.NODE_ENV === "development" && env.USE_DEV_MAILER) {
+    await devSendMail(input.to, input.subject, component, attachments)
+  } else {
+    await azureSendEmail(input.to, input.subject, component, attachments, {
+      throwOnError: true,
+      messageId: `<people-${Buffer.from(input.id).toString("base64url")}@polinetwork.org>`,
+    })
+  }
 }

@@ -6,7 +6,6 @@ import type { RequestAuth } from "@/idp/auth"
 vi.hoisted(() => {
   Object.assign(process.env, {
     NODE_ENV: "test",
-    BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
     ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     DB_HOST: "localhost",
     DB_USER: "postgres",
@@ -14,7 +13,7 @@ vi.hoisted(() => {
   })
 })
 
-import { type Context, createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { type Context, createTRPCRouter, policy } from "@/trpc"
 
 const router = createTRPCRouter({
   lookup: policy({
@@ -24,15 +23,16 @@ const router = createTRPCRouter({
   }).query(({ ctx }) => ({ actor: ctx.actor })),
   dashboardOnly: policy({ user: { scope: "backend:admin", permission: "admin:access" } }).query(() => "ok"),
   multiScope: policy({ service: { scope: ["backend:tg:read", "backend:public:read"] } }).query(() => "ok"),
-  newProcedure: policy({ service: { scope: "backend:tg:read" } }, { tokenOnly: true }).query(() => "ok"),
-  old: legacyProcedure.query(({ ctx }) => ({ actor: ctx.actor })),
+  tokenOnly: policy({ service: { scope: "backend:tg:read" } }, { tokenOnly: true }).query(({ ctx }) => ({
+    client: ctx.actor.client,
+  })),
 })
 
 const bot: Actor = { kind: "service", client: "telegram-bot" }
 const moderator: Actor = { kind: "telegram", client: "telegram-bot", telegramId: "123", sub: "usr_mod" }
 const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
 
-function caller(auth: RequestAuth, permissions: string[] = [], legacyAnonymous: "allow" | "deny" = "allow") {
+function caller(auth: RequestAuth, permissions: string[] = [], legacyAnonymous?: "allow" | "deny") {
   const ctx: Context = {
     auth,
     legacyAnonymous,
@@ -55,28 +55,32 @@ const code = (promise: Promise<unknown>) =>
   )
 
 describe("policy", () => {
-  it("runs anonymous calls on the legacy path while allowed, and refuses them otherwise", async () => {
-    expect(await caller({ kind: "anonymous" }).lookup()).toEqual({ actor: null })
-    expect(await caller({ kind: "anonymous" }).old()).toEqual({ actor: null })
+  it("refuses anonymous calls unless LEGACY_ANONYMOUS allows them", async () => {
+    expect(await code(caller({ kind: "anonymous" }).lookup())).toBe("UNAUTHORIZED")
     expect(await code(caller({ kind: "anonymous" }, [], "deny").lookup())).toBe("UNAUTHORIZED")
-    expect(await code(caller({ kind: "anonymous" }).newProcedure())).toBe("UNAUTHORIZED")
+    expect(await caller({ kind: "anonymous" }, [], "allow").lookup()).toEqual({ actor: null })
+  })
+
+  it("refuses anonymous calls to token-only procedures even while allowed", async () => {
+    expect(await code(caller({ kind: "anonymous" }, [], "allow").tokenOnly())).toBe("UNAUTHORIZED")
   })
 
   it("treats a direct caller without auth as anonymous", async () => {
-    expect(await router.createCaller({}).old()).toEqual({ actor: null })
+    expect(await code(router.createCaller({}).lookup())).toBe("UNAUTHORIZED")
+    expect(await router.createCaller({ legacyAnonymous: "allow" }).lookup()).toEqual({ actor: null })
   })
 
   it("passes on authentication rejections", async () => {
     expect(await code(caller({ kind: "rejected", status: 401, reason: "bad" }).lookup())).toBe("UNAUTHORIZED")
     expect(await code(caller({ kind: "rejected", status: 403, reason: "actor" }).lookup())).toBe("FORBIDDEN")
-    expect(await code(caller({ kind: "rejected", status: 503, reason: "keys" }).old())).toBe("SERVICE_UNAVAILABLE")
+    expect(await code(caller({ kind: "rejected", status: 503, reason: "keys" }).lookup())).toBe("SERVICE_UNAVAILABLE")
   })
 
   it("authorizes services by scope alone and hands the actor to the handler", async () => {
     expect(await caller(token(bot, ["backend:tg:read"])).lookup()).toEqual({ actor: bot })
     expect(await code(caller(token(bot, ["backend:tg:ingest"])).lookup())).toBe("FORBIDDEN")
     expect(await caller(token(bot, ["backend:public:read"])).multiScope()).toBe("ok")
-    expect(await caller(token(bot, ["backend:tg:read"])).newProcedure()).toBe("ok")
+    expect(await caller(token(bot, ["backend:tg:read"])).tokenOnly()).toEqual({ client: "telegram-bot" })
   })
 
   it("requires both the scope and the person's permission", async () => {
@@ -94,9 +98,5 @@ describe("policy", () => {
   it("denies actor kinds a procedure does not list", async () => {
     expect(await code(caller(token(bot, ["backend:admin"])).dashboardOnly())).toBe("FORBIDDEN")
     expect(await code(caller(token(moderator, ["backend:admin"]), ["admin:access"]).dashboardOnly())).toBe("FORBIDDEN")
-  })
-
-  it("keeps legacy procedures away from token callers", async () => {
-    expect(await code(caller(token(admin, ["backend:admin"]), ["admin:access"]).old())).toBe("FORBIDDEN")
   })
 })

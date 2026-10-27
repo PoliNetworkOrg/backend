@@ -1,9 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { and, eq, gt, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
-import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
-import type { TUserRole } from "@/db/schema/tg/permissions"
 import { describeActor } from "@/idp/actor-info"
 import { ACT_AS_SCOPE } from "@/idp/auth"
 import { botReadOrDashboard, dashboard } from "@/idp/policies"
@@ -14,14 +12,6 @@ import { activeGrantByUser, type Grant, listGrants } from "@/utils/grants"
 import { decryptUser } from "@/utils/users"
 
 const s = SCHEMA.TG
-
-/** Legacy path only: token callers need `tg:grants:manage` instead. */
-const CAN_MANAGE_GRANTS: TUserRole[] = [USER_ROLE.PRESIDENT, USER_ROLE.OWNER, USER_ROLE.DIRETTIVO] as const
-
-async function legacyCanManageGrants(telegramId: number) {
-  const q = await DB.select().from(s.permissions).where(eq(s.permissions.userId, telegramId)).limit(1)
-  return q.length === 1 && q[0].roles.some((role) => CAN_MANAGE_GRANTS.includes(role))
-}
 
 async function withUsers(grants: Grant[]) {
   const ids = [...new Set(grants.map((grant) => grant.userId))]
@@ -43,9 +33,9 @@ export default createTRPCRouter({
         isGranted: z.boolean(),
         grant: z.nullable(
           z.object({
-            /** Telegram ID of a legacy grantor; null for grants made through the IdP. */
-            grantedBy: z.number().nullable(),
-            grantedBySub: z.string().nullable(),
+            /** @deprecated Always null: grants are made by IdP subjects. Use `grantedBySub`. */
+            grantedBy: z.null(),
+            grantedBySub: z.string(),
             validSince: z.date(),
             validUntil: z.date(),
           })
@@ -60,13 +50,14 @@ export default createTRPCRouter({
       return { isGranted: true, grant: { grantedBy, grantedBySub, validSince, validUntil } }
     }),
 
-  /** Escalating write: dashboard users only, never the bot acting for someone (RFC v3 §8.1). */
-  create: policy(dashboard("tg:grants:manage"))
+  /**
+   * Escalating write: dashboard users only, never the bot acting for someone (RFC v3 §8.1). The
+   * grantor is the token's user.
+   */
+  create: policy(dashboard("tg:grants:manage"), { tokenOnly: true })
     .input(
       z.object({
         userId: z.number(),
-        /** Legacy callers only; token callers are taken from the token. */
-        adderId: z.number().optional(),
         since: z.date(),
         until: z.date(),
         reason: z.string().optional(),
@@ -92,39 +83,25 @@ export default createTRPCRouter({
         after: { validSince: input.since, validUntil: input.until },
         reason: input.reason,
       })
-      if (actor && actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
-      if (!actor && input.adderId === undefined)
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Missing adderId" })
+      if (actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
 
       try {
-        if (!actor && !(await legacyCanManageGrants(input.adderId as number)))
-          return { success: false, error: "UNAUTHORIZED" }
-        if (actor && input.since >= input.until) return { success: false, error: "INVALID_PERIOD" }
+        if (input.since >= input.until) return { success: false, error: "INVALID_PERIOD" }
 
         if ((await activeGrantByUser([input.userId])).has(input.userId))
           return { success: false, error: "ALREADY_EXISTING" }
 
-        if (actor) {
-          await DB.insert(s.grantsV2).values({
-            telegramUserId: input.userId,
-            validSince: input.since,
-            validUntil: input.until,
-            reason: input.reason,
-            grantedBySub: actor.sub,
-            grantedViaClient: actor.client,
-          })
-        } else {
-          await DB.insert(s.grants).values({
-            userId: input.userId,
-            grantedBy: input.adderId as number,
-            validUntil: input.until,
-            validSince: input.since,
-            reason: input.reason,
-          })
-        }
+        await DB.insert(s.grants).values({
+          telegramUserId: input.userId,
+          validSince: input.since,
+          validUntil: input.until,
+          reason: input.reason,
+          grantedBySub: actor.sub,
+          grantedViaClient: actor.client,
+        })
 
         if (input.sendTgLog) {
-          const author = await describeActor(actor, input.adderId)
+          const author = await describeActor(actor)
           await WSS.logGrantCreate({
             userId: input.userId,
             adminId: author.telegramId ? Number(author.telegramId) : null,
@@ -142,16 +119,20 @@ export default createTRPCRouter({
       }
     }),
 
-  /** De-escalating write: the bot's 🛑 button acting for a Telegram user, or the dashboard. */
-  interrupt: policy({
-    telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
-    ...dashboard("tg:grants:manage"),
-  })
+  /**
+   * De-escalating write: the bot's 🛑 button acting for a Telegram user, or the dashboard. Who
+   * interrupted is the token's actor.
+   */
+  interrupt: policy(
+    {
+      telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
+      ...dashboard("tg:grants:manage"),
+    },
+    { tokenOnly: true }
+  )
     .input(
       z.object({
         userId: z.number(),
-        /** Legacy callers only; token callers are taken from the token. */
-        interruptedById: z.number().optional(),
         sendTgLog: z.boolean().default(false),
       })
     )
@@ -170,58 +151,31 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
       ctx.audit.set({ target: { type: "tg.user", id: input.userId } })
-      if (actor?.kind === "service") throw new TRPCError({ code: "FORBIDDEN" })
-      if (!actor && input.interruptedById === undefined)
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Missing interruptedById" })
+      if (actor.kind === "service") throw new TRPCError({ code: "FORBIDDEN" })
 
       try {
-        if (!actor && !(await legacyCanManageGrants(input.interruptedById as number)))
-          return { success: false, error: "UNAUTHORIZED" }
-
         const now = new Date()
-        const interruptedByTgId = actor ? (actor.telegramId === null ? null : Number(actor.telegramId)) : null
-        // Ends every unexpired grant of the user, in both tables.
-        const [legacy, current] = await DB.transaction(async (tx) =>
-          Promise.all([
-            tx
-              .update(s.grants)
-              .set(actor ? { interruptedAt: now } : { interruptedBy: input.interruptedById, interruptedAt: now })
-              .where(
-                and(
-                  eq(s.grants.userId, input.userId),
-                  gt(s.grants.validUntil, now),
-                  isNull(s.grants.interruptedBy),
-                  isNull(s.grants.interruptedAt)
-                )
-              )
-              .returning(),
-            tx
-              .update(s.grantsV2)
-              .set({
-                interruptedAt: now,
-                interruptedBySub: actor?.sub ?? null,
-                interruptedByTgId: actor ? interruptedByTgId : (input.interruptedById as number),
-              })
-              .where(
-                and(
-                  eq(s.grantsV2.telegramUserId, input.userId),
-                  gt(s.grantsV2.validUntil, now),
-                  isNull(s.grantsV2.interruptedAt)
-                )
-              )
-              .returning(),
-          ])
-        )
+        // Ends every unexpired grant of the user.
+        const interrupted = await DB.update(s.grants)
+          .set({
+            interruptedAt: now,
+            interruptedBySub: actor.sub,
+            interruptedByTgId: actor.telegramId === null ? null : Number(actor.telegramId),
+          })
+          .where(
+            and(eq(s.grants.telegramUserId, input.userId), gt(s.grants.validUntil, now), isNull(s.grants.interruptedAt))
+          )
+          .returning()
 
-        ctx.audit.set({ after: [...legacy, ...current] })
-        if (legacy.length + current.length === 0)
+        ctx.audit.set({ after: interrupted })
+        if (interrupted.length === 0)
           return {
             success: false,
             error: "NOT_FOUND",
           }
 
         if (input.sendTgLog) {
-          const author = await describeActor(actor, input.interruptedById)
+          const author = await describeActor(actor)
           await WSS.logGrantInterrupt({
             userId: input.userId,
             adminId: author.telegramId ? Number(author.telegramId) : null,

@@ -21,10 +21,7 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check",
     "check:fix": "biome check --write --unsafe",
-    "seed:user": "bun ./scripts/seed-user.ts",
-    "seed:db": "bun ./scripts/seed-db.ts",
-    "idp:export": "bun ./scripts/idp-migration-export.ts",
-    "idp:reconcile": "bun ./scripts/idp-migration-reconcile.ts"
+    "seed:db": "bun ./scripts/seed-db.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",
@@ -34,6 +31,7 @@
     "@types/bun": "^1.3.6",
     "@types/nodemailer": "^7.0.5",
     "@types/react": "^19.2.2",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
     "drizzle-kit": "^0.31.4",
     "pino-pretty": "^13.1.3",
     "react-email": "5.2.5",
@@ -48,10 +46,7 @@
   "dependencies": {
     "@azure/identity": "^4.13.0",
     "@azure/storage-blob": "^12.31.0",
-    "@better-auth/drizzle-adapter": "1.5.5",
-    "@better-auth/passkey": "1.5.5",
     "@hono/trpc-server": "^0.4.2",
-    "@hono/zod-validator": "^0.7.6",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@polinetwork/auth-kit": "^1.2.0",
     "@react-email/components": "1.0.6",
@@ -59,9 +54,10 @@
     "@socket.io/devalue-parser": "^0.1.0",
     "@t3-oss/env-core": "^0.13.8",
     "@trpc/server": "11.5.1",
-    "better-auth": "1.5.5",
     "croner": "^9.1.0",
     "drizzle-orm": "^0.44.7",
+    "fast-xml-parser": "^5.11.2",
+    "fflate": "^0.8.3",
     "hono": "^4.11.6",
     "nanoid": "^5.1.6",
     "node-html-parser": "^7.0.2",

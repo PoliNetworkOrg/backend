@@ -1,5 +1,5 @@
 {
-  "id": "2538705f-3293-46b3-a123-4da1a2ddb48a",
+  "id": "4cd59385-7abd-4ec9-8509-a7aac8e688df",
   "prevId": "33542854-3513-411e-af76-254bf84afbaa",
   "version": "7",
   "dialect": "postgresql",
@@ -470,194 +470,6 @@
           "columns": [
             {
               "expression": "identifier",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.common_audit_events": {
-      "name": "common_audit_events",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigint",
-          "primaryKey": true,
-          "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "common_audit_events_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "9223372036854775807",
-            "cache": "1",
-            "cycle": false
-          }
-        },
-        "action": {
-          "name": "action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_kind": {
-          "name": "actor_kind",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_sub": {
-          "name": "actor_sub",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_tg_id": {
-          "name": "actor_tg_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "actor_client": {
-          "name": "actor_client",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target_type": {
-          "name": "target_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "target_label": {
-          "name": "target_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "input": {
-          "name": "input",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "before": {
-          "name": "before",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "after": {
-          "name": "after",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (3) with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "common_audit_events_action_idx": {
-          "name": "common_audit_events_action_idx",
-          "columns": [
-            {
-              "expression": "action",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "common_audit_events_actor_sub_idx": {
-          "name": "common_audit_events_actor_sub_idx",
-          "columns": [
-            {
-              "expression": "actor_sub",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "common_audit_events_actor_tg_id_idx": {
-          "name": "common_audit_events_actor_tg_id_idx",
-          "columns": [
-            {
-              "expression": "actor_tg_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "common_audit_events_target_idx": {
-          "name": "common_audit_events_target_idx",
-          "columns": [
-            {
-              "expression": "target_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "target_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3150,6 +2962,245 @@
         "web_faqs_creator_check": {
           "name": "web_faqs_creator_check",
           "value": "\"web_faqs\".\"created_by_id\" IS NOT NULL OR \"web_faqs\".\"created_by_sub\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.web_freshman_cards": {
+      "name": "web_freshman_cards",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "icon": {
+          "name": "icon",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "href": {
+          "name": "href",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_id": {
+          "name": "created_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by_id": {
+          "name": "modified_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_sub": {
+          "name": "created_by_sub",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by_sub": {
+          "name": "modified_by_sub",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "web_freshman_cards_created_by_id_tg_permissions_user_id_fk": {
+          "name": "web_freshman_cards_created_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_freshman_cards",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "created_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "web_freshman_cards_modified_by_id_tg_permissions_user_id_fk": {
+          "name": "web_freshman_cards_modified_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_freshman_cards",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "modified_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "web_freshman_cards_creator_check": {
+          "name": "web_freshman_cards_creator_check",
+          "value": "\"web_freshman_cards\".\"created_by_id\" IS NOT NULL OR \"web_freshman_cards\".\"created_by_sub\" IS NOT NULL"
+        },
+        "web_freshman_cards_slot_check": {
+          "name": "web_freshman_cards_slot_check",
+          "value": "\"web_freshman_cards\".\"id\" in ('featured-1', 'featured-2', 'guides-1', 'guides-2', 'guides-3', 'guides-4', 'guides-5', 'materials-1', 'tools-1', 'tools-2', 'telegram-1', 'telegram-2', 'telegram-3', 'telegram-4', 'telegram-5', 'telegram-6', 'telegram-7', 'telegram-8')"
+        },
+        "web_freshman_cards_icon_check": {
+          "name": "web_freshman_cards_icon_check",
+          "value": "\"web_freshman_cards\".\"icon\" in ('chart', 'monitor', 'book', 'map', 'news', 'money', 'folder', 'repeat', 'refresh', 'bell', 'user', 'users', 'cart', 'home')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.web_freshman_faqs": {
+      "name": "web_freshman_faqs",
+      "schema": "",
+      "columns": {
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "faq_id": {
+          "name": "faq_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_id": {
+          "name": "created_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by_id": {
+          "name": "modified_by_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_sub": {
+          "name": "created_by_sub",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modified_by_sub": {
+          "name": "modified_by_sub",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp (0) with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "web_freshman_faqs_faq_id_web_faqs_id_fk": {
+          "name": "web_freshman_faqs_faq_id_web_faqs_id_fk",
+          "tableFrom": "web_freshman_faqs",
+          "tableTo": "web_faqs",
+          "columnsFrom": [
+            "faq_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "web_freshman_faqs_created_by_id_tg_permissions_user_id_fk": {
+          "name": "web_freshman_faqs_created_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_freshman_faqs",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "created_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "web_freshman_faqs_modified_by_id_tg_permissions_user_id_fk": {
+          "name": "web_freshman_faqs_modified_by_id_tg_permissions_user_id_fk",
+          "tableFrom": "web_freshman_faqs",
+          "tableTo": "tg_permissions",
+          "columnsFrom": [
+            "modified_by_id"
+          ],
+          "columnsTo": [
+            "user_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "web_freshman_faqs_faq_id_unique": {
+          "name": "web_freshman_faqs_faq_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "faq_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "web_freshman_faqs_creator_check": {
+          "name": "web_freshman_faqs_creator_check",
+          "value": "\"web_freshman_faqs\".\"created_by_id\" IS NOT NULL OR \"web_freshman_faqs\".\"created_by_sub\" IS NOT NULL"
+        },
+        "web_freshman_faqs_position_check": {
+          "name": "web_freshman_faqs_position_check",
+          "value": "\"web_freshman_faqs\".\"position\" between 0 and 4"
         }
       },
       "isRLSEnabled": false

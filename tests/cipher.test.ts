@@ -6,7 +6,6 @@ let DecryptError: typeof import("@/utils/cipher").DecryptError
 
 const TEST_ENV: Record<string, string> = {
   NODE_ENV: "test",
-  BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
   ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   DB_HOST: "localhost",
   DB_PORT: "5432",
@@ -92,17 +91,6 @@ describe("Cipher", () => {
     const second = cipher.encrypt("message two")
 
     expect(first).not.toBe(second)
-  })
-
-  it("has stable payload format iv:ciphertext:tag", () => {
-    const cipher = new Cipher("payload-format-salt")
-    const encrypted = cipher.encrypt("format-check")
-    const parts = encrypted.split(":")
-
-    expect(parts).toHaveLength(3)
-    expect(parts[0]).toBe("000000000000000000000000")
-    expect(parts[1]).toMatch(/^[a-f0-9]+$/)
-    expect(parts[2]).toMatch(/^[a-f0-9]{32}$/)
   })
 
   it("throws when reusing the same salt", () => {

@@ -7,11 +7,19 @@ import { getAzureClient } from "../client"
 
 export type EmailAttachment = { filename: string; content: Uint8Array; contentType: string }
 
+/** Where replies go instead of the sender's mailbox. */
+export type EmailOptions = {
+  replyTo?: { name: string; address: string }
+  throwOnError?: boolean
+  messageId?: string
+}
+
 export async function sendEmail(
   to: string | string[],
   subject: string,
   component: JSX.Element,
-  attachments: EmailAttachment[] = []
+  attachments: EmailAttachment[] = [],
+  options: EmailOptions = {}
 ) {
   const html = await render(component)
   const text = toPlainText(html, {
@@ -26,9 +34,11 @@ export async function sendEmail(
   const mail = new MailComposer({
     from: sender,
     to,
+    replyTo: options.replyTo,
     subject,
     text,
     html,
+    messageId: options.messageId,
     attachments: attachments.map((a) => ({
       filename: a.filename,
       content: Buffer.from(a.content),
@@ -46,6 +56,7 @@ export async function sendEmail(
     return true
   } catch (error) {
     logger.error({ error }, "[Azure Graph API] Could not send email")
+    if (options.throwOnError) throw error
     return false
   }
 }

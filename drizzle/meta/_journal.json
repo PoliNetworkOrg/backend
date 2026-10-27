@@ -187,8 +187,29 @@
     {
       "idx": 26,
       "version": "7",
-      "when": 1792616705733,
-      "tag": "0026_audit_events",
+      "when": 1792449139688,
+      "tag": "0026_freshman_content",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792664842483,
+      "tag": "0027_people",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792682679485,
+      "tag": "0028_idp_phase6_cleanup",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793124547175,
+      "tag": "0029_audit_events",
       "breakpoints": true
     }
   ]

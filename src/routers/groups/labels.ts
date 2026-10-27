@@ -31,27 +31,23 @@ export default createTRPCRouter({
     return results
   }),
 
-  create: policy(dashboard("groups:labels:write"))
+  create: policy(dashboard("groups:labels:write"), { tokenOnly: true })
     .input(
       z.object({
         label,
         description: z.string().optional(),
         color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
-        // Legacy callers only; token callers are taken from the token.
-        createdBy: z.number().optional(),
-        updatedBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { label, description, color, createdBy } = input
-      const author = authorOf(ctx.actor, createdBy)
+      const { label, description, color } = input
+      const author = authorOf(ctx.actor)
 
       const result = await DB.insert(GROUP_LABELS)
         .values({
           label,
           description,
           color,
-          createdBy: author.id,
           createdBySub: author.sub,
         })
         .returning()
@@ -92,7 +88,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  modify: policy(dashboard("groups:labels:write"))
+  modify: policy(dashboard("groups:labels:write"), { tokenOnly: true })
     .input(
       z.object({
         label,
@@ -102,13 +98,11 @@ export default createTRPCRouter({
           .string()
           .regex(/^#[0-9A-Fa-f]{6}$/)
           .optional(),
-        // Legacy callers only; token callers are taken from the token.
-        updatedBy: z.number().optional(),
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const { label, newLabel, description, color, updatedBy } = input
-      const author = authorOf(ctx.actor, updatedBy)
+      const { label, newLabel, description, color } = input
+      const author = authorOf(ctx.actor)
 
       const [before] = await DB.select().from(GROUP_LABELS).where(eq(GROUP_LABELS.label, label)).limit(1)
       const result = await DB.update(GROUP_LABELS)
@@ -116,7 +110,7 @@ export default createTRPCRouter({
           label: newLabel,
           description,
           color,
-          updatedBy: author.id,
+          legacyModifiedByTgId: null,
           updatedBySub: author.sub,
           updatedAt: new Date(),
         })

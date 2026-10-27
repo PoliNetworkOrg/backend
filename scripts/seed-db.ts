@@ -1,11 +1,10 @@
 import { argv } from "bun"
 import { like, sql } from "drizzle-orm"
 import type { PgInsertValue, PgTable } from "drizzle-orm/pg-core"
-import { USER_ROLE } from "@/constants"
 import { DB, SCHEMA } from "@/db"
 import { ARRAY_AUDIT_TYPE, AUDIT_BASIS, AUDIT_REVIEW, AUDIT_TYPE } from "@/db/schema/tg/audit-log"
-import type { TUserRole } from "@/db/schema/tg/permissions"
 import { tgMessagesCipher } from "@/routers/tg/messages"
+import { defaultFreshmanCards } from "@/routers/web/freshman/seed"
 import { encryptUser } from "@/utils/users"
 
 const USERS_COUNT = 2000
@@ -109,12 +108,11 @@ if (tgHasData && force) {
   await DB.execute(sql`TRUNCATE TABLE tg_messages, tg_groups, tg_users CASCADE`)
 }
 
-const { userIds, groupIds, createdUserIds, createdGroupIds } = await seedTelegramActivity()
+const { userIds, groupIds, createdUserIds } = await seedTelegramActivity()
 
 /** Seeds each empty activity table, using retained users and groups for new messages. */
 async function seedTelegramActivity() {
   const createdUserIds = new Set<number>()
-  const createdGroupIds = new Set<number>()
   const [firstUser] = await DB.select().from(SCHEMA.TG.users).limit(1)
   if (!firstUser) {
     console.log(`SEED: generating ${USERS_COUNT} users`)
@@ -156,7 +154,6 @@ async function seedTelegramActivity() {
     }))
     for (const batch of chunk(groups, CHUNK_SIZE)) {
       await DB.insert(SCHEMA.TG.groups).values(batch)
-      for (const group of batch) createdGroupIds.add(group.telegramId)
     }
   } else {
     console.log("SEED: tg_groups already contains data, skipping")
@@ -195,12 +192,13 @@ async function seedTelegramActivity() {
     console.log("SEED: tg_messages already contains data, skipping")
   }
 
-  return { userIds, groupIds, createdUserIds, createdGroupIds }
+  return { userIds, groupIds, createdUserIds }
 }
 
 const CATEGORY_ROOT = "didattica"
 const FACET_LABELS = ["ita", "eng", "online", "campus-nord", "campus-sud"]
-const SEED_OWNER_ID = 1 // matches the admin app's AGENT_MODE synthetic session (telegramId: 1)
+/** IdP subject recorded as the author of seeded rows. */
+const SEED_SUB = "seed-owner"
 const WA_SEED_LINK_PATTERN = "https://chat.whatsapp.com/SEEDFAKE%"
 
 type CourseEntry = {
@@ -351,11 +349,6 @@ function labelsFor(target: LinkTarget): { categories: string[]; facets: string[]
   return { categories: [...categories], facets: [...facets], title }
 }
 
-console.log("SEED: ensuring seed-owner permissions row (matches AGENT_MODE's synthetic session)")
-await DB.insert(SCHEMA.TG.permissions)
-  .values({ userId: SEED_OWNER_ID, roles: [USER_ROLE.ADMIN, USER_ROLE.WEB], addedBy: SEED_OWNER_ID })
-  .onConflictDoNothing()
-
 console.log("SEED: creating didattica category + facet labels")
 const categoryLabelNames = new Set<string>([CATEGORY_ROOT])
 for (const entry of COURSE_ENTRIES) {
@@ -366,10 +359,10 @@ for (const entry of COURSE_ENTRIES) {
   }
 }
 await DB.insert(SCHEMA.COMMON.groupLabels)
-  .values([...categoryLabelNames].map((label) => ({ label, color: "#3b82f6", createdBy: SEED_OWNER_ID })))
+  .values([...categoryLabelNames].map((label) => ({ label, color: "#3b82f6", createdBySub: SEED_SUB })))
   .onConflictDoNothing()
 await DB.insert(SCHEMA.COMMON.groupLabels)
-  .values(FACET_LABELS.map((label) => ({ label, color: "#94a3b8", createdBy: SEED_OWNER_ID })))
+  .values(FACET_LABELS.map((label) => ({ label, color: "#94a3b8", createdBySub: SEED_SUB })))
   .onConflictDoNothing()
 
 const allLabels = await DB.select().from(SCHEMA.COMMON.groupLabels)
@@ -475,37 +468,9 @@ async function seedTable<T extends PgTable>(name: string, table: T, rows: () => 
   console.log(`SEED: ${name} → ${values.length} rows`)
 }
 
-const seedAuthor = { createdBy: SEED_OWNER_ID }
-const SEED_SUB = "seed-owner"
+const seedAuthor = { createdBySub: SEED_SUB }
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
-
-const STAFF: { userId: number; roles: TUserRole[] }[] = [
-  { userId: seededUserId(0), roles: [USER_ROLE.OWNER, USER_ROLE.ADMIN] },
-  { userId: seededUserId(1), roles: [USER_ROLE.PRESIDENT, USER_ROLE.DIRETTIVO] },
-  { userId: seededUserId(2), roles: [USER_ROLE.DIRETTIVO, USER_ROLE.HR] },
-  { userId: seededUserId(3), roles: [USER_ROLE.ADMIN] },
-  { userId: seededUserId(4), roles: [USER_ROLE.ADMIN, USER_ROLE.WEB] },
-  { userId: seededUserId(5), roles: [USER_ROLE.CREATOR] },
-  { userId: seededUserId(6), roles: [USER_ROLE.WEB] },
-]
-const newStaff = STAFF.filter((staff) => createdUserIds.has(staff.userId))
-if (newStaff.length) {
-  console.log("SEED: granting roles to newly seeded Telegram users")
-  await DB.insert(SCHEMA.TG.permissions)
-    .values(newStaff.map((s) => ({ ...s, addedBy: SEED_OWNER_ID })))
-    .onConflictDoNothing()
-}
-
-const bulkGroupId = (i: number) => -1_000_000_000_000 - i - 1
-const newGroupAdmins = STAFF.slice(3)
-  .flatMap((s, i) =>
-    [0, 1, 2].map((g) => ({ userId: s.userId, groupId: bulkGroupId(i * 3 + g), addedBy: SEED_OWNER_ID }))
-  )
-  .filter((admin) => createdUserIds.has(admin.userId) && createdGroupIds.has(admin.groupId))
-if (newGroupAdmins.length) {
-  await DB.insert(SCHEMA.TG.groupAdmins).values(newGroupAdmins).onConflictDoNothing()
-}
 
 await seedTable("web_projects", SCHEMA.WEB.projects, () =>
   [
@@ -704,6 +669,9 @@ const FAQ_CONTENT: {
   },
 ]
 
+// Clear featured references first when explicitly replacing the development FAQ catalog.
+if (force) await DB.delete(SCHEMA.WEB.freshmanFaqs)
+
 await seedTable("web_faq_categories", SCHEMA.WEB.faqCategories, () =>
   FAQ_CONTENT.map(({ titleIt, titleEn, icon }) => ({ titleIt, titleEn, icon, ...seedAuthor }))
 )
@@ -732,6 +700,19 @@ await seedTable("web_faqs", SCHEMA.WEB.faqs, () =>
     }))
   })
 )
+
+await seedTable("web_freshman_cards", SCHEMA.WEB.freshmanCards, () =>
+  defaultFreshmanCards.map((card) => ({ ...card, ...seedAuthor }))
+)
+const [featuredFaq] = await DB.select().from(SCHEMA.WEB.freshmanFaqs).limit(1)
+if (!featuredFaq) {
+  const catalog = await DB.select({ id: SCHEMA.WEB.faqs.id }).from(SCHEMA.WEB.faqs).orderBy(SCHEMA.WEB.faqs.id).limit(5)
+  if (catalog.length === 5) {
+    await DB.insert(SCHEMA.WEB.freshmanFaqs).values(
+      catalog.map((faq, position) => ({ position, faqId: faq.id, ...seedAuthor }))
+    )
+  } else console.warn("SEED: at least five FAQs are needed to initialize the Freshman selections")
+}
 
 await seedTable("web_guides_matricole", SCHEMA.WEB.guidesMatricole, () =>
   [
@@ -805,7 +786,7 @@ await seedTable("tg_audit_log", SCHEMA.TG.auditLog, () => {
   })
 })
 
-await seedTable("tg_grants_v2", SCHEMA.TG.grantsV2, () => {
+await seedTable("tg_grants", SCHEMA.TG.grants, () => {
   const now = Date.now()
   const grant = (i: number, sinceOffset: number, durationHours: number, interrupted = false) => ({
     telegramUserId: seededUserId(20 + i),

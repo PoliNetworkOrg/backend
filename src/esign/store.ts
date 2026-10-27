@@ -58,6 +58,8 @@ export type Signer = {
 }
 
 export type SigningRequest = {
+  /** Set only by the backend's persistent People receipt association. */
+  peopleReceipt?: { receiptId: string; number: string; year: string } | null
   id: string
   title: string
   status: RequestStatus
@@ -109,6 +111,9 @@ export type Job = {
   completedAt: Date | null
 }
 
+/** Why a job ended, stored in its error columns. */
+export type JobError = { code: string; message: string }
+
 export type NewJob = Pick<
   Job,
   "ticketHash" | "requestId" | "signerId" | "sub" | "baseVersion" | "places" | "step" | "expiresAt"
@@ -136,6 +141,9 @@ export type RequestFilter = {
 
 /** The signature commit: a new document version, the signer's and the job's new state, atomically. */
 export type SignatureCommit = {
+  /** Original CAdES envelope, retained by People; the eSign revision shows its encapsulated PDF. */
+  receiptEnvelope?: { content: Uint8Array; fileName: string }
+  receiptManual?: boolean
   jobId: string
   requestId: string
   baseVersion: number
@@ -190,20 +198,37 @@ export interface EsignStore {
   getRequest(id: string): Promise<SigningRequest | null>
   listRequests(filter: RequestFilter): Promise<SigningRequest[]>
   updateRequest(id: string, patch: Partial<Pick<SigningRequest, "delivery">>): Promise<void>
-  /** Cancels an in-progress request and its open jobs, atomically with signature commits. */
-  cancelRequest(id: string, event: NewEvent): Promise<"ok" | "conflict">
+  /**
+   * Cancels an in-progress request and its open jobs, atomically with signature commits. `jobError` tells the agent
+   * and the dashboard why the jobs ended.
+   */
+  cancelRequest(id: string, event: NewEvent, jobError: JobError): Promise<"ok" | "conflict">
   /**
    * Deletes a request with its documents, signers, jobs and events, unless it is in progress or its delivery is
    * pending, atomically with signature commits and delivery claims.
    */
   deleteRequest(id: string): Promise<"ok" | "conflict">
-  /** Records a pending signer's refusal, which ends the request, atomically with signature commits. */
-  declineRequest(id: string, signerId: string, reason: string | null, event: NewEvent): Promise<"ok" | "conflict">
+  /**
+   * Records a pending signer's refusal, which ends the request and cancels its open jobs with `jobError`, atomically
+   * with signature commits.
+   */
+  declineRequest(
+    id: string,
+    signerId: string,
+    reason: string | null,
+    event: NewEvent,
+    jobError: JobError
+  ): Promise<"ok" | "conflict">
   /**
    * Claims a completed request's delivery for one worker: succeeds when it is pending (or failed with `retry`) and no
    * other attempt started after `staleBefore`.
    */
   claimDelivery(id: string, at: Date, staleBefore: Date, retry: boolean): Promise<boolean>
+  /**
+   * Records the result of the delivery attempt that claimed it `at`, unless a later attempt has since taken over the
+   * claim; returns whether it did.
+   */
+  finishDelivery(id: string, at: Date, delivery: DeliveryJson): Promise<boolean>
   /** Completed requests whose delivery is pending and was not attempted after `staleBefore`. */
   pendingDeliveries(staleBefore: Date): Promise<string[]>
   updateSigner(id: string, patch: Partial<Pick<Signer, "status" | "declineReason" | "places">>): Promise<void>

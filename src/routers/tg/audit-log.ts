@@ -13,7 +13,8 @@ import {
   type TAuditType,
 } from "@/db/schema/tg/audit-log"
 import { dashboard, SCOPE } from "@/idp/policies"
-import { createTRPCRouter, legacyProcedure, policy } from "@/trpc"
+import { createTRPCRouter, policy } from "@/trpc"
+import { revokedMeasures } from "@/utils/audit-log"
 import { decryptUser } from "@/utils/users"
 
 const AUDIT_LOG = SCHEMA.TG.auditLog
@@ -69,26 +70,6 @@ function moderationNote(
 }
 
 export default createTRPCRouter({
-  /** Legacy path; replaced by `record`. */
-  create: legacyProcedure
-    .input(
-      z.object({
-        adminId: z.number(),
-        targetId: z.number(),
-        type: z.enum(ARRAY_AUDIT_TYPE),
-        groupId: z.number().nullable(), // NULL in "*_ALL" audit types
-        until: z.date().nullable(),
-        reason: z.string().optional(),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      const [row] = await DB.insert(AUDIT_LOG)
-        .values({ ...input, actorTgId: input.adminId, basis: AUDIT_BASIS.LEGACY })
-        .onConflictDoNothing()
-        .returning()
-      ctx.audit.set(moderationNote(row ?? input))
-    }),
-
   /**
    * Records a moderation action that already happened on Telegram (RFC v3 §9.2). It is never
    * rejected for the actor's permissions, which would only lose history: an `idp_permission`
@@ -120,7 +101,6 @@ export default createTRPCRouter({
     .output(z.object({ id: z.number(), duplicate: z.boolean() }))
     .mutation(async ({ input, ctx }) => {
       const { actor, access } = ctx
-      if (!actor) throw new TRPCError({ code: "UNAUTHORIZED" })
 
       const telegramId = input.actorTelegramId === null ? null : String(input.actorTelegramId)
       const subject = telegramId ? access?.subjectByTelegramId(telegramId) : undefined
@@ -135,23 +115,31 @@ export default createTRPCRouter({
         else if (!backed) review = AUDIT_REVIEW.PERMISSION_MISSING
       }
 
-      const [inserted] = await DB.insert(AUDIT_LOG)
-        .values({
-          adminId: input.actorTelegramId,
-          actorTgId: input.actorTelegramId,
-          actorSub: subject?.sub ?? null,
-          targetId: input.targetId,
-          groupId: input.groupId,
-          type: input.type,
-          until: input.until,
-          reason: input.reason,
-          client: actor.client,
-          basis: input.basis,
-          review,
-          idempotencyKey: input.idempotencyKey,
-        })
-        .onConflictDoNothing({ target: AUDIT_LOG.idempotencyKey })
-        .returning({ id: AUDIT_LOG.id })
+      // A revocation deletes the records of the measures it lifts, in the same transaction so a
+      // failed delete is retried with the record instead of being skipped as a duplicate.
+      const inserted = await DB.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(AUDIT_LOG)
+          .values({
+            adminId: input.actorTelegramId,
+            actorTgId: input.actorTelegramId,
+            actorSub: subject?.sub ?? null,
+            targetId: input.targetId,
+            groupId: input.groupId,
+            type: input.type,
+            until: input.until,
+            reason: input.reason,
+            client: actor.client,
+            basis: input.basis,
+            review,
+            idempotencyKey: input.idempotencyKey,
+          })
+          .onConflictDoNothing({ target: AUDIT_LOG.idempotencyKey })
+          .returning({ id: AUDIT_LOG.id })
+        const revoked = row && revokedMeasures({ ...input, id: row.id })
+        if (revoked) await tx.delete(AUDIT_LOG).where(revoked)
+        return row
+      })
       if (inserted) {
         ctx.audit.set(
           moderationNote({ ...input, actorTgId: input.actorTelegramId, actorSub: subject?.sub ?? null, review }, actor)

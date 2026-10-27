@@ -17,7 +17,9 @@ import { dbPersistence } from "./persistence"
 
 /** The projection this backend reads from the IdP (RFC v3 §5.2). */
 const PROJECTION = "backend"
-const signerDirectory = z.array(z.object({ sub: z.string(), name: z.string(), email: z.string().nullable() }))
+const signerDirectory = z.array(
+  z.object({ sub: z.string(), name: z.string(), email: z.string().nullable(), emailVerified: z.boolean().optional() })
+)
 
 function report(component: string) {
   return (error: unknown) => {
@@ -37,7 +39,9 @@ function parsePrivateKey(value: string): ServiceTokenSourceOptions["privateKey"]
 
 function configure() {
   if (!env.IDP_PUBLIC_URL || !env.OAUTH_BACKEND_RESOURCE_URI) {
-    logger.warn("[IDP] Token authentication is not configured: only legacy anonymous calls are accepted")
+    logger.warn(
+      "[IDP] Token authentication is not configured: tokens are rejected, and only anonymous calls allowed by LEGACY_ANONYMOUS run"
+    )
     return null
   }
   const endpoints = idpEndpoints({

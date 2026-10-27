@@ -12,7 +12,6 @@ const seedEnv = {
   DB_USER: "seed_test",
   DB_PASS: "seed_test",
   DB_NAME: "seed_review_test",
-  BETTER_AUTH_SECRET: "seed-test-secret-with-at-least-thirty-two-characters",
   ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 }
 
@@ -41,8 +40,9 @@ async function query(sql: string): Promise<Record<string, unknown>[]> {
 
 // The port opts into a disposable PostgreSQL database with the fixed test credentials above.
 describe.skipIf(!testPort)("database seed", () => {
+  // Only the schema has to exist: every test truncates the tables first. Importing the DB applies the migrations.
   beforeAll(async () => {
-    await seed()
+    await exec("bun", ["-e", 'await import("@/db"); process.exit(0)'], { env: seedEnv })
   }, 30_000)
 
   beforeEach(async () => {
@@ -63,13 +63,11 @@ describe.skipIf(!testPort)("database seed", () => {
     expect(await query("SELECT count(*)::int AS count FROM tg_groups")).toEqual([{ count: 1006 }])
     expect(await query("SELECT DISTINCT author_id FROM tg_messages")).toEqual([{ author_id: "100000001" }])
     expect(await query("SELECT count(*)::int AS count FROM tg_messages")).toEqual([{ count: 30 }])
-    expect(await query("SELECT * FROM tg_permissions WHERE user_id = 100000001")).toEqual([])
-    expect(await query("SELECT * FROM tg_group_admins")).toEqual([])
-    expect(await query("SELECT * FROM tg_grants_v2")).toEqual([])
+    expect(await query("SELECT * FROM tg_grants")).toEqual([])
     expect(await query("SELECT DISTINCT target_id FROM tg_audit_log")).toEqual([{ target_id: "100000001" }])
   }, 30_000)
 
-  it("uses retained groups for messages without assigning their admins", async () => {
+  it("uses retained groups for messages", async () => {
     await query(`INSERT INTO tg_groups (telegram_id, title) VALUES (-1000000000001, 'retained')`)
 
     await seed()
@@ -79,8 +77,6 @@ describe.skipIf(!testPort)("database seed", () => {
     ])
     expect(await query("SELECT count(*)::int AS count FROM tg_groups")).toEqual([{ count: 7 }])
     expect(await query("SELECT DISTINCT chat_id FROM tg_messages")).toEqual([{ chat_id: "-1000000000001" }])
-    expect(await query("SELECT * FROM tg_group_admins")).toEqual([])
-    expect(await query("SELECT count(*)::int AS count FROM tg_permissions WHERE user_id <> 1")).toEqual([{ count: 7 }])
   }, 30_000)
 
   it("fills empty users and groups while preserving existing messages", async () => {
@@ -96,7 +92,7 @@ describe.skipIf(!testPort)("database seed", () => {
     expect(await query("SELECT count(*)::int AS count FROM tg_groups")).toEqual([{ count: 1006 }])
   }, 30_000)
 
-  it("does not assign roles, admins, or grants when Telegram activity already exists", async () => {
+  it("does not add grants when Telegram activity already exists", async () => {
     await query(`INSERT INTO tg_users (user_id, first_name, is_bot) VALUES (100000001, 'retained', false);
       INSERT INTO tg_groups (telegram_id, title) VALUES (-1000000000001, 'retained');
       INSERT INTO tg_messages (chat_id, message_id, author_id, timestamp, message)
@@ -104,9 +100,7 @@ describe.skipIf(!testPort)("database seed", () => {
 
     await seed()
 
-    expect(await query("SELECT * FROM tg_permissions WHERE user_id <> 1")).toEqual([])
-    expect(await query("SELECT * FROM tg_group_admins")).toEqual([])
-    expect(await query("SELECT * FROM tg_grants_v2")).toEqual([])
+    expect(await query("SELECT * FROM tg_grants")).toEqual([])
     expect(await query("SELECT count(*)::int AS count FROM tg_messages")).toEqual([{ count: 1 }])
   }, 30_000)
 
@@ -138,17 +132,13 @@ describe.skipIf(!testPort)("database seed", () => {
     const counts = async () =>
       query(`SELECT 'users' AS name, count(*)::int AS count FROM tg_users
         UNION ALL SELECT 'messages', count(*)::int FROM tg_messages
-        UNION ALL SELECT 'staff', count(*)::int FROM tg_permissions WHERE user_id <> 1
-        UNION ALL SELECT 'admins', count(*)::int FROM tg_group_admins
         UNION ALL SELECT 'faqs', count(*)::int FROM web_faqs
-        UNION ALL SELECT 'grants', count(*)::int FROM tg_grants_v2
+        UNION ALL SELECT 'grants', count(*)::int FROM tg_grants
         ORDER BY name`)
     const expected = [
-      { name: "admins", count: 12 },
       { name: "faqs", count: 9 },
       { name: "grants", count: 11 },
       { name: "messages", count: 60000 },
-      { name: "staff", count: 7 },
       { name: "users", count: 2000 },
     ]
     expect(await counts()).toEqual(expected)
@@ -157,7 +147,7 @@ describe.skipIf(!testPort)("database seed", () => {
         SELECT 'tg_messages' AS tablename, md5(string_agg(row_to_json(m)::text, ',' ORDER BY chat_id, message_id)) AS data
           FROM tg_messages m
         UNION ALL SELECT 'web_faqs', md5(string_agg(row_to_json(f)::text, ',' ORDER BY id)) FROM web_faqs f
-        UNION ALL SELECT 'tg_grants_v2', md5(string_agg(row_to_json(g)::text, ',' ORDER BY id)) FROM tg_grants_v2 g
+        UNION ALL SELECT 'tg_grants', md5(string_agg(row_to_json(g)::text, ',' ORDER BY id)) FROM tg_grants g
       ) t ORDER BY tablename`)
     const before = await fingerprints()
 
