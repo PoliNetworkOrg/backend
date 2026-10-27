@@ -22,10 +22,30 @@ const signerDirectory = z.array(
   z.object({ sub: z.string(), name: z.string(), email: z.string().nullable(), emailVerified: z.boolean().optional() })
 )
 const peopleDirectory = z.object({
+  proposals: z
+    .array(
+      z.object({
+        personId: z.string(),
+        sub: z.string(),
+        name: z.string(),
+        email: z.string().nullable(),
+        telegramId: z.string().nullable(),
+        reason: z.enum(["verified-email", "verified-telegram", "name-only", "conflicting-identities"]),
+      })
+    )
+    .optional(),
   roles: z.array(z.object({ key: z.string(), name: z.string(), binding: z.string() })),
   users: z.array(
     z.object({
       sub: z.string(),
+      registrationId: z.string().optional(),
+      provisional: z.boolean().optional(),
+      previousSub: z.string().optional(),
+      firstName: z.string().optional(),
+      lastName: z.string().optional(),
+      phone: z.string().nullable().optional(),
+      declaredTelegramId: z.string().nullable().optional(),
+      declaredTelegramUsername: z.string().nullable().optional(),
       name: z.string(),
       email: z.string().nullable(),
       azureId: z.string().nullish(),
@@ -133,48 +153,50 @@ function configure() {
         if (!response.ok) throw new Error(`IdP People roles returned ${response.status}`)
         return peopleDirectory.parse(await response.json())
       },
-      async change(change) {
-        const send = async () => {
-          let token: string
-          try {
-            token = await roleTokens.getToken()
-          } catch {
-            throw new RoleChangeError(
-              503,
-              `no token to change roles; is ${PEOPLE_ROLES_SCOPE} granted to this backend?`
-            )
-          }
-          try {
-            return await fetch(peopleRolesUrl, {
-              method: "POST",
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-              body: JSON.stringify(change),
-              signal: AbortSignal.timeout(10_000),
-            })
-          } catch {
-            throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
-          }
-        }
-        let response = await send()
-        // A stale cached token: ask for a new one and send the same command once more. A second 401 is a refusal.
-        if (response.status === 401) {
-          roleTokens.invalidate()
-          response = await send()
-          if (response.status === 401) roleTokens.invalidate()
-        }
-        if (response.ok) {
-          // The command was applied, but without a readable answer People can't confirm it: retry it by ID.
-          const result = roleResult.safeParse(await response.json().catch(() => null))
-          if (!result.success) throw new RoleChangeError(503, "PoliNetwork Auth sent an unreadable answer")
-          return result.data
-        }
-        const body = (await response.json().catch(() => null)) as { error?: unknown } | null
-        throw new RoleChangeError(
-          response.status,
-          typeof body?.error === "string" ? body.error : `request failed (${response.status})`
-        )
-      },
+      change: (change) => sendPeopleCommand(change, roleResult),
+      update: (input) => sendPeopleCommand(input, z.object({ sub: z.string() })),
+      create: (input) => sendPeopleCommand(input, z.object({ sub: z.string() })),
+      link: (input) => sendPeopleCommand(input, z.object({ sub: z.string() })),
     }
+    const sendPeopleCommand = async <T>(change: unknown, resultSchema: z.ZodType<T>): Promise<T> => {
+      const send = async () => {
+        let token: string
+        try {
+          token = await roleTokens.getToken()
+        } catch {
+          throw new RoleChangeError(503, `no token to change roles; is ${PEOPLE_ROLES_SCOPE} granted to this backend?`)
+        }
+        try {
+          return await fetch(peopleRolesUrl, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(change),
+            signal: AbortSignal.timeout(10_000),
+          })
+        } catch {
+          throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
+        }
+      }
+      let response = await send()
+      // A stale cached token: ask for a new one and send the same command once more. A second 401 is a refusal.
+      if (response.status === 401) {
+        roleTokens.invalidate()
+        response = await send()
+        if (response.status === 401) roleTokens.invalidate()
+      }
+      if (response.ok) {
+        // The command was applied, but without a readable answer People can't confirm it: retry it by ID.
+        const result = resultSchema.safeParse(await response.json().catch(() => null))
+        if (!result.success) throw new RoleChangeError(503, "PoliNetwork Auth sent an unreadable answer")
+        return result.data
+      }
+      const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+      throw new RoleChangeError(
+        response.status,
+        typeof body?.error === "string" ? body.error : `request failed (${response.status})`
+      )
+    }
+
     events = createAccessEventHandler({
       keyStore,
       issuer: endpoints.issuer,

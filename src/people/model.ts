@@ -87,6 +87,7 @@ export function row(
   const contacts = self || general(v, "people:read") || scopedContacts
   return C.personRowSchema.parse({
     ...p,
+    preliminary: p.authProvisional === true,
     profile: {
       ...p.profile,
       personalEmail: contacts ? p.profile.personalEmail : null,
@@ -128,10 +129,15 @@ export function newPerson(s: PeopleState, input: C.CreatePersonInput, date: stri
   const p: Person = {
     id: `P-${String(sequence).padStart(4, "0")}`,
     profile: {
-      ...input,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      personalEmail: input.personalEmail || null,
+      course: input.course || "",
+      year: input.year || "",
+      campus: input.campus ?? null,
       phone: input.phone || null,
       telegramUsername: input.telegramUsername || null,
-      telegramId: null,
+      telegramId: input.telegramId || null,
       otherAssociations: [],
       studentRepresentative: null,
     },

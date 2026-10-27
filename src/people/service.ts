@@ -81,6 +81,7 @@ export type PeopleOptions = {
   completeSigned: (sub: string, requestId: string, bytes: Uint8Array) => Promise<void>
   transferType: (bytes: Uint8Array) => Promise<string>
   /** Roles bound to People in PoliNetwork Auth; `null` when the backend can't reach it. */
+  allowLocalPeople?: boolean
   peopleRoles?: PeopleRoles | null
   /** Members of the Microsoft 365 Soci group. */
   azureMembers?: () => Promise<AzureMember[]>
@@ -179,8 +180,49 @@ export function createPeopleService(options: PeopleOptions) {
   ) {
     const at = { date: date(), now: now() }
     if (directory) {
-      if (directory.revision === (s.counters.roleRevision ?? 0)) syncDirectory(s, directory.value, at)
-      else directoryRead = null
+      if (directory.revision === (s.counters.roleRevision ?? 0)) {
+        syncDirectory(s, directory.value, at)
+        const proposals = directory.value.proposals ?? []
+        for (const pending of Object.values(s.reviews))
+          if (
+            pending.kind === "preliminary-link" &&
+            !proposals.some(
+              (proposal) =>
+                proposal.sub === pending.sub &&
+                s.persons[pending.record?.id ?? ""]?.authRegistrationId === proposal.personId
+            )
+          )
+            pending.resolved = true
+        for (const proposal of proposals) {
+          const person = Object.values(s.persons).find(
+            (p) => p.authRegistrationId === proposal.personId && p.authProvisional
+          )
+          if (
+            !person ||
+            Object.values(s.reviews).some(
+              (r) => r.kind === "preliminary-link" && r.sub === proposal.sub && r.record?.id === person.id
+            )
+          )
+            continue
+          review(
+            s,
+            { sub: proposal.sub, telegramId: proposal.telegramId, can: () => false },
+            { sub: proposal.sub, name: proposal.name, email: proposal.email, telegramId: proposal.telegramId },
+            "preliminary-link",
+            person,
+            {
+              "verified-email":
+                "The verified email matches this person's recorded email. A Master Admin must approve the link.",
+              "verified-telegram":
+                "The verified Telegram account matches this person's recorded Telegram ID. A Master Admin must approve the link.",
+              "name-only":
+                "Only the name matches. This may be a different person; a Master Admin must check before linking.",
+              "conflicting-identities":
+                "Several records or verified identifiers disagree. A Master Admin must check the identities before linking.",
+            }[proposal.reason]
+          )
+        }
+      } else directoryRead = null
     }
     if (members) syncMembers(s, members.value, at)
   }
@@ -221,7 +263,7 @@ export function createPeopleService(options: PeopleOptions) {
     if (!options.peopleRoles) return
     for (const p of Object.values(s.persons)) {
       const was = before.get(p.id)
-      if (!was || !p.accountSub || p.account.status !== "linked") continue
+      if (!was || !p.accountSub || (p.account.status !== "linked" && !p.authProvisional)) continue
       const changes = roleChanges(roleView(was), roleView(p))
       if (!changes.length) continue
       settled(p)
@@ -434,12 +476,41 @@ export function createPeopleService(options: PeopleOptions) {
     if (Object.values(s.persons).some((other) => other.id !== p.id && other.accountSub === account.sub))
       fail("CONFLICT", "This account is already linked to another person")
     if (p.accountSub && p.accountSub !== account.sub) fail("CONFLICT", "Unlink the existing account first")
+    if (p.authProvisional) fail("FORBIDDEN", "A Master Admin must approve this preliminary Auth person through Linking")
     const wasLinked = !!p.accountSub
     p.accountSub = account.sub
     p.account = { status: "linked", email: account.email ?? "", via: "IdP", linkedOn: date(), how: reason }
     p.invite = null
     log(p, actor, `Linked account ${account.sub}: ${reason}`, now())
     if (!wasLinked) pushRoles(s, new Map([[p.id, unconfirmed(p, date())]]), actor, `Linked in People: ${reason}`, false)
+  }
+  async function linkPreliminaryPerson(s: PeopleState, p: Person, account: Account, actor: string, reason: string) {
+    if (!p.authProvisional || !p.authRegistrationId) return false
+    settled(p)
+    if (Object.values(s.persons).some((other) => other.id !== p.id && other.accountSub === account.sub))
+      fail("CONFLICT", "This account already has a People record; review the duplicate before linking")
+    if (!options.peopleRoles?.link) fail("PRECONDITION_FAILED", "Auth identity linking is unavailable")
+    const result = await options.peopleRoles.link({
+      operation: "link-person",
+      id: randomUUID(),
+      actor,
+      personId: p.authRegistrationId,
+      userId: account.sub,
+      reason,
+    })
+    if (result.sub !== account.sub) fail("PRECONDITION_FAILED", "Auth returned another account for this link")
+    p.accountSub = result.sub
+    p.authProvisional = false
+    p.account = {
+      status: "linked",
+      email: account.email ?? "",
+      via: "PoliNetwork Auth",
+      linkedOn: date(),
+      how: "Master Admin approved the preliminary identity",
+    }
+    directoryRead = null
+    log(p, actor, `Auth approved the preliminary identity link: ${reason}`, now())
+    return true
   }
   function candidate(s: PeopleState, v: Viewer, account: Account | undefined) {
     if (!account) return null
@@ -495,7 +566,10 @@ export function createPeopleService(options: PeopleOptions) {
     return null
   }
   function review(s: PeopleState, v: Viewer, account: Account, kind: C.ReviewKind, p: Person | null, message: string) {
-    const existing = Object.values(s.reviews).find((r) => r.sub === v.sub && r.kind === kind && !r.resolved)
+    const existing = Object.values(s.reviews).find(
+      (r) =>
+        r.sub === v.sub && r.kind === kind && !r.resolved && (kind !== "preliminary-link" || r.record?.id === p?.id)
+    )
     if (existing) return existing
     const id = randomUUID()
     s.reviews[id] = {
@@ -551,8 +625,34 @@ export function createPeopleService(options: PeopleOptions) {
         return record(u.state, find(u.state, input.id), v, config, date())
       })
     },
-    async createPerson(v: Viewer, input: C.CreatePersonInput) {
+    async createPerson(v: Viewer, raw: C.CreatePersonInput) {
       requireGeneral(v, "people:write")
+      const input = C.createPersonInputSchema.parse(raw)
+      if (options.peopleRoles?.create) {
+        const created = await options.peopleRoles.create({
+          operation: "create-person",
+          id: input.requestId ?? randomUUID(),
+          actor: v.sub,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          email: input.personalEmail,
+          phone: input.phone,
+          telegramId: input.telegramId,
+          telegramUsername: input.telegramUsername,
+          changes: [
+            ...(input.admin ? [{ kind: "admin" as const, active: true }] : []),
+            ...input.teams.map((team) => ({ kind: "team" as const, team, role: "member" as const })),
+          ],
+        })
+        directoryRead = null
+        return tx((u) => {
+          const person = Object.values(u.state.persons).find((p) => p.accountSub === created.sub)
+          if (!person) fail("PRECONDITION_FAILED", "Auth saved the person; refresh People before retrying")
+          return { id: person.id }
+        })
+      }
+      if (!options.allowLocalPeople)
+        fail("PRECONDITION_FAILED", "Auth person creation is unavailable; no local person was created")
       return tx((u) => {
         const p = newPerson(u.state, input, date())
         log(p, v.sub, "Created person", now())
@@ -562,8 +662,24 @@ export function createPeopleService(options: PeopleOptions) {
     },
     async updatePerson(v: Viewer, input: C.UpdatePersonInput) {
       requireGeneral(v, "people:write")
-      return tx((u) => {
+      return tx(async (u) => {
         const p = find(u.state, input.id)
+        if (p.authRegistrationId) {
+          if (!options.peopleRoles?.update) fail("PRECONDITION_FAILED", "Auth contact editing is unavailable")
+          await options.peopleRoles.update({
+            operation: "update-person",
+            id: randomUUID(),
+            actor: v.sub,
+            personId: p.authRegistrationId,
+            firstName: input.firstName,
+            lastName: input.lastName,
+            email: input.personalEmail,
+            phone: input.phone,
+            telegramId: p.profile.telegramId ?? "",
+            telegramUsername: input.telegramUsername,
+          })
+          directoryRead = null
+        }
         const { id: _, ...profile } = input
         Object.assign(p.profile, profile)
         log(p, v.sub, "Updated profile", now())
@@ -1035,6 +1151,7 @@ export function createPeopleService(options: PeopleOptions) {
                 personalEmail: r.profile.personalEmail ?? "",
                 phone: r.profile.phone ?? "",
                 telegramUsername: r.profile.telegramUsername ?? "",
+                telegramId: r.profile.telegramId ?? "",
                 year: C.personInputSchema.shape.year.parse(r.profile.year),
                 campus: C.campusSchema.parse(r.profile.campus),
                 admin: false,
@@ -1141,7 +1258,7 @@ export function createPeopleService(options: PeopleOptions) {
     async resolveReview(v: Viewer, input: C.ResolveReviewInput) {
       requireGeneral(v, "people:write")
       const accounts = await options.directory()
-      return tx((u) => {
+      return tx(async (u) => {
         const r = u.state.reviews[input.reviewId]
         if (!r || r.resolved) fail("CONFLICT", "Review already handled")
         const linkChoices = ["move-telegram", "link-other", "link-first", "link-second", "link-anyway"]
@@ -1151,6 +1268,7 @@ export function createPeopleService(options: PeopleOptions) {
           "two-records": ["link-first", "link-second", "merge-first"],
           "not-me": ["link-anyway", "add-new", "decline"],
           "name-only": ["link-anyway", "add-new", "decline"],
+          "preliminary-link": ["link-anyway", "decline"],
         }
         if (!allowed[r.kind].includes(input.resolution)) fail("BAD_REQUEST", "Resolution does not apply to this review")
         const account = accounts.find((a) => a.sub === r.sub)
@@ -1168,7 +1286,9 @@ export function createPeopleService(options: PeopleOptions) {
             }
             find(u.state, target.id).profile.telegramId = account.telegramId
           }
-          link(u.state, find(u.state, target.id), account, v.sub, input.reason)
+          const person = find(u.state, target.id)
+          if (!(await linkPreliminaryPerson(u.state, person, account, v.sub, input.reason)))
+            link(u.state, person, account, v.sub, input.reason)
         } else if (input.resolution === "add-new") {
           if (!account) fail("CONFLICT", "IdP account no longer exists")
           const parts = account.name.trim().split(/\s+/)
@@ -1322,13 +1442,15 @@ export function createPeopleService(options: PeopleOptions) {
       if (!account) fail("NOT_FOUND", "IdP account not found")
       return tx(async (u) => {
         const p = find(u.state, input.personId)
-        link(u.state, p, account, v.sub, input.reason)
+        if (!(await linkPreliminaryPerson(u.state, p, account, v.sub, input.reason)))
+          link(u.state, p, account, v.sub, input.reason)
       })
     },
     async unlinkAccount(v: Viewer, input: { personId: string }) {
       requireGeneral(v, "people:write")
       return tx((u) => {
         const p = find(u.state, input.personId)
+        if (p.authRegistrationId) fail("FORBIDDEN", "Manage this identity link in Auth")
         if (!p.accountSub) fail("CONFLICT", "Account not linked")
         settled(p)
         p.accountSub = null

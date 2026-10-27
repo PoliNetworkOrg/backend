@@ -8,9 +8,25 @@ import type { PeopleState, Person } from "./types"
  * them through `PeopleRoles.change`, which checks again what the acting dashboard user may do.
  */
 export type RoleDirectory = {
+  proposals?: {
+    personId: string
+    sub: string
+    name: string
+    email: string | null
+    telegramId: string | null
+    reason: "verified-email" | "verified-telegram" | "name-only" | "conflicting-identities"
+  }[]
   roles: { key: string; name: string; binding: string }[]
   users: {
     sub: string
+    registrationId?: string
+    provisional?: boolean
+    previousSub?: string
+    firstName?: string
+    lastName?: string
+    phone?: string | null
+    declaredTelegramId?: string | null
+    declaredTelegramUsername?: string | null
     name: string
     email: string | null
     azureId?: string | null
@@ -32,7 +48,34 @@ export type RoleChange = {
   changes: ({ kind: "admin"; active: boolean } | { kind: "team"; team: C.TeamId; role: "member" | "lead" | null })[]
 }
 export type RoleResult = { roles: RoleDirectory["roles"]; held: string[]; assigned: string[] }
+export type CreateAuthPerson = {
+  operation: "create-person"
+  id: string
+  actor: string
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  telegramId: string
+  telegramUsername: string
+  changes: RoleChange["changes"]
+}
+export type LinkAuthPerson = {
+  operation: "link-person"
+  id: string
+  actor: string
+  personId: string
+  userId: string
+  reason: string
+}
+export type UpdateAuthPerson = Omit<CreateAuthPerson, "operation" | "changes"> & {
+  operation: "update-person"
+  personId: string
+}
 export type PeopleRoles = {
+  update?(input: UpdateAuthPerson): Promise<{ sub: string }>
+  create?(input: CreateAuthPerson): Promise<{ sub: string }>
+  link?(input: LinkAuthPerson): Promise<{ sub: string }>
   directory(): Promise<RoleDirectory>
   change(change: RoleChange): Promise<RoleResult>
 }
@@ -156,21 +199,29 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
   const users = new Map(directory.users.map((u) => [u.sub, u]))
   for (const u of directory.users) {
     const wanted = wantedView(bound, u.roles)
-    const existing = persons().find((p) => p.accountSub === u.sub)
+    const existing = persons().find(
+      (p) => p.accountSub === u.sub || (u.registrationId && p.authRegistrationId === u.registrationId)
+    )
     // Accounts without a bound role only refresh the identities of the record already linked to them.
-    if (!existing && !wanted.admin && !Object.keys(wanted.teams).length) continue
+    if (!existing && !u.registrationId && !wanted.admin && !Object.keys(wanted.teams).length) continue
     const email = lower(u.email)
     const matches = persons().filter(
       (p) =>
         p === existing ||
-        (u.azureId && p.azureId === u.azureId) ||
-        (u.telegramId && p.profile.telegramId === u.telegramId) ||
-        (email?.endsWith("@polinetwork.org") && lower(p.member?.m365Email) === email)
+        (!p.authProvisional &&
+          ((u.azureId && p.azureId === u.azureId) ||
+            (u.telegramId && p.profile.telegramId === u.telegramId) ||
+            (email?.endsWith("@polinetwork.org") && lower(p.member?.m365Email) === email)))
     )
     // Never guess between records, or move an identity off the record holding it: HR decides.
     if (
       matches.length > 1 ||
-      matches.some((p) => p.accountSub && p.accountSub !== u.sub) ||
+      matches.some(
+        (p) =>
+          p.accountSub &&
+          p.accountSub !== u.sub &&
+          !(u.registrationId && p.authRegistrationId === u.registrationId && !u.provisional)
+      ) ||
       (existing?.azureId && u.azureId && existing.azureId !== u.azureId)
     ) {
       for (const p of matches)
@@ -193,6 +244,28 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
       p.invite = null
       log(p, "system", `Linked account ${u.sub}: holds a People role in PoliNetwork Auth`, at.now)
     }
+    if (u.registrationId) {
+      p.authRegistrationId = u.registrationId
+      p.authProvisional = u.provisional === true
+      p.accountSub = u.sub
+      p.profile.firstName = u.firstName ?? p.profile.firstName
+      p.profile.lastName = u.lastName ?? p.profile.lastName
+      p.profile.phone = u.phone ?? null
+      if (u.provisional) {
+        p.account = { status: "none" }
+        p.profile.personalEmail = u.email
+        p.profile.telegramId = u.declaredTelegramId ?? null
+        p.profile.telegramUsername = u.declaredTelegramUsername ?? null
+      } else if (p.account.status !== "linked") {
+        p.account = {
+          status: "linked",
+          email: u.email ?? "",
+          via: "PoliNetwork Auth",
+          linkedOn: at.date,
+          how: "Master Admin approved the preliminary identity",
+        }
+      }
+    }
     // Microsoft 365 members are matched by this ID, so a later PoliNetwork address doesn't make a second record.
     if (u.azureId) p.azureId = u.azureId
     if (!p.profile.telegramId && u.telegramId) p.profile.telegramId = u.telegramId
@@ -200,7 +273,7 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
   }
 
   for (const p of persons()) {
-    if (!p.accountSub || p.account.status !== "linked" || p.roleCommand) continue
+    if (!p.accountSub || (p.account.status !== "linked" && !p.authProvisional) || p.roleCommand) continue
     const u = users.get(p.accountSub)
     syncPersonRoles(p, bound, wantedView(bound, u?.roles ?? []), at, u?.since)
   }

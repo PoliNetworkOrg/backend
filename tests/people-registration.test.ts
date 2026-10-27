@@ -1,0 +1,192 @@
+import assert from "node:assert/strict"
+import { describe, expect, it, vi } from "vitest"
+import {
+  type CreateAuthPerson,
+  type LinkAuthPerson,
+  type PeopleRoles,
+  RoleChangeError,
+  type RoleDirectory,
+} from "@/people/roles"
+import { SOURCE_TTL_MS } from "@/people/service"
+import { harness, master, viewer } from "./people-fixtures"
+
+function authPeople() {
+  const directory: RoleDirectory = {
+    roles: [
+      { key: "admin", name: "Admin", binding: "admin" },
+      { key: "it", name: "IT", binding: "team:it:member" },
+    ],
+    users: [],
+    proposals: [],
+  }
+  const roles: PeopleRoles = {
+    directory: vi.fn(async () => structuredClone(directory)),
+    change: vi.fn(async () => ({ roles: directory.roles, held: [], assigned: [] })),
+    create: vi.fn(async (input: CreateAuthPerson) => {
+      const sub = `people:${input.id}`
+      if (!directory.users.some((user) => user.sub === sub))
+        directory.users.push({
+          sub,
+          registrationId: sub,
+          provisional: true,
+          name: `${input.firstName} ${input.lastName}`,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          email: input.email || null,
+          phone: input.phone || null,
+          telegramId: null,
+          declaredTelegramId: input.telegramId || null,
+          telegramUsername: null,
+          roles: input.changes.flatMap((change) => (change.kind === "admin" ? ["admin"] : [change.team])),
+        })
+      return { sub }
+    }),
+    link: vi.fn(async (input: LinkAuthPerson) => {
+      if (input.actor !== "president") throw new RoleChangeError(403, "Master Admin required")
+      const person = directory.users.find((person) => person.registrationId === input.personId)
+      if (!person) throw new Error("Person not found")
+      person.previousSub = person.sub
+      person.sub = input.userId
+      person.provisional = false
+      directory.proposals = []
+      return { sub: input.userId }
+    }),
+  }
+  return { directory, roles }
+}
+
+describe("People before the first Auth login", () => {
+  it("creates with names and roles only in Auth, and keeps blank census data", async () => {
+    const auth = authPeople()
+    const h = harness({ peopleRoles: auth.roles, allowLocalPeople: false })
+    const input = {
+      requestId: "7b3c7576-3f7d-4ef8-9765-82e00cf0a04e",
+      firstName: "Mario",
+      lastName: "Rossi",
+      teams: ["it" as const],
+      admin: true,
+    }
+    const created = await h.service.createPerson(master, input)
+    expect(await h.service.createPerson(master, input)).toEqual(created)
+    const person = await h.service.getPerson(master, created)
+    expect(person).toMatchObject({
+      preliminary: true,
+      profile: { firstName: "Mario", lastName: "Rossi", course: "", year: "", campus: null, personalEmail: null },
+      admin: { status: "active" },
+      teams: [{ team: "it", role: "member" }],
+      account: { status: "none" },
+    })
+    expect(await h.service.listPeople(master)).toHaveLength(1)
+    expect(auth.roles.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: master.sub,
+        changes: [
+          { kind: "admin", active: true },
+          { kind: "team", team: "it", role: "member" },
+        ],
+      })
+    )
+  })
+
+  it("requires Master approval and retains the register identity and roles after linking", async () => {
+    const auth = authPeople()
+    const h = harness({ peopleRoles: auth.roles, allowLocalPeople: false })
+    const created = await h.service.createPerson(master, {
+      firstName: "Mario",
+      lastName: "Rossi",
+      personalEmail: "new@example.org",
+      teams: ["it"],
+      admin: true,
+    })
+    const registration = auth.directory.users[0]
+    assert.ok(registration.registrationId)
+    h.accounts.push({
+      sub: "new-login",
+      name: "Mario Rossi",
+      email: "new@example.org",
+      emailVerified: true,
+      telegramId: null,
+    })
+    auth.directory.proposals = [
+      {
+        personId: registration.registrationId,
+        sub: "new-login",
+        name: "Mario Rossi",
+        email: "new@example.org",
+        telegramId: null,
+        reason: "verified-email",
+      },
+    ]
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    const [review] = await h.service.listReviews(master)
+    expect(review).toMatchObject({ kind: "preliminary-link", record: { id: created.id } })
+    expect(await h.service.getMyRoles(viewer("new-login", ["people:self"]))).toEqual({ capoScope: null, leads: [] })
+    const input = {
+      reviewId: review.id,
+      resolution: "link-anyway",
+      reason: "Verified the email belongs to this person",
+    }
+    await expect(h.service.resolveReview(viewer("vice", ["admin:access", "people:write"]), input)).rejects.toThrow(
+      "Master Admin required"
+    )
+    expect((await h.service.getPerson(master, created)).account.status).toBe("none")
+    await h.service.resolveReview(master, input)
+    expect(await h.service.getPerson(master, created)).toMatchObject({
+      preliminary: false,
+      account: { status: "linked" },
+      admin: { status: "active" },
+      teams: [{ team: "it", role: "member" }],
+    })
+    expect(await h.service.listPeople(master)).toHaveLength(1)
+    expect(await h.service.listReviews(master)).toEqual([])
+  })
+
+  it("recovers a confirmed Auth link without creating a duplicate after a backend restart", async () => {
+    const auth = authPeople()
+    const h = harness({ peopleRoles: auth.roles, allowLocalPeople: false })
+    const created = await h.service.createPerson(master, { firstName: "Mario", lastName: "Rossi", admin: true })
+    const registration = auth.directory.users[0]
+    registration.previousSub = registration.sub
+    registration.sub = "first-login"
+    registration.provisional = false
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    const restarted = harness({ peopleRoles: auth.roles, store: h.store, allowLocalPeople: false })
+    expect(await restarted.service.listPeople(master)).toHaveLength(1)
+    expect(await restarted.service.getPerson(master, created)).toMatchObject({
+      preliminary: false,
+      account: { status: "linked" },
+      admin: { status: "active" },
+    })
+  })
+
+  it("does not auto-claim a preliminary person from a declared Telegram contact", async () => {
+    const auth = authPeople()
+    const h = harness({ peopleRoles: auth.roles, allowLocalPeople: false })
+    const created = await h.service.createPerson(master, {
+      firstName: "Mario",
+      lastName: "Rossi",
+      telegramId: "123",
+      admin: true,
+    })
+    auth.directory.users.push({
+      sub: "different-login",
+      name: "Mario Rossi",
+      email: null,
+      telegramId: "123",
+      telegramUsername: null,
+      roles: ["admin"],
+    })
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    expect(await h.service.listPeople(master)).toHaveLength(2)
+    expect(await h.service.getPerson(master, created)).toMatchObject({ preliminary: true, account: { status: "none" } })
+    expect(auth.roles.link).not.toHaveBeenCalled()
+  })
+
+  it("fails without Auth instead of creating a local authority", async () => {
+    const h = harness({ allowLocalPeople: false })
+    await expect(
+      h.service.createPerson(master, { firstName: "Mario", lastName: "Rossi", admin: true })
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" })
+    expect(await h.service.listPeople(master)).toEqual([])
+  })
+})

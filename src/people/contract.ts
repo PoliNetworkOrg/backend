@@ -32,7 +32,14 @@ export const MEMBER_STATUSES = ["active", "suspended", "expired", "former"] as c
 export const FEE_STATUSES = ["due", "receipt", "paid", "unpaid"] as const
 export const ACCOUNT_STATUSES = ["none", "invite", "linked", "review"] as const
 export const CENSUS_ANSWERS = ["continues", "leaving"] as const
-export const REVIEW_KINDS = ["telegram-conflict", "ask-to-be-added", "two-records", "not-me", "name-only"] as const
+export const REVIEW_KINDS = [
+  "telegram-conflict",
+  "ask-to-be-added",
+  "two-records",
+  "not-me",
+  "name-only",
+  "preliminary-link",
+] as const
 /** A receipt's pipeline: issued unsigned, signed by an officer, emailed to the member; or the email failed, or voided. */
 export const RECEIPT_STATUSES = ["toSign", "signed", "sent", "failed", "voided"] as const
 export const PAYMENT_METHODS = ["transfer", "cash"] as const
@@ -143,6 +150,7 @@ export const consentsSchema = z.object({
 
 /** One row of the People lists: everything but notes, activity and discrepancies. */
 export const personRowSchema = z.object({
+  preliminary: z.boolean().optional(),
   id: z.string(),
   profile: profileSchema,
   /** `null` without `people:members:read`, except on the viewer's own record: `isMember` still says whether they are one. */
@@ -583,8 +591,21 @@ export const personInputSchema = z.object({
   year: z.enum(YEARS),
   campus: campusSchema,
 })
-export const createPersonInputSchema = personInputSchema.extend({ admin: z.boolean() })
-export const updatePersonInputSchema = personInputSchema.extend({ id: personIdSchema })
+export const createPersonInputSchema = personInputSchema.extend({
+  requestId: z.uuid().optional(),
+  personalEmail: z.union([z.literal(""), z.email().max(254)]).default(""),
+  phone: z.string().trim().max(40).default(""),
+  telegramUsername: telegramUsernameSchema.default(""),
+  telegramId: z.union([z.literal(""), z.string().regex(/^[1-9]\d{0,19}$/)]).default(""),
+  course: z.string().trim().max(120).default(""),
+  year: z.union([z.literal(""), z.enum(YEARS)]).default(""),
+  campus: campusSchema.nullable().default(null),
+  admin: z.boolean().default(false),
+  teams: z.array(teamIdSchema).max(TEAM_IDS.length).default([]),
+})
+export const updatePersonInputSchema = createPersonInputSchema
+  .omit({ admin: true, teams: true, telegramId: true, requestId: true })
+  .extend({ id: personIdSchema })
 export const setNoteInputSchema = z.object({ id: personIdSchema, note: z.string().trim().max(2000) })
 
 export const createMemberInputSchema = z.object({
@@ -747,7 +768,7 @@ export const sendSignedInputSchema = z.object({
 })
 export const transferInputSchema = z.object({ transferDate: dateSchema, amountCents: amountCentsSchema })
 
-export type CreatePersonInput = z.infer<typeof createPersonInputSchema>
+export type CreatePersonInput = z.input<typeof createPersonInputSchema>
 export type UpdatePersonInput = z.infer<typeof updatePersonInputSchema>
 export type SetNoteInput = z.infer<typeof setNoteInputSchema>
 export type CreateMemberInput = z.infer<typeof createMemberInputSchema>

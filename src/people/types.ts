@@ -2,6 +2,8 @@ import type { Campaign, CensusEntry, FeeDetail, ImportPreview, PersonRecord, Rec
 
 export type Viewer = { sub: string; telegramId: string | null; can: (permission: string) => boolean }
 export type Person = Omit<PersonRecord, "fees" | "isMember"> & {
+  authRegistrationId?: string
+  authProvisional?: boolean
   accountSub: string | null
   azureId: string | null
   feeYears: Record<string, FeeDetail & { rejections: NonNullable<FeeDetail["rejection"]>[]; fileId: string | null }>

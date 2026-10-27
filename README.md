@@ -130,3 +130,9 @@ Signatures are checked against the CIE certification authorities of the Minister
 catalog entries. Selected FAQs/categories must be replaced in Freshman before deleting them from the catalog.
 The development seed also initializes the card slots and selections; `--force` clears those selections before
 replacing the sample FAQ catalog.
+
+### People before login
+
+New manual People records are created in Auth, including their initial admin/team roles, with optional contacts and no census prerequisites. The backend uses Auth's stable registration ID to retain the register record after a Master Admin approves its real login account. Declared Telegram contacts never establish a verified identity, and a preliminary person is not automatically linked by name or contact alone. Auth supplies proposals for the Linking queue; approval and role transfer happen atomically in Auth. Production creation fails explicitly if Auth is unavailable; the local-only option exists for the test harness.
+
+Deploy the Auth preliminary-person migration/API before this backend and the matching admin dashboard. Existing historical records/imports are not automatically migrated by this feature.

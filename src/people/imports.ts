@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { XMLParser, XMLValidator } from "fast-xml-parser"
 import { Unzip, UnzipInflate } from "fflate"
 import { z } from "zod"
-import { type CensusAnswer, createPersonInputSchema, teamIdSchema } from "./contract"
+import { type CensusAnswer, personInputSchema, teamIdSchema } from "./contract"
 import { fail, hash } from "./model"
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -201,7 +201,7 @@ export async function parseImport(file: File) {
     if (indexes[required] < 0) fail("BAD_REQUEST", `Missing census column: ${required}`)
   return rows.slice(1).map((cells, i) => {
     const get = (key: string) => cells[indexes[key]]?.trim() ?? ""
-    const profile = createPersonInputSchema.safeParse({
+    const profile = personInputSchema.safeParse({
       ...Object.fromEntries(Object.keys(aliases).map((key) => [key, get(key)])),
       admin: false,
     })

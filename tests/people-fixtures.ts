@@ -115,6 +115,7 @@ export function harness(overrides: Partial<PeopleOptions> = {}) {
   const service = createPeopleService({
     store,
     config,
+    allowLocalPeople: true,
     now: () => clock,
     directory: async () => accounts,
     telegramUsers: async () => [],
