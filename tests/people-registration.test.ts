@@ -118,7 +118,18 @@ describe("People before the first Auth login", () => {
       },
     ]
     h.advance(SOURCE_TTL_MS.directory + 1)
-    const [review] = await h.service.listReviews(master)
+    // The person signing in learns they were found, and isn't sent to ask to be added.
+    const self = viewer("new-login", ["people:self"])
+    expect(await h.service.getMyArea(self)).toEqual({
+      state: "awaiting-approval",
+      candidate: { id: created.id, name: "Mario Rossi", roles: ["Admin", "IT"] },
+      reason: expect.stringContaining("Same verified email address"),
+    })
+    await expect(h.service.askToBeAdded(self, { note: "" } as never)).rejects.toThrow("already checking")
+    // The verified match is the only review: the same name doesn't add a name-only one.
+    const reviews = await h.service.listReviews(master)
+    expect(reviews.map((r) => r.kind)).toEqual(["preliminary-link"])
+    const [review] = reviews
     expect(review).toMatchObject({ kind: "preliminary-link", record: { id: created.id } })
     expect(await h.service.getMyRoles(viewer("new-login", ["people:self"]))).toEqual({ capoScope: null, leads: [] })
     const input = {
@@ -180,6 +191,33 @@ describe("People before the first Auth login", () => {
     expect(await h.service.listPeople(master)).toHaveLength(2)
     expect(await h.service.getPerson(master, created)).toMatchObject({ preliminary: true, account: { status: "none" } })
     expect(auth.roles.link).not.toHaveBeenCalled()
+  })
+
+  it("tells a weaker match it is being checked without showing the record", async () => {
+    const auth = authPeople()
+    const h = harness({ peopleRoles: auth.roles, allowLocalPeople: false })
+    await h.service.createPerson(master, { firstName: "Anna", lastName: "Bianchi", telegramUsername: "anna_pn" })
+    const registration = auth.directory.users[0]
+    assert.ok(registration.registrationId)
+    h.accounts.push({ sub: "tg-login", name: "Someone", email: null, emailVerified: false, telegramId: "77" })
+    auth.directory.proposals = [
+      {
+        personId: registration.registrationId,
+        sub: "tg-login",
+        name: "Someone",
+        email: null,
+        telegramId: "77",
+        reason: "telegram-username",
+      },
+    ]
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    expect(await h.service.getMyArea(viewer("tg-login", ["people:self"]))).toEqual({
+      state: "awaiting-approval",
+      candidate: null,
+      reason: expect.stringContaining("You don't need to ask to be added"),
+    })
+    const [review] = await h.service.listReviews(master)
+    expect(review).toMatchObject({ kind: "preliminary-link", message: expect.stringContaining("Usernames can change") })
   })
 
   it("fails without Auth instead of creating a local authority", async () => {

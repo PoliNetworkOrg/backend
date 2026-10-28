@@ -457,6 +457,13 @@ export const myAreaSchema = z.discriminatedUnion("state", [
     }),
     reason: z.string(),
   }),
+  z.object({
+    /** People already holds a record made before this account's first sign-in; a Master Admin decides the link. */
+    state: z.literal("awaiting-approval"),
+    /** Only when a verified email or Telegram account matched: weaker matches may be someone else's record. */
+    candidate: z.object({ id: z.string(), name: z.string(), roles: z.array(z.string()) }).nullable(),
+    reason: z.string(),
+  }),
   z.object({ state: z.literal("none"), request: z.object({ sentOn: z.string() }).nullable() }),
 ])
 export type MyArea = z.infer<typeof myAreaSchema>

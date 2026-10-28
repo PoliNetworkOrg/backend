@@ -215,6 +215,8 @@ export function createPeopleService(options: PeopleOptions) {
                 "The verified email matches this person's recorded email. A Master Admin must approve the link.",
               "verified-telegram":
                 "The verified Telegram account matches this person's recorded Telegram ID. A Master Admin must approve the link.",
+              "telegram-username":
+                "The signed-in Telegram username matches the one recorded for this person. Usernames can change hands; a Master Admin must check before linking.",
               "name-only":
                 "Only the name matches. This may be a different person; a Master Admin must check before linking.",
               "conflicting-identities":
@@ -512,6 +514,28 @@ export function createPeopleService(options: PeopleOptions) {
     log(p, actor, `Auth approved the preliminary identity link: ${reason}`, now())
     return true
   }
+  const roleNames = (p: Person) => [
+    ...(p.admin?.status === "active" ? ["Admin"] : []),
+    ...p.teams.filter((t) => !t.endedOn).map((t) => C.TEAMS[t.team].name),
+  ]
+  /** A preliminary Auth person proposed for this account, while a Master Admin has not decided the link. */
+  function awaitingApproval(s: PeopleState, v: Viewer): C.MyArea | null {
+    const pending = Object.values(s.reviews).filter(
+      (r) => r.kind === "preliminary-link" && r.sub === v.sub && !r.resolved
+    )
+    if (!pending.length) return null
+    const proposals = (directoryRead?.value.proposals ?? []).filter((proposal) => proposal.sub === v.sub)
+    const person = pending.length === 1 ? s.persons[pending[0].record?.id ?? ""] : undefined
+    const reason = person && proposals.find((proposal) => proposal.personId === person.authRegistrationId)?.reason
+    const verified = reason === "verified-email" || reason === "verified-telegram"
+    return {
+      state: "awaiting-approval",
+      candidate: person && verified ? { ...ref(person), roles: roleNames(person) } : null,
+      reason: verified
+        ? `${reason === "verified-email" ? "Same verified email address" : "Same verified Telegram account"}. A Master Admin will confirm the link: you don't need to ask to be added.`
+        : "An admin is checking whether you're already on PoliNetwork's lists. You don't need to ask to be added.",
+    }
+  }
   function candidate(s: PeopleState, v: Viewer, account: Account | undefined) {
     if (!account) return null
     const rejected = new Set(
@@ -560,7 +584,7 @@ export function createPeopleService(options: PeopleOptions) {
     )
     if (candidates.length === 1) return candidates[0]
     const nameMatch = Object.values(s.persons).find(
-      (p) => nameOf(p).toLowerCase() === account.name.toLowerCase() && !rejected.has(p.id)
+      (p) => !p.authProvisional && nameOf(p).toLowerCase() === account.name.toLowerCase() && !rejected.has(p.id)
     )
     if (nameMatch) review(s, v, account, "name-only", nameMatch, "Name-only matches require HR review")
     return null
@@ -1500,16 +1524,15 @@ export function createPeopleService(options: PeopleOptions) {
                 course: match.profile.course,
                 year: match.profile.year,
                 campus: match.profile.campus,
-                roles: [
-                  ...(match.admin?.status === "active" ? ["Admin"] : []),
-                  ...match.teams.filter((t) => !t.endedOn).map((t) => C.TEAMS[t.team].name),
-                ],
+                roles: roleNames(match),
               },
               reason:
                 v.telegramId && match.profile.telegramId === v.telegramId
                   ? "Same verified Telegram account"
                   : "Same verified email address",
             }
+          const awaiting = awaitingApproval(u.state, v)
+          if (awaiting) return awaiting
           const asked = Object.values(u.state.reviews).find(
             (r) => r.sub === v.sub && r.kind === "ask-to-be-added" && !r.resolved
           )
@@ -1611,6 +1634,7 @@ export function createPeopleService(options: PeopleOptions) {
       if (!account) fail("PRECONDITION_FAILED", "IdP account unavailable")
       return tx((u) => {
         if (own(u.state, v)) fail("CONFLICT", "Already linked to a person")
+        if (awaitingApproval(u.state, v)) fail("CONFLICT", "A Master Admin is already checking your existing record")
         review(u.state, v, account, "ask-to-be-added", null, JSON.stringify(input))
       })
     },

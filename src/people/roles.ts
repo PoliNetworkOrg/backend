@@ -14,7 +14,7 @@ export type RoleDirectory = {
     name: string
     email: string | null
     telegramId: string | null
-    reason: "verified-email" | "verified-telegram" | "name-only" | "conflicting-identities"
+    reason: "verified-email" | "verified-telegram" | "telegram-username" | "name-only" | "conflicting-identities"
   }[]
   roles: { key: string; name: string; binding: string }[]
   users: {

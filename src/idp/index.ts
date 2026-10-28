@@ -30,7 +30,13 @@ const peopleDirectory = z.object({
         name: z.string(),
         email: z.string().nullable(),
         telegramId: z.string().nullable(),
-        reason: z.enum(["verified-email", "verified-telegram", "name-only", "conflicting-identities"]),
+        reason: z.enum([
+          "verified-email",
+          "verified-telegram",
+          "telegram-username",
+          "name-only",
+          "conflicting-identities",
+        ]),
       })
     )
     .optional(),
