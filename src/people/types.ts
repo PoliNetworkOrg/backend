@@ -84,6 +84,7 @@ export type SignedBatch = {
     signer: string | null
   }[]
 }
+export type MailAction = { label: string; url: string }
 export type Outbox = {
   id: string
   personId: string
@@ -91,6 +92,8 @@ export type Outbox = {
   to: string
   subject: string
   text: string
+  /** The button under the text; absent on emails queued before it existed. */
+  action?: MailAction | null
   fileId: string | null
   status: "pending" | "sending" | "sent" | "failed"
   attemptedAt: string | null

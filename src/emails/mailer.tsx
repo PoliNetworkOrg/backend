@@ -6,6 +6,7 @@ import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import MemberNumberChanged from "./templates/member-number-changed"
+import PeopleEmail from "./templates/people"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
@@ -126,9 +127,13 @@ export async function sendPeopleEmail(input: {
   to: string
   subject: string
   text: string
+  firstName: string | null
+  action: { label: string; url: string } | null
   attachment: { fileName: string; contentType: string; content: Uint8Array } | null
 }) {
-  const component = <div style={{ whiteSpace: "pre-wrap" }}>{input.text}</div>
+  const component = (
+    <PeopleEmail subject={input.subject} firstName={input.firstName} text={input.text} action={input.action} />
+  )
   const attachments = input.attachment
     ? [
         {

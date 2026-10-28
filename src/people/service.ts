@@ -25,6 +25,7 @@ import {
   hash,
   leads,
   log,
+  longDate,
   nameOf,
   newestReceipts,
   newPerson,
@@ -61,6 +62,7 @@ import {
 import type {
   Account,
   ImportRow,
+  MailAction,
   PeopleConfig,
   PeopleState,
   PeopleStore,
@@ -85,6 +87,9 @@ export type PeopleOptions = {
     to: string
     subject: string
     text: string
+    /** The recipient's first name, for the greeting. */
+    firstName: string | null
+    action: MailAction | null
     attachment: { fileName: string; contentType: string; content: Uint8Array } | null
   }) => Promise<void>
   verifySigned: (sub: string, requestId: string, bytes: Uint8Array) => Promise<{ signer: string; content: Uint8Array }>
@@ -126,6 +131,10 @@ function unconfirmed(p: Person, on: string): RoleSnapshot {
 
 export function createPeopleService(options: PeopleOptions) {
   const { store, config } = options
+  /** The account holder's area in the dashboard, where every People email leads. */
+  const AREA = `${config.dashboardUrl}/dashboard/account/me`
+  const feeReminder = (f: { year: string; dueOn: string; amountCents: number }) =>
+    `ti ricordiamo che la quota associativa ${f.year} di PoliNetwork, di ${(f.amountCents / 100).toLocaleString("it-IT", { style: "currency", currency: "EUR" })}, è da versare. Scadenza: ${longDate(f.dueOn)}.\n\nNella tua area personale trovi le coordinate per il bonifico e puoi caricare la ricevuta. Se l'hai già versata, ignora questo messaggio.`
   const now = options.now ?? (() => new Date())
   const date = () => today(now())
   const year = () => academicYear(date())
@@ -888,7 +897,8 @@ export function createPeopleService(options: PeopleOptions) {
             id,
             p.profile.personalEmail,
             `Censimento PoliNetwork ${c.year}`,
-            `Conferma la tua partecipazione: ${config.dashboardUrl}/dashboard/account/me`
+            `è aperto il censimento ${c.year} di PoliNetwork: ogni anno chiediamo a chi fa parte dell'associazione se continua e di aggiornare corso, anno e sede. Ci vogliono un paio di minuti.\n\nPuoi rispondere dalla tua area personale. Chiusura del censimento: ${longDate(c.closesOn)}.`,
+            { label: "Rispondi al censimento", url: AREA }
           )
           p.reminders[c.id] = now().toISOString()
           entry.reminders++
@@ -1247,7 +1257,7 @@ export function createPeopleService(options: PeopleOptions) {
             `review-details:${r.id}:${randomUUID()}`,
             account.email,
             "PoliNetwork · verifica anagrafica",
-            input.reason
+            `stiamo collegando il tuo account PoliNetwork alla tua scheda nell'associazione e prima di farlo dobbiamo verificare alcuni dati. Questo è il messaggio del team HR:\n\n${input.reason}`
           )
         } else if (input.resolution === "merge-first") {
           if (!r.record || !r.other || !account) fail("CONFLICT", "Two records and a registered account are required")
@@ -1314,7 +1324,8 @@ export function createPeopleService(options: PeopleOptions) {
           `invite:${p.id}:${p.invite.hash}`,
           p.profile.personalEmail,
           "PoliNetwork · collega il tuo account",
-          `${config.dashboardUrl}/dashboard/account/me?peopleInvite=${token}`
+          `il team HR di PoliNetwork ti invita a collegare il tuo account PoliNetwork alla tua scheda nell'associazione. Una volta collegato, nella tua area personale trovi i tuoi dati, i tuoi ruoli e le quote associative.\n\nPremi il pulsante e accedi con l'account che usa questo indirizzo email (${p.profile.personalEmail}). Il collegamento avviene subito, non devi fare altro.\n\nScadenza dell'invito: ${longDate(p.invite.expiresAt.slice(0, 10))}. Se non ti aspettavi questo messaggio, ignoralo: senza il tuo accesso non succede niente.`,
+          { label: "Collega il tuo account", url: `${AREA}?peopleInvite=${token}` }
         )
         log(p, v.sub, "Queued account invitation", now())
       })
@@ -1683,7 +1694,8 @@ export function createPeopleService(options: PeopleOptions) {
             `fee-rejection:${randomUUID()}`,
             p.profile.personalEmail,
             "PoliNetwork · verifica del bonifico",
-            input.reason
+            `abbiamo controllato la ricevuta del bonifico per la quota associativa ${f.year} e non abbiamo potuto accettarla. Questo è il motivo:\n\n${input.reason}\n\nPuoi caricare una nuova ricevuta dalla tua area personale.`,
+            { label: "Apri la tua area", url: AREA }
           )
         log(p, v.sub, `Rejected fee receipt: ${input.reason}`, now())
       })
@@ -1727,14 +1739,10 @@ export function createPeopleService(options: PeopleOptions) {
             continue
           }
           const id = `fee-reminder:${p.id}:${f.year}:${date()}`
-          queue(
-            u.state,
-            p,
-            id,
-            p.member.m365Email,
-            `PoliNetwork · quota ${f.year}`,
-            `Quota associativa da versare entro il ${f.dueOn}: ${config.dashboardUrl}/dashboard/account/me`
-          )
+          queue(u.state, p, id, p.member.m365Email, `PoliNetwork · quota ${f.year}`, feeReminder(f), {
+            label: "Apri la tua area",
+            url: AREA,
+          })
           f.lastReminder = now().toISOString()
           ids.push(id)
           log(p, v.sub, `Queued fee reminder ${f.year}`, now())
@@ -2058,7 +2066,10 @@ export function createPeopleService(options: PeopleOptions) {
           mail.status = "sending"
           mail.attemptedAt = now().toISOString()
         }
-        return pending
+        return pending.map((mail) => ({
+          ...mail,
+          firstName: u.state.persons[mail.personId]?.profile.firstName ?? null,
+        }))
       })
       for (const mail of claimed) {
         let error: string | null = null
@@ -2066,7 +2077,15 @@ export function createPeopleService(options: PeopleOptions) {
           const fileId = mail.fileId
           const file = fileId ? await commit((u) => u.getFile(fileId)) : null
           if (mail.fileId && !file) throw new Error("Attachment is missing")
-          await options.sendMail({ id: mail.id, to: mail.to, subject: mail.subject, text: mail.text, attachment: file })
+          await options.sendMail({
+            id: mail.id,
+            to: mail.to,
+            subject: mail.subject,
+            text: mail.text,
+            firstName: mail.firstName,
+            action: mail.action ?? null,
+            attachment: file,
+          })
         } catch (err) {
           error = err instanceof Error ? err.message : String(err)
         }
@@ -2143,14 +2162,10 @@ export function createPeopleService(options: PeopleOptions) {
           if (![14, 3].includes(days)) continue
           const id = `fee-auto:${p.id}:${f.year}:${days}`
           if (u.state.outbox[id]) continue
-          queue(
-            u.state,
-            p,
-            id,
-            p.member.m365Email,
-            `PoliNetwork · quota ${f.year}`,
-            `Scadenza quota associativa: ${f.dueOn}. ${config.dashboardUrl}/dashboard/account/me`
-          )
+          queue(u.state, p, id, p.member.m365Email, `PoliNetwork · quota ${f.year}`, feeReminder(f), {
+            label: "Apri la tua area",
+            url: AREA,
+          })
           f.lastReminder = now().toISOString()
           log(p, "system", `Queued automatic fee reminder ${f.year} (${days} days)`, now())
         }

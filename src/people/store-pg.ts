@@ -217,7 +217,7 @@ export async function completeReceiptSignature(tx: Transaction, commit: Signatur
     receiptId: receipt.id,
     to: receipt.recipient,
     subject: `Ricevuta ${receipt.number} · PoliNetwork`,
-    text: `Quota associativa ${receipt.year}. In allegato la ricevuta firmata.`,
+    text: `grazie per aver versato la quota associativa ${receipt.year} di PoliNetwork. In allegato trovi la ricevuta ${receipt.number}, firmata digitalmente: conservala, vale come prova del pagamento.`,
     fileId,
     status: "pending",
     attemptedAt: null,

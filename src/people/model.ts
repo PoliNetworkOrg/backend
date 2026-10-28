@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { TRPCError } from "@trpc/server"
 import * as C from "./contract"
-import type { Officer, PeopleConfig, PeopleState, Person, StoredReceipt, UnitOfWork, Viewer } from "./types"
+import type { MailAction, Officer, PeopleConfig, PeopleState, Person, StoredReceipt, UnitOfWork, Viewer } from "./types"
 
 export function fail(
   code: "BAD_REQUEST" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "PRECONDITION_FAILED",
@@ -26,6 +26,11 @@ export function academicYear(date: string) {
   const y = Number(date.slice(0, 4)) - (Number(date.slice(5, 7)) < 9 ? 1 : 0)
   return `${y}/${String(y + 1).slice(-2)}`
 }
+/** A `YYYY-MM-DD` date as Italian emails write it, e.g. "31 ottobre 2026". */
+export const longDate = (date: string) =>
+  new Intl.DateTimeFormat("it-IT", { timeZone: "UTC", day: "numeric", month: "long", year: "numeric" }).format(
+    new Date(`${date}T00:00:00Z`)
+  )
 export const dueDate = (year: string) => `${year.slice(0, 4)}-10-31`
 export function find(state: PeopleState, id: string) {
   return state.persons[id] ?? fail("NOT_FOUND", "Person not found")
@@ -204,8 +209,7 @@ export function queue(
   to: string,
   subject: string,
   text: string,
-  fileId: string | null = null,
-  receiptId: string | null = null
+  action: MailAction | null = null
 ) {
   if (s.outbox[id]?.status === "failed") {
     s.outbox[id].status = "pending"
@@ -218,8 +222,9 @@ export function queue(
     to,
     subject,
     text,
-    fileId,
-    receiptId,
+    action,
+    fileId: null,
+    receiptId: null,
     status: "pending",
     attemptedAt: null,
     error: null,

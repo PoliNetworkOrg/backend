@@ -182,12 +182,12 @@ describe("People authorization and projections", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" })
     await h.service.unlinkAccount(master, { personId: "P-0003" })
     await h.service.sendInvite(master, { personId: "P-0003" })
-    const first = Object.values(h.state().outbox).at(-1)?.text.split("peopleInvite=")[1] ?? ""
+    const first = Object.values(h.state().outbox).at(-1)?.action?.url.split("peopleInvite=")[1] ?? ""
     await h.service.sendInvite(master, { personId: "P-0003" })
     await expect(h.service.acceptInvite(viewer("member", ["people:self"]), { token: first })).rejects.toMatchObject({
       code: "NOT_FOUND",
     })
-    const last = Object.values(h.state().outbox).at(-1)?.text.split("peopleInvite=")[1] ?? ""
+    const last = Object.values(h.state().outbox).at(-1)?.action?.url.split("peopleInvite=")[1] ?? ""
     await expect(h.service.acceptInvite(viewer("vice", ["people:self"]), { token: last })).rejects.toMatchObject({
       code: "NOT_FOUND",
     })
