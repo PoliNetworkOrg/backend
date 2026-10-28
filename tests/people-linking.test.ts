@@ -116,6 +116,55 @@ describe("account linking against PoliNetwork Auth's directory", () => {
     expect(h.state().persons["P-0003"].accountSub).toBeNull()
   })
 
+  it("lists a link the account holder made and lets HR undo it for good", async () => {
+    const a = auth([login("luca-login", { verifiedEmail: "luca@example.org" })])
+    const h = harness({ peopleRoles: a.roles })
+    await h.seed()
+    await h.store.transaction(async ({ state }) => {
+      const p = state.persons["P-0003"]
+      p.accountSub = null
+      p.account = { status: "none" }
+      p.admin = null
+      p.profile.personalEmail = "luca@example.org"
+      p.profile.telegramId = null
+    })
+    const self = viewer("luca-login", ["people:self"])
+    await h.service.confirmMatch(self)
+    expect(await h.service.listRecentLinks(master)).toContainEqual(
+      expect.objectContaining({ personId: "P-0003", linkedBy: "account-holder", preliminary: false })
+    )
+    await h.service.unlinkAccount(master, { personId: "P-0003" })
+    expect(h.state().persons["P-0003"]).toMatchObject({ accountSub: null, account: { status: "none" } })
+    expect(await h.service.listRecentLinks(master)).not.toContainEqual(expect.objectContaining({ personId: "P-0003" }))
+    // “Is this you?” doesn't come back for the same account.
+    expect(await h.service.getMyArea(self)).toMatchObject({ state: "none" })
+  })
+
+  it("takes the record's roles off the account in Auth when HR undoes the link", async () => {
+    const a = auth([login("luca-login", { telegramId: "103", roles: ["it"] })])
+    const h = harness({ peopleRoles: a.roles })
+    await h.seed()
+    await h.store.transaction(async ({ state }) => {
+      const p = state.persons["P-0003"]
+      p.accountSub = null
+      p.account = { status: "none" }
+    })
+    await h.service.syncSources()
+    const [review] = await h.service.listReviews(master)
+    await h.service.resolveReview(master, { reviewId: review.id, resolution: "link-anyway", reason: "Checked" })
+    await h.service.unlinkAccount(master, { personId: "P-0003" })
+    expect(a.roles.change).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sub: "luca-login", changes: [{ kind: "team", team: "it", role: null }] })
+    )
+    expect(h.state().persons["P-0003"]).toMatchObject({ accountSub: null, profile: { telegramId: null } })
+    // Auth no longer lists the role, so the account gets no record of its own.
+    a.directory.users[0].roles = []
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    await h.service.syncSources()
+    expect(Object.values(h.state().persons).some((p) => p.accountSub === "luca-login")).toBe(false)
+    expect(await h.service.listReviews(master)).toEqual([])
+  })
+
   it("does not reopen a declined preliminary link when Auth's directory is read again", async () => {
     const a = auth([])
     a.directory.users.push({

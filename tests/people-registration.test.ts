@@ -6,6 +6,7 @@ import {
   type PeopleRoles,
   RoleChangeError,
   type RoleDirectory,
+  type UnlinkAuthPerson,
 } from "@/people/roles"
 import { SOURCE_TTL_MS } from "@/people/service"
 import { harness, master, viewer } from "./people-fixtures"
@@ -51,6 +52,15 @@ function authPeople() {
       Object.assign(person, { previousSub: person.sub, sub: input.userId, provisional: false })
       person.verifiedEmail = login?.verifiedEmail ?? null
       return { sub: input.userId }
+    }),
+    unlink: vi.fn(async (input: UnlinkAuthPerson) => {
+      if (input.actor !== "president") throw new RoleChangeError(403, "Master Admin required")
+      const person = directory.users.find((person) => person.registrationId === input.personId)
+      if (!person) throw new Error("Person not found")
+      // The login account is listed on its own again, without the person's roles.
+      directory.users.push({ ...person, registrationId: undefined, previousSub: undefined, roles: [] })
+      Object.assign(person, { sub: input.personId, provisional: true, previousSub: undefined, verifiedEmail: null })
+      return { sub: input.personId }
     }),
   }
   return { directory, roles }
@@ -142,6 +152,30 @@ describe("People before the first Auth login", () => {
       teams: [{ team: "it", role: "member" }],
     })
     expect(await h.service.listPeople(master)).toHaveLength(1)
+    expect(await h.service.listReviews(master)).toEqual([])
+
+    // The link shows among recent ones; undoing it needs a Master Admin and gives the roles back to the person.
+    expect(await h.service.listRecentLinks(master)).toEqual([
+      expect.objectContaining({ personId: created.id, preliminary: true, linkedBy: "admin" }),
+    ])
+    await expect(
+      h.service.unlinkAccount(viewer("vice", ["admin:access", "people:write"]), { personId: created.id })
+    ).rejects.toThrow("Master Admin required")
+    await h.service.unlinkAccount(master, { personId: created.id })
+    expect(auth.roles.unlink).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: "unlink-person", personId: registration.registrationId })
+    )
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    expect(await h.service.getPerson(master, created)).toMatchObject({
+      preliminary: true,
+      account: { status: "none" },
+      admin: { status: "active" },
+      teams: [{ team: "it", role: "member" }],
+    })
+    expect(await h.service.listPeople(master)).toHaveLength(1)
+    expect(await h.service.listRecentLinks(master)).toEqual([])
+    // The same account isn't proposed this person again.
+    expect(await h.service.getMyArea(self)).toMatchObject({ state: "none" })
     expect(await h.service.listReviews(master)).toEqual([])
   })
 

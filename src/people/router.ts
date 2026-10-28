@@ -152,6 +152,7 @@ export function createPeopleRouter(people: PeopleService) {
         .mutation(({ ctx, input }) => people.resolveReview(ctx.viewer, input)),
       dismiss: write.input(C.reviewInputSchema).mutation(({ ctx, input }) => people.dismissReview(ctx.viewer, input)),
       invites: read.output(C.inviteSchema.array()).query(({ ctx }) => people.listInvites(ctx.viewer)),
+      recent: read.output(C.recentLinkSchema.array()).query(({ ctx }) => people.listRecentLinks(ctx.viewer)),
       sendInvite: write
         .input(C.personRefInputSchema)
         .mutation(({ ctx, input }) => people.sendInvite(ctx.viewer, input)),

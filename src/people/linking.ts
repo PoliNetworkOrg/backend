@@ -203,7 +203,7 @@ export function attachAccount(
   if (p.accountSub && p.accountSub !== account.sub) fail("CONFLICT", "Unlink the existing account first")
   const wasLinked = !!p.accountSub
   p.accountSub = account.sub
-  p.account = { status: "linked", email: account.email ?? "", via, linkedOn: at.date, how }
+  p.account = { status: "linked", email: account.email ?? "", via, linkedOn: at.date, how, by: actor }
   p.invite = null
   log(p, actor, `Linked account ${account.sub}: ${how}`, at.now)
   return !wasLinked

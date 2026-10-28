@@ -503,8 +503,10 @@ export function createPeopleService(options: PeopleOptions) {
       via: "PoliNetwork Auth",
       linkedOn: date(),
       how: "Master Admin approved the preliminary identity",
+      by: actor,
     }
     directoryRead = null
+    bumpRoles(s)
     log(p, actor, `Auth approved the preliminary identity link: ${reason}`, now())
     return true
   }
@@ -1303,6 +1305,36 @@ export function createPeopleService(options: PeopleOptions) {
         )
       )
     },
+    async listRecentLinks(v: Viewer) {
+      requireGeneral(v, "people:read")
+      const since = new Date(now().getTime() - C.RECENT_LINK_DAYS * 86400000).toISOString().slice(0, 10)
+      return tx((u) =>
+        Object.values(u.state.persons)
+          .flatMap((p) => {
+            if (p.account.status !== "linked" || p.account.linkedOn < since) return []
+            const by = p.account.by
+            return [
+              {
+                personId: p.id,
+                name: nameOf(p),
+                email: p.account.email,
+                via: p.account.via,
+                how: p.account.how,
+                linkedOn: p.account.linkedOn,
+                linkedBy: !by
+                  ? ("unknown" as const)
+                  : by === p.accountSub
+                    ? ("account-holder" as const)
+                    : by === "system"
+                      ? ("system" as const)
+                      : ("admin" as const),
+                preliminary: !!p.authRegistrationId,
+              },
+            ]
+          })
+          .sort((a, b) => b.linkedOn.localeCompare(a.linkedOn))
+      )
+    },
     async sendInvite(v: Viewer, input: { personId: string }) {
       requireGeneral(v, "people:write")
       return tx((u) => {
@@ -1375,17 +1407,53 @@ export function createPeopleService(options: PeopleOptions) {
       if (!account) fail("NOT_FOUND", "IdP account not found")
       return tx((u) => linkRecord(u.state, find(u.state, input.personId), account, v.sub, input.reason))
     },
+    /**
+     * Undoes a link, typically a mistaken one. The account loses the record's roles in Auth: for a preliminary person a
+     * Master Admin gives them back to it there; otherwise People removes them and keeps owning them on the record. The
+     * record is never proposed to that account again, and the identities it copied from the account are dropped.
+     */
     async unlinkAccount(v: Viewer, input: { personId: string }) {
       requireGeneral(v, "people:write")
-      return tx((u) => {
+      const known = await readDirectory()
+      return tx(async (u) => {
         const p = find(u.state, input.personId)
-        if (p.authRegistrationId) fail("FORBIDDEN", "Manage this identity link in Auth")
-        if (!p.accountSub) fail("CONFLICT", "Account not linked")
+        if (!p.accountSub || p.authProvisional) fail("CONFLICT", "Account not linked")
         settled(p)
-        p.accountSub = null
+        const sub = p.accountSub
+        const reason = "Unlinked in People"
+        if (p.authRegistrationId) {
+          if (!options.peopleRoles?.unlink) fail("PRECONDITION_FAILED", "Auth identity linking is unavailable")
+          await options.peopleRoles.unlink({
+            operation: "unlink-person",
+            id: randomUUID(),
+            actor: v.sub,
+            personId: p.authRegistrationId,
+            reason,
+          })
+          p.accountSub = p.authRegistrationId
+          p.authProvisional = true
+        } else {
+          const held = known?.value.users.find((user) => user.sub === sub)?.roles ?? []
+          const changes = known
+            ? roleChanges(wantedView(boundRoles(known.value), held), { admin: false, teams: {} })
+            : []
+          if (changes.length && options.peopleRoles)
+            await options.peopleRoles.change({ id: randomUUID(), actor: v.sub, sub, reason, changes })
+          // Without an account its roles can't follow PoliNetwork Auth: People owns them from now on.
+          p.accountSub = null
+        }
+        directoryRead = null
+        bumpRoles(u.state)
         p.account = { status: "none" }
-        // Without an account its roles can't follow PoliNetwork Auth: People owns them from now on.
-        log(p, v.sub, "Unlinked account", now())
+        const account = (known && accountsOf(known.value).find((a) => a.sub === sub)) || null
+        if (account) {
+          if (account.azureId && p.azureId === account.azureId) p.azureId = null
+          if (account.telegramId && p.profile.telegramId === account.telegramId) p.profile.telegramId = null
+          const r = openReview(u.state, account, "not-me", p, "Unlinked in People", date())
+          r.resolved = true
+          r.rejectedPersonIds.push(p.id)
+        }
+        log(p, v.sub, `Unlinked account ${sub}`, now())
       })
     },
     async acceptInvite(v: Viewer, input: { token: string }) {

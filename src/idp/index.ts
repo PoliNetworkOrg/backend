@@ -146,6 +146,7 @@ function configure() {
       update: (input) => sendPeopleCommand(input, z.object({ sub: z.string() })),
       create: (input) => sendPeopleCommand(input, z.object({ sub: z.string() })),
       link: (input) => sendPeopleCommand(input, z.object({ sub: z.string() })),
+      unlink: (input) => sendPeopleCommand(input, z.object({ sub: z.string() })),
     }
     const sendPeopleCommand = async <T>(change: unknown, resultSchema: z.ZodType<T>): Promise<T> => {
       const send = async () => {

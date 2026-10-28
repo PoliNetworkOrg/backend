@@ -140,7 +140,15 @@ export const accountSchema = z.discriminatedUnion("status", [
     expiresOn: z.string(),
     sentBy: z.string(),
   }),
-  z.object({ status: z.literal("linked"), email: z.string(), via: z.string(), linkedOn: z.string(), how: z.string() }),
+  z.object({
+    status: z.literal("linked"),
+    email: z.string(),
+    via: z.string(),
+    linkedOn: z.string(),
+    how: z.string(),
+    /** Who made the link: the account holder, an admin's sub, or `system`. Absent on older links. */
+    by: z.string().optional(),
+  }),
   z.object({ status: z.literal("review"), reviewId: z.string(), issue: z.string() }),
 ])
 
@@ -325,6 +333,22 @@ export const inviteSchema = z.object({
   sentBy: z.string(),
 })
 export type Invite = z.infer<typeof inviteSchema>
+
+/** A link made recently, so HR can spot and undo a mistaken one. */
+export const recentLinkSchema = z.object({
+  personId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  via: z.string(),
+  how: z.string(),
+  linkedOn: z.string(),
+  linkedBy: z.enum(["account-holder", "admin", "system", "unknown"]),
+  /** Created in Auth before its first login: only a Master Admin can undo the link. */
+  preliminary: z.boolean(),
+})
+export type RecentLink = z.infer<typeof recentLinkSchema>
+/** How far back Linking lists recent links. */
+export const RECENT_LINK_DAYS = 30
 
 export const accountMatchSchema = z.object({
   id: z.string(),

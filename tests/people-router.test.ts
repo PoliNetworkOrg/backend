@@ -65,7 +65,7 @@ describe("People tRPC contract", () => {
     const procedures = (r as unknown as { _def: { procedures: Record<string, { _def: { meta: unknown } }> } })._def
       .procedures
     const defs = Object.entries(procedures)
-    expect(defs.length).toBe(60)
+    expect(defs.length).toBe(61)
     for (const [, proc] of defs) expect(proc._def.meta).toMatchObject({ policy: { user: { scope: "backend:admin" } } })
     for (const path of [
       "persons.list",
@@ -73,6 +73,7 @@ describe("People tRPC contract", () => {
       "teams.candidates",
       "census.importPreview",
       "linking.resolve",
+      "linking.recent",
       "capo.get",
       "me.roles",
       "fees.review",

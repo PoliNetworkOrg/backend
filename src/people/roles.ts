@@ -65,6 +65,13 @@ export type LinkAuthPerson = {
   userId: string
   reason: string
 }
+export type UnlinkAuthPerson = {
+  operation: "unlink-person"
+  id: string
+  actor: string
+  personId: string
+  reason: string
+}
 export type UpdateAuthPerson = Omit<CreateAuthPerson, "operation" | "changes"> & {
   operation: "update-person"
   personId: string
@@ -73,6 +80,7 @@ export type PeopleRoles = {
   update?(input: UpdateAuthPerson): Promise<{ sub: string }>
   create?(input: CreateAuthPerson): Promise<{ sub: string }>
   link?(input: LinkAuthPerson): Promise<{ sub: string }>
+  unlink?(input: UnlinkAuthPerson): Promise<{ sub: string }>
   directory(): Promise<RoleDirectory>
   change(change: RoleChange): Promise<RoleResult>
 }
