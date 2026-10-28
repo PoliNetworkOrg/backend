@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { PeopleRoles, RoleDirectory } from "@/people/roles"
+import { SOURCE_TTL_MS } from "@/people/service"
 import { harness, master, viewer } from "./people-fixtures"
 
 /** Auth's People directory with these accounts; role commands succeed without changing anything. */
@@ -87,8 +88,51 @@ describe("account linking against PoliNetwork Auth's directory", () => {
     const self = viewer("new-login", ["people:self"])
     expect(await h.service.getMyArea(self)).toMatchObject({ state: "none" })
     a.directory.users.push(login("new-login", { telegramId: "103" }))
-    // Within the cache lifetime: the unknown account makes People ask Auth again.
+    // Within the cache lifetime, an unknown account makes People ask Auth again, at most every 2 seconds.
+    expect(await h.service.getMyArea(self)).toMatchObject({ state: "none" })
+    h.advance(2_000)
     expect(await h.service.getMyArea(self)).toMatchObject({ state: "match", candidate: { id: "P-0003" } })
+    expect(await h.service.listReviews(master)).toEqual([])
+  })
+
+  it("keeps a declined match declined: a role holder then gets a record of their own", async () => {
+    const a = auth([login("luca-login", { telegramId: "103", roles: ["it"] })])
+    const h = harness({ peopleRoles: a.roles })
+    await h.seed()
+    await h.store.transaction(async ({ state }) => {
+      const p = state.persons["P-0003"]
+      p.accountSub = null
+      p.account = { status: "none" }
+    })
+    await h.service.syncSources()
+    const [review] = await h.service.listReviews(master)
+    expect(review).toMatchObject({ kind: "identity-match", record: { id: "P-0003" } })
+    await h.service.resolveReview(master, { reviewId: review.id, resolution: "decline", reason: "Different person" })
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    await h.service.syncSources()
+    expect(await h.service.listReviews(master)).toEqual([])
+    const persons = Object.values(h.state().persons)
+    expect(persons.find((p) => p.accountSub === "luca-login")).toMatchObject({ teams: [{ team: "it" }] })
+    expect(h.state().persons["P-0003"].accountSub).toBeNull()
+  })
+
+  it("does not reopen a declined preliminary link when Auth's directory is read again", async () => {
+    const a = auth([])
+    a.directory.users.push({
+      ...login("people:1", { name: "Pre Login", email: "pre@example.org" }),
+      registrationId: "people:1",
+      provisional: true,
+      firstName: "Pre",
+      lastName: "Login",
+    })
+    a.directory.users.push(login("real", { name: "Someone", verifiedEmail: "pre@example.org" }))
+    const h = harness({ peopleRoles: a.roles, allowLocalPeople: false })
+    await h.service.syncSources()
+    const [review] = await h.service.listReviews(master)
+    expect(review).toMatchObject({ kind: "preliminary-link", account: { name: "Someone" } })
+    await h.service.resolveReview(master, { reviewId: review.id, resolution: "decline", reason: "Different person" })
+    h.advance(SOURCE_TTL_MS.directory + 1)
+    await h.service.syncSources()
     expect(await h.service.listReviews(master)).toEqual([])
   })
 })

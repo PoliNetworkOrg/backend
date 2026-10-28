@@ -1,6 +1,6 @@
 import * as C from "./contract"
-import { evidenceBetween, strengthOf } from "./identity"
-import { accountOf, attachAccount, decideFor, reviewFor } from "./linking"
+import { sharesVerified } from "./identity"
+import { accountOf, attachAccount, decideFor, matchContext, reviewFor } from "./linking"
 import { academicYear, log, newPerson } from "./model"
 import type { PeopleState, Person } from "./types"
 
@@ -195,21 +195,27 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
   const bound = boundRoles(directory)
   const persons = () => Object.values(s.persons)
   const users = new Map(directory.users.map((u) => [u.sub, u]))
+  // Auth lists every account: look records up by key instead of scanning the register for each one.
+  const context = matchContext(s)
+  const bySub = new Map(persons().flatMap((p) => (p.accountSub ? [[p.accountSub, p] as const] : [])))
+  const byRegistration = new Map(
+    persons().flatMap((p) => (p.authRegistrationId ? [[p.authRegistrationId, p] as const] : []))
+  )
   for (const u of directory.users) {
     const wanted = wantedView(bound, u.roles)
-    const account = accountOf(u)
-    const existing = persons().find(
-      (p) => p.accountSub === u.sub || (u.registrationId && p.authRegistrationId === u.registrationId)
-    )
+    const existing = bySub.get(u.sub) ?? (u.registrationId ? byRegistration.get(u.registrationId) : undefined)
     const holds = wanted.admin || Object.keys(wanted.teams).length > 0
     // Accounts without a bound role only refresh the identities of the record already linked to them.
     if (!existing && !u.registrationId && !holds) continue
+    const account = accountOf(u)
     // Records other than its own holding this account's verified identity.
-    const holders = persons().filter((other) => {
-      if (other === existing || other.authProvisional || (!existing && !other.accountSub)) return false
-      const evidence = evidenceBetween(other, account)
-      return !!evidence && strengthOf(evidence) === "verified"
-    })
+    const holders = [...context.index.candidates(account)].filter(
+      (other) =>
+        other !== existing &&
+        !other.authProvisional &&
+        (!!existing || !!other.accountSub) &&
+        sharesVerified(other, account)
+    )
     let p: Person
     // Never move an identity off the record holding it, or give it a second record: HR decides.
     if (holders.length || (existing?.azureId && u.azureId && existing.azureId !== u.azureId)) {
@@ -227,7 +233,7 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
       p = blankPerson(s, splitName(u.name), at.date)
       log(p, "system", "Created from a preliminary person in PoliNetwork Auth", at.now)
     } else {
-      const decision = decideFor(s, account)
+      const decision = decideFor(s, account, context)
       if (decision.action === "review") {
         reviewFor(s, account, decision, at.date)
         continue
@@ -238,6 +244,7 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
         log(p, "system", "Created from a role held in PoliNetwork Auth", at.now)
       }
       attachAccount(s, p, account, "system", "Holds a People role in PoliNetwork Auth", at, "PoliNetwork Auth")
+      bySub.set(u.sub, p)
     }
     if (u.registrationId) {
       p.authRegistrationId = u.registrationId
@@ -265,6 +272,7 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
     if (u.azureId) p.azureId = u.azureId
     if (!p.profile.telegramId && u.telegramId) p.profile.telegramId = u.telegramId
     p.profile.telegramUsername ||= u.telegramUsername
+    context.index.add(p)
   }
 
   for (const p of persons()) {

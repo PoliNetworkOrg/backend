@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type Evidence, matchAccount, strengthOf } from "@/people/identity"
+import { type Evidence, matchAccount, RecordIndex, strengthOf } from "@/people/identity"
 import { decide } from "@/people/linking"
 import { newPerson } from "@/people/model"
 import { type Account, emptyState, type Person } from "@/people/types"
@@ -23,6 +23,7 @@ const account = (extra: Partial<Account> = {}): Account => ({
   ...extra,
 })
 const none = new Set<string>()
+const index = (persons: Person[]) => new RecordIndex(persons)
 
 describe("one identity rule", () => {
   const mario = record("Mario", "Rossi", (p) => {
@@ -38,11 +39,11 @@ describe("one identity rule", () => {
   ])("matches by %s", (_, signedIn, evidence) => {
     const p = structuredClone(mario)
     p.azureId = "az-1"
-    expect(matchAccount([p], signedIn, none)).toMatchObject({ kind: "one", evidence })
+    expect(matchAccount(index([p]), signedIn, none)).toMatchObject({ kind: "one", evidence })
   })
 
   it("never matches on an address Auth did not verify", () => {
-    expect(matchAccount([mario], account({ email: "mario@example.org" }), none)).toEqual({ kind: "none" })
+    expect(matchAccount(index([mario]), account({ email: "mario@example.org" }), none)).toEqual({ kind: "none" })
   })
 
   it("matches the Microsoft 365 address of a member", () => {
@@ -55,7 +56,7 @@ describe("one identity rule", () => {
         m365Email: "a.b@polinetwork.org",
       }
     })
-    expect(matchAccount([member], account({ verifiedEmail: "a.b@polinetwork.org" }), none)).toMatchObject({
+    expect(matchAccount(index([member]), account({ verifiedEmail: "a.b@polinetwork.org" }), none)).toMatchObject({
       kind: "one",
       evidence: "email",
     })
@@ -66,7 +67,11 @@ describe("one identity rule", () => {
     const handle = record("Luca", "Verdi", (p) => {
       p.profile.telegramUsername = "mario_test"
     })
-    const match = matchAccount([homonym, handle, mario], account({ telegramId: "101", name: "Mario Rossi" }), none)
+    const match = matchAccount(
+      index([homonym, handle, mario]),
+      account({ telegramId: "101", name: "Mario Rossi" }),
+      none
+    )
     expect(match).toMatchObject({ kind: "one", person: { id: mario.id }, evidence: "telegram" })
   })
 
@@ -74,13 +79,13 @@ describe("one identity rule", () => {
     const twin = record("Maria", "Rossi", (p) => {
       p.profile.personalEmail = "mario@example.org"
     })
-    expect(matchAccount([mario, twin], account({ verifiedEmail: "mario@example.org" }), none)).toMatchObject({
+    expect(matchAccount(index([mario, twin]), account({ verifiedEmail: "mario@example.org" }), none)).toMatchObject({
       kind: "conflict",
       reason: "two-records",
     })
     const byEmail = record("Anna", "Bianchi")
     expect(
-      matchAccount([byEmail, mario], account({ verifiedEmail: "anna@example.org", telegramId: "101" }), none)
+      matchAccount(index([byEmail, mario]), account({ verifiedEmail: "anna@example.org", telegramId: "101" }), none)
     ).toMatchObject({
       kind: "conflict",
       reason: "telegram-conflict",
@@ -88,9 +93,9 @@ describe("one identity rule", () => {
       other: { id: mario.id },
     })
     expect(
-      matchAccount([mario], account({ verifiedEmail: "mario@example.org", telegramId: "999" }), none)
+      matchAccount(index([mario]), account({ verifiedEmail: "mario@example.org", telegramId: "999" }), none)
     ).toMatchObject({ kind: "conflict", reason: "telegram-conflict", other: null })
-    expect(matchAccount([mario, record("Mario", "Rossi")], account({ name: "Mario Rossi" }), none)).toEqual({
+    expect(matchAccount(index([mario, record("Mario", "Rossi")]), account({ name: "Mario Rossi" }), none)).toEqual({
       kind: "none",
     })
   })
@@ -100,14 +105,14 @@ describe("one identity rule", () => {
       p.accountSub = "other"
       p.profile.telegramId = "101"
     })
-    expect(matchAccount([linked], account({ telegramId: "101" }), none)).toEqual({ kind: "none" })
-    expect(matchAccount([mario], account({ telegramId: "101" }), new Set([mario.id]))).toEqual({ kind: "none" })
+    expect(matchAccount(index([linked]), account({ telegramId: "101" }), none)).toEqual({ kind: "none" })
+    expect(matchAccount(index([mario]), account({ telegramId: "101" }), new Set([mario.id]))).toEqual({ kind: "none" })
     const preliminary = record("Mario", "Rossi", (p) => {
       p.accountSub = "people:1"
       p.authProvisional = true
       p.profile.telegramId = "101"
     })
-    expect(matchAccount([preliminary], account({ telegramId: "101" }), none)).toMatchObject({ kind: "one" })
+    expect(matchAccount(index([preliminary]), account({ telegramId: "101" }), none)).toMatchObject({ kind: "one" })
   })
 })
 
@@ -120,6 +125,15 @@ describe("one outcome policy", () => {
   })
   const preliminary = record("Mario", "Rossi", (p) => {
     p.authProvisional = true
+  })
+  const member = record("Mario", "Rossi", (p) => {
+    p.member = {
+      number: "0001",
+      status: "active",
+      admittedOn: "2025-01-01",
+      fee: "due",
+      m365Email: "m.r@polinetwork.org",
+    }
   })
 
   it.each([
@@ -167,11 +181,18 @@ describe("one outcome policy", () => {
       { action: "link" },
     ],
     [
-      "a role holder is linked by a PoliNetwork address",
-      plain,
+      "a role holder is linked by the PoliNetwork address Microsoft 365 gave the record",
+      member,
       "email",
       { holdsPeopleRole: true, verifiedEmail: "m.r@polinetwork.org" },
       { action: "link" },
+    ],
+    [
+      "a role holder matching a PoliNetwork address typed on the record goes to HR",
+      plain,
+      "email",
+      { holdsPeopleRole: true, verifiedEmail: "mario@polinetwork.org" },
+      { action: "review", kind: "identity-match" },
     ],
     [
       "a role holder's Telegram ID goes to HR (D2)",
@@ -189,6 +210,23 @@ describe("one outcome policy", () => {
     ],
   ] as const)("%s", (_, p, evidence, extra, expected) => {
     expect(decide(one(p, evidence), account(extra))).toMatchObject(expected)
+  })
+
+  it("sends a record holding another Microsoft 365 account to HR instead of linking it", () => {
+    const p = record("Luca", "Verdi", (r) => {
+      r.azureId = "az-old"
+      r.member = {
+        number: "0002",
+        status: "active",
+        admittedOn: "2025-01-01",
+        fee: "due",
+        m365Email: "l.v@polinetwork.org",
+      }
+    })
+    const signedIn = account({ azureId: "az-new", verifiedEmail: "l.v@polinetwork.org", holdsPeopleRole: true })
+    const match = matchAccount(index([p]), signedIn, none)
+    expect(match).toMatchObject({ kind: "conflict", reason: "microsoft-365-conflict" })
+    expect(decide(match, signedIn)).toMatchObject({ action: "review", kind: "identity-match" })
   })
 
   it("reviews a conflict and tells the account holder it is being checked", () => {

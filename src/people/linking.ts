@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type * as C from "./contract"
-import { type Evidence, type Match, matchAccount } from "./identity"
+import { type Evidence, type Match, matchAccount, RecordIndex } from "./identity"
 import { fail, log, ref } from "./model"
 import type { RoleDirectory } from "./roles"
 import type { Account, PeopleState, Person, StoredReview } from "./types"
@@ -44,7 +44,13 @@ const PROVED = {
   telegram: "Telegram account",
 } as const satisfies Partial<Record<Evidence, string>>
 
-const isOrganization = (account: Account) => !!account.verifiedEmail?.toLowerCase().endsWith("@polinetwork.org")
+const lower = (value: string | null | undefined) => value?.trim().toLowerCase() || null
+
+/** The verified address is the `@polinetwork.org` one Microsoft 365 gave this record, not one HR typed. */
+const sameMicrosoft365Address = (p: Person, account: Account) => {
+  const email = lower(account.verifiedEmail)
+  return !!email?.endsWith("@polinetwork.org") && lower(p.member?.m365Email) === email
+}
 
 /** The outcome policy. Who may approve is enforced where the link is made: Auth for a preliminary person. */
 export function decide(match: Match, account: Account): Decision {
@@ -52,13 +58,15 @@ export function decide(match: Match, account: Account): Decision {
   if (match.kind === "conflict")
     return {
       action: "review",
-      kind: match.reason,
+      kind: match.reason === "microsoft-365-conflict" ? "identity-match" : match.reason,
       person: match.person,
       other: match.other,
-      message:
-        match.reason === "two-records"
-          ? "Several records use the same verified identity"
-          : "Verified email and Telegram identity disagree",
+      message: {
+        "two-records": "Several records use the same verified identity",
+        "telegram-conflict": "Verified email and Telegram identity disagree",
+        "microsoft-365-conflict":
+          "The sign-in matches this record, but the record holds another Microsoft 365 account: HR must check before linking.",
+      }[match.reason],
       shown: "notice",
     }
   const { person, evidence } = match
@@ -98,7 +106,7 @@ export function decide(match: Match, account: Account): Decision {
       "record"
     )
   if (account.holdsPeopleRole) {
-    if (evidence === "microsoft-365" || (evidence === "email" && isOrganization(account)))
+    if (evidence === "microsoft-365" || (evidence === "email" && sameMicrosoft365Address(person, account)))
       return { action: "link", person }
     return review(
       "identity-match",
@@ -115,17 +123,20 @@ export function decide(match: Match, account: Account): Decision {
   return { action: "confirm", person, evidence }
 }
 
-/** Records the account holder said aren't theirs. */
-export const rejectedBy = (s: PeopleState, sub: string) =>
-  new Set(
-    Object.values(s.reviews)
-      .filter((r) => r.sub === sub)
-      .flatMap((r) => r.rejectedPersonIds)
-  )
+/** What matching reads from the register, computed once per pass over many accounts. */
+export type MatchContext = { index: RecordIndex; rejected: Map<string, Set<string>> }
+
+/** Indexes the records and, per account, the records it was told aren't theirs ("This isn't me", Decline). */
+export function matchContext(s: PeopleState): MatchContext {
+  const rejected = new Map<string, Set<string>>()
+  for (const r of Object.values(s.reviews))
+    for (const id of r.rejectedPersonIds) rejected.set(r.sub, (rejected.get(r.sub) ?? new Set()).add(id))
+  return { index: new RecordIndex(Object.values(s.persons)), rejected }
+}
 
 /** The decision for an account against the whole register. */
-export const decideFor = (s: PeopleState, account: Account) =>
-  decide(matchAccount(Object.values(s.persons), account, rejectedBy(s, account.sub)), account)
+export const decideFor = (s: PeopleState, account: Account, context = matchContext(s)) =>
+  decide(matchAccount(context.index, account, context.rejected.get(account.sub) ?? new Set()), account)
 
 /** Opens a review, or returns the open one for the same account, kind and record. */
 export function openReview(
@@ -165,7 +176,11 @@ export function reviewFor(
   since: string
 ) {
   const r = openReview(s, account, decision.kind, decision.person, decision.message, since, decision.shown)
-  r.other = decision.other ? ref(decision.other) : null
+  Object.assign(r, {
+    other: decision.other ? ref(decision.other) : null,
+    message: decision.message,
+    shown: decision.shown,
+  })
   return r
 }
 
@@ -184,6 +199,7 @@ export function attachAccount(
 ) {
   if (Object.values(s.persons).some((other) => other.id !== p.id && other.accountSub === account.sub))
     fail("CONFLICT", "This account is already linked to another person")
+  if (p.authProvisional) fail("FORBIDDEN", "A Master Admin must approve this preliminary Auth person through Linking")
   if (p.accountSub && p.accountSub !== account.sub) fail("CONFLICT", "Unlink the existing account first")
   const wasLinked = !!p.accountSub
   p.accountSub = account.sub
@@ -227,19 +243,24 @@ export function awaitingReason(review: StoredReview, person: Person | null) {
  * matched against them when Auth's directory changes, and reviews that no longer apply are closed.
  */
 export function reconcilePreliminary(s: PeopleState, accounts: Account[], since: string) {
-  const linked = new Set(Object.values(s.persons).flatMap((p) => (p.accountSub ? [p.accountSub] : [])))
+  const persons = Object.values(s.persons)
+  const open = Object.values(s.reviews).filter(
+    (r) => !r.resolved && (r.kind === "preliminary-link" || !!(r.record && s.persons[r.record.id]?.authProvisional))
+  )
+  if (!open.length && !persons.some((p) => p.authProvisional)) return
+  const linked = new Set(persons.flatMap((p) => (p.accountSub && !p.authProvisional ? [p.accountSub] : [])))
+  const context = matchContext(s)
+  const decisions = new Map<string, Decision>()
   for (const account of accounts) {
     if (linked.has(account.sub)) continue
-    const decision = decideFor(s, account)
+    const decision = decideFor(s, account, context)
+    decisions.set(account.sub, decision)
     if (decision.action === "review" && decision.person.authProvisional) reviewFor(s, account, decision, since)
   }
   // Only reviews this matching opened: a correction request on a linked record is not one.
-  const bySub = new Map(accounts.map((a) => [a.sub, a]))
-  for (const r of Object.values(s.reviews)) {
+  for (const r of open) {
     const p = r.record ? s.persons[r.record.id] : undefined
-    if (r.resolved || !p?.authRegistrationId || (!p.authProvisional && r.kind !== "preliminary-link")) continue
-    const account = bySub.get(r.sub)
-    const decision = account && p.authProvisional ? decideFor(s, account) : null
-    if (decision?.action !== "review" || decision.kind !== r.kind || decision.person.id !== p.id) r.resolved = true
+    const decision = decisions.get(r.sub)
+    if (decision?.action !== "review" || decision.kind !== r.kind || decision.person.id !== p?.id) r.resolved = true
   }
 }

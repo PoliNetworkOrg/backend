@@ -105,6 +105,8 @@ export type PeopleOptions = {
 export const SOURCE_TTL_MS = { directory: 15_000, members: 5 * 60_000 }
 /** Past this, People refuses to work rather than decide who leads or administers from an old answer. */
 export const DIRECTORY_MAX_AGE_MS = 60 * 60_000
+/** At most one extra read of Auth this often for an account it didn't list. */
+const UNKNOWN_ACCOUNT_REREAD_MS = 2_000
 type RoleSnapshot = Pick<Person, "admin" | "teams">
 const PENDING_ROLES = "A role change for this person is waiting for PoliNetwork Auth; try again in a moment."
 const AWAITING_AUTH = "Awaiting confirmation from PoliNetwork Auth"
@@ -154,8 +156,8 @@ export function createPeopleService(options: PeopleOptions) {
   }
   type SourceRead<T> = { value: T; at: number; revision: number }
   let directoryRead: SourceRead<RoleDirectory> | null = null
-  /** When preliminary persons were last matched against the accounts in `directoryRead`. */
-  let reconciledAt: number | null = null
+  /** When an unknown account last made People read Auth again, so unknown callers can't make it read on every call. */
+  let unknownAccountReadAt = 0
   let membersRead: SourceRead<AzureMember[]> | null = null
   /** Who holds the roles bound to People, from PoliNetwork Auth; null when People has no Auth to ask. */
   async function readDirectory(force = false): Promise<SourceRead<RoleDirectory> | null> {
@@ -179,9 +181,12 @@ export function createPeopleService(options: PeopleOptions) {
     const read = await readDirectory(force)
     return read ? accountsOf(read.value) : []
   }
-  /** The signed-in account; read again once when it is new, so a first sign-in is not missed. */
+  /** The signed-in account; Auth is read again for one it doesn't know yet, so a first sign-in is not missed. */
   async function readAccount(sub: string): Promise<Account | undefined> {
-    return (await readAccounts()).find((a) => a.sub === sub) ?? (await readAccounts(true)).find((a) => a.sub === sub)
+    const known = (await readAccounts()).find((a) => a.sub === sub)
+    if (known || now().getTime() - unknownAccountReadAt < UNKNOWN_ACCOUNT_REREAD_MS) return known
+    unknownAccountReadAt = now().getTime()
+    return (await readAccounts(true)).find((a) => a.sub === sub)
   }
   /** The Microsoft 365 Soci group; null without Microsoft 365, or while it has never answered. */
   async function readMembers(force = false): Promise<SourceRead<AzureMember[]> | null> {
@@ -205,9 +210,10 @@ export function createPeopleService(options: PeopleOptions) {
     if (directory) {
       if (directory.revision === (s.counters.roleRevision ?? 0)) {
         syncDirectory(s, directory.value, at)
-        if (reconciledAt !== directory.at) {
+        // Stored with the register, so a transaction that fails doesn't skip the next pass.
+        if (s.counters.preliminaryReconciledAt !== directory.at) {
           reconcilePreliminary(s, accountsOf(directory.value), at.date)
-          reconciledAt = directory.at
+          s.counters.preliminaryReconciledAt = directory.at
         }
       } else directoryRead = null
     }
@@ -1160,6 +1166,9 @@ export function createPeopleService(options: PeopleOptions) {
         if (!r || r.resolved) fail("CONFLICT", "Review already handled")
         r.resolved = true
         if (r.record) {
+          // A dismissed single-record match would only open again: matching skips the record for this account.
+          if (r.kind === "identity-match" || r.kind === "name-only" || r.kind === "preliminary-link")
+            r.rejectedPersonIds.push(r.record.id)
           const p = find(u.state, r.record.id)
           if (p.account.status === "review") p.account = { status: "none" }
           log(p, v.sub, `Dismissed review ${r.id}`, now())
@@ -1270,6 +1279,8 @@ export function createPeopleService(options: PeopleOptions) {
           }
         }
         r.resolved = true
+        // Matching skips this record for this account from now on, so the review doesn't open again.
+        if (input.resolution === "decline" && r.record) r.rejectedPersonIds.push(r.record.id)
         if (r.record)
           log(find(u.state, r.record.id), v.sub, `Resolved ${r.kind}: ${input.resolution}; ${input.reason}`, now())
       })
