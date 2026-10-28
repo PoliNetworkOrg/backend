@@ -6,7 +6,7 @@ import { decryptUser } from "@/utils/users"
 import { provisionMember, setMemberNumber } from "./azure-members"
 import { peopleConfig } from "./config"
 import { transferType } from "./files"
-import { fail, receiptEligible } from "./model"
+import { receiptEligible } from "./model"
 import { createPeopleService } from "./service"
 import { createPeoplePgStore } from "./store-pg"
 
@@ -19,14 +19,6 @@ export function permissionsFor(sub: string) {
 export const people = createPeopleService({
   store: createPeoplePgStore(DB),
   config: peopleConfig,
-  async directory() {
-    if (!idp?.directory) fail("PRECONDITION_FAILED", "The IdP account directory is not configured")
-    return (await idp.directory()).map((a) => ({
-      ...a,
-      emailVerified: a.emailVerified === true,
-      telegramId: idp?.snapshot?.current()?.bySub(a.sub)?.telegramId ?? null,
-    }))
-  },
   async telegramUsers() {
     const users = await DB.select().from(SCHEMA.TG.users)
     return Promise.all(

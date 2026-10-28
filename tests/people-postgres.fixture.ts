@@ -60,9 +60,27 @@ try {
   const president = viewer("president")
   const vice = viewer("vice")
   const directory = [
-    { sub: "president", name: "Mario Rossi", email: "president@example.org", emailVerified: true, telegramId: "101" },
-    { sub: "vice", name: "Anna Bianchi", email: "vice@example.org", emailVerified: true, telegramId: "102" },
-    { sub: "member", name: "Luca Verdi", email: "member@example.org", emailVerified: true, telegramId: "103" },
+    {
+      sub: "president",
+      name: "Mario Rossi",
+      email: "president@example.org",
+      verifiedEmail: "president@example.org",
+      telegramId: "101",
+    },
+    {
+      sub: "vice",
+      name: "Anna Bianchi",
+      email: "vice@example.org",
+      verifiedEmail: "vice@example.org",
+      telegramId: "102",
+    },
+    {
+      sub: "member",
+      name: "Luca Verdi",
+      email: "member@example.org",
+      verifiedEmail: "member@example.org",
+      telegramId: "103",
+    },
   ]
   const outboxCalls: string[] = []
   const eligible = (r: PeopleState["receipts"][string], sub: string, state: PeopleState, requireEsign: boolean) =>
@@ -309,7 +327,13 @@ try {
     admittedOn: "2026-10-01",
     fee: "due",
   })
-  directory.push({ sub: "sara", name: "Sara Neri", email: "sara@example.org", emailVerified: true, telegramId: "104" })
+  directory.push({
+    sub: "sara",
+    name: "Sara Neri",
+    email: "sara@example.org",
+    verifiedEmail: "sara@example.org",
+    telegramId: "104",
+  })
   await people.getMyArea(viewer("sara"))
   const review = (await people.listReviews(president)).find((r) => r.kind === "two-records")
   assert.ok(review)

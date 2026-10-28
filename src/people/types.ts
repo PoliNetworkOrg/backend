@@ -38,6 +38,8 @@ export type StoredReview = Review & {
   resolved: boolean
   rejectedPersonIds: string[]
   mergedRecord?: Person
+  /** What the account holder sees while it is open (`linking.ts`); hidden when absent. */
+  shown?: import("./linking").Shown
 }
 export type ImportRow = {
   volunteer: {
@@ -145,11 +147,18 @@ export type UnitOfWork = {
 export interface PeopleStore {
   transaction<T>(fn: (uow: UnitOfWork) => Promise<T>): Promise<T>
 }
+/** A PoliNetwork Auth login account and the identity it proved there. */
 export type Account = {
   sub: string
   name: string
+  /** Contact address, for display only. */
   email: string | null
+  /** The address Auth verified; the only one People matches on. */
+  verifiedEmail: string | null
+  azureId?: string | null
   telegramId: string | null
-  emailVerified?: boolean
+  telegramUsername?: string | null
+  /** Holds a role bound to People in Auth. */
+  holdsPeopleRole?: boolean
 }
 export type TelegramUser = { id: string; name: string; username: string | null }

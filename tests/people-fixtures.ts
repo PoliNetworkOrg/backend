@@ -61,9 +61,27 @@ export function harness(overrides: Partial<PeopleOptions> = {}) {
   let clock = new Date("2026-10-18T10:00:00Z")
   const requests = new Map<string, { id: string; status: string }>()
   const accounts: Account[] = [
-    { sub: "president", name: "Mario Rossi", email: "mario@example.org", emailVerified: true, telegramId: "101" },
-    { sub: "vice", name: "Anna Bianchi", email: "anna@example.org", emailVerified: true, telegramId: "102" },
-    { sub: "member", name: "Luca Verdi", email: "luca@example.org", emailVerified: true, telegramId: "103" },
+    {
+      sub: "president",
+      name: "Mario Rossi",
+      email: "mario@example.org",
+      verifiedEmail: "mario@example.org",
+      telegramId: "101",
+    },
+    {
+      sub: "vice",
+      name: "Anna Bianchi",
+      email: "anna@example.org",
+      verifiedEmail: "anna@example.org",
+      telegramId: "102",
+    },
+    {
+      sub: "member",
+      name: "Luca Verdi",
+      email: "luca@example.org",
+      verifiedEmail: "luca@example.org",
+      telegramId: "103",
+    },
   ]
   const store: PeopleOptions["store"] = {
     transaction(fn) {

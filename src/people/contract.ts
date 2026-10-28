@@ -39,6 +39,7 @@ export const REVIEW_KINDS = [
   "not-me",
   "name-only",
   "preliminary-link",
+  "identity-match",
 ] as const
 /** A receipt's pipeline: issued unsigned, signed by an officer, emailed to the member; or the email failed, or voided. */
 export const RECEIPT_STATUSES = ["toSign", "signed", "sent", "failed", "voided"] as const

@@ -97,7 +97,7 @@ describe("roleChanges", () => {
 })
 
 describe("People mirrors PoliNetwork Auth", () => {
-  it("creates and links records for role holders, and links existing ones by Telegram ID", async () => {
+  it("creates and links records for role holders, and asks HR before linking one by Telegram ID", async () => {
     const auth = fakeAuth([
       user("u-new", ["design-lead"], { name: "Giulia Neri", email: "giulia.neri@polinetwork.org" }),
       user("u-tg", ["it-core"], { name: "Luca V.", telegramId: "777", telegramUsername: "lucav" }),
@@ -119,10 +119,12 @@ describe("People mirrors PoliNetwork Auth", () => {
       account: { status: "linked", via: "PoliNetwork Auth" },
       teams: [{ team: "design", role: "lead", endedOn: null }],
     })
-    expect(h.state().persons["P-0003"]).toMatchObject({
-      accountSub: "u-tg",
-      teams: [{ team: "it", role: "member" }],
-    })
+    // A Telegram ID on a record was typed by HR or imported: HR confirms before the role holder gets it.
+    expect(h.state().persons["P-0003"]).toMatchObject({ accountSub: null, teams: [] })
+    const [review] = await h.service.listReviews(master)
+    expect(review).toMatchObject({ kind: "identity-match", record: { id: "P-0003" } })
+    await h.service.resolveReview(master, { reviewId: review.id, resolution: "link-anyway", reason: "Checked" })
+    expect(h.state().persons["P-0003"]).toMatchObject({ accountSub: "u-tg", teams: [{ team: "it", role: "member" }] })
     const rows = await h.service.listPeople(master)
     expect(rows.find((r) => r.id === giulia?.id)?.profile.campus).toBeNull()
   })
@@ -392,7 +394,7 @@ describe("People mirrors the Microsoft 365 Soci group", () => {
 
 describe("Auth is the authority for People role commands", () => {
   it("never leaves a refused linked Lead authorized, even after synchronization", async () => {
-    const auth = fakeAuth([], () => "Appointing a Lead requires people:appoint")
+    const auth = fakeAuth([user("member", [])], () => "Appointing a Lead requires people:appoint")
     const h = harness({ peopleRoles: auth.roles })
     await h.seed()
     await h.store.transaction(async ({ state }) => {

@@ -137,7 +137,7 @@ describe("People authorization and projections", () => {
       "Correction: Personal email → luca.new@example.org; New address"
     )
   })
-  it("does not grant record roles or mutation rights to an unconfirmed match", async () => {
+  it("does not grant record roles or mutation rights to a match waiting for HR", async () => {
     const h = harness()
     await h.seed()
     await h.store.transaction(async ({ state }) => {
@@ -148,13 +148,15 @@ describe("People authorization and projections", () => {
       p.teams.push({ team: "it", role: "lead", since: "2026-10-01", endedOn: null, endReason: null, fields: {} })
     })
     const v = viewer("president", ["people:self"], "101")
-    expect(await h.service.getMyArea(v)).toMatchObject({ state: "match", candidate: { id: "P-0001" } })
+    // The record carries roles, so HR approves the link: the account holder can't confirm it themselves.
+    expect(await h.service.getMyArea(v)).toMatchObject({ state: "awaiting-approval", candidate: { id: "P-0001" } })
     expect(await h.service.getMyRoles(v)).toEqual({ capoScope: null, leads: [] })
     await expect(h.service.getCapoArea(v)).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(h.service.revokePhotoConsent(v)).rejects.toMatchObject({ code: "FORBIDDEN" })
-    await h.service.rejectMatch(v)
-    expect(await h.service.getMyArea(v)).toMatchObject({ state: "none" })
     await expect(h.service.confirmMatch(v)).rejects.toMatchObject({ code: "CONFLICT" })
+    expect(await h.service.listReviews(master)).toEqual([
+      expect.objectContaining({ kind: "identity-match", record: expect.objectContaining({ id: "P-0001" }) }),
+    ])
   })
   it("does not trust an unverified directory email for self matching", async () => {
     const h = harness()
@@ -162,10 +164,14 @@ describe("People authorization and projections", () => {
     await h.store.transaction(async ({ state }) => {
       state.persons["P-0003"].accountSub = null
       state.persons["P-0003"].account = { status: "none" }
+      // A record that grants nothing is the one the account holder may confirm.
+      state.persons["P-0003"].admin = null
     })
-    h.accounts[2].emailVerified = false
+    // Without its Telegram account, which would match on its own.
+    h.accounts[2].telegramId = null
+    h.accounts[2].verifiedEmail = null
     expect(await h.service.getMyArea(viewer("member", ["people:self"]))).toMatchObject({ state: "none" })
-    h.accounts[2].emailVerified = true
+    h.accounts[2].verifiedEmail = "luca@example.org"
     expect(await h.service.getMyArea(viewer("member", ["people:self"]))).toMatchObject({ state: "match" })
   })
   it("prevents account takeover and invalidates old invitation tokens", async () => {

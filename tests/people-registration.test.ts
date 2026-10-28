@@ -17,7 +17,6 @@ function authPeople() {
       { key: "it", name: "IT", binding: "team:it:member" },
     ],
     users: [],
-    proposals: [],
   }
   const roles: PeopleRoles = {
     directory: vi.fn(async () => structuredClone(directory)),
@@ -36,6 +35,7 @@ function authPeople() {
           phone: input.phone || null,
           telegramId: null,
           declaredTelegramId: input.telegramId || null,
+          declaredTelegramUsername: input.telegramUsername || null,
           telegramUsername: null,
           roles: input.changes.flatMap((change) => (change.kind === "admin" ? ["admin"] : [change.team])),
         })
@@ -45,10 +45,11 @@ function authPeople() {
       if (input.actor !== "president") throw new RoleChangeError(403, "Master Admin required")
       const person = directory.users.find((person) => person.registrationId === input.personId)
       if (!person) throw new Error("Person not found")
-      person.previousSub = person.sub
-      person.sub = input.userId
-      person.provisional = false
-      directory.proposals = []
+      // Auth reports the linked registration through the login account, as one user.
+      const login = directory.users.find((user) => user.sub === input.userId)
+      directory.users = directory.users.filter((user) => user !== login)
+      Object.assign(person, { previousSub: person.sub, sub: input.userId, provisional: false })
+      person.verifiedEmail = login?.verifiedEmail ?? null
       return { sub: input.userId }
     }),
   }
@@ -100,30 +101,22 @@ describe("People before the first Auth login", () => {
     })
     const registration = auth.directory.users[0]
     assert.ok(registration.registrationId)
-    h.accounts.push({
+    auth.directory.users.push({
       sub: "new-login",
       name: "Mario Rossi",
       email: "new@example.org",
-      emailVerified: true,
+      verifiedEmail: "new@example.org",
       telegramId: null,
+      telegramUsername: null,
+      roles: [],
     })
-    auth.directory.proposals = [
-      {
-        personId: registration.registrationId,
-        sub: "new-login",
-        name: "Mario Rossi",
-        email: "new@example.org",
-        telegramId: null,
-        reason: "verified-email",
-      },
-    ]
     h.advance(SOURCE_TTL_MS.directory + 1)
     // The person signing in learns they were found, and isn't sent to ask to be added.
     const self = viewer("new-login", ["people:self"])
     expect(await h.service.getMyArea(self)).toEqual({
       state: "awaiting-approval",
       candidate: { id: created.id, name: "Mario Rossi", roles: ["Admin", "IT"] },
-      reason: expect.stringContaining("Same verified email address"),
+      reason: expect.stringContaining("A Master Admin will confirm the link"),
     })
     await expect(h.service.askToBeAdded(self, { note: "" } as never)).rejects.toThrow("already checking")
     // The verified match is the only review: the same name doesn't add a name-only one.
@@ -188,8 +181,13 @@ describe("People before the first Auth login", () => {
       roles: ["admin"],
     })
     h.advance(SOURCE_TTL_MS.directory + 1)
-    expect(await h.service.listPeople(master)).toHaveLength(2)
+    // The role holder's Telegram account matches the declared contact: a Master Admin decides, and no second
+    // record is made meanwhile.
+    expect(await h.service.listPeople(master)).toHaveLength(1)
     expect(await h.service.getPerson(master, created)).toMatchObject({ preliminary: true, account: { status: "none" } })
+    expect(await h.service.listReviews(master)).toEqual([
+      expect.objectContaining({ kind: "preliminary-link", record: expect.objectContaining({ id: created.id }) }),
+    ])
     expect(auth.roles.link).not.toHaveBeenCalled()
   })
 
@@ -199,17 +197,15 @@ describe("People before the first Auth login", () => {
     await h.service.createPerson(master, { firstName: "Anna", lastName: "Bianchi", telegramUsername: "anna_pn" })
     const registration = auth.directory.users[0]
     assert.ok(registration.registrationId)
-    h.accounts.push({ sub: "tg-login", name: "Someone", email: null, emailVerified: false, telegramId: "77" })
-    auth.directory.proposals = [
-      {
-        personId: registration.registrationId,
-        sub: "tg-login",
-        name: "Someone",
-        email: null,
-        telegramId: "77",
-        reason: "telegram-username",
-      },
-    ]
+    auth.directory.users.push({
+      sub: "tg-login",
+      name: "Someone",
+      email: null,
+      verifiedEmail: null,
+      telegramId: "77",
+      telegramUsername: "Anna_PN",
+      roles: [],
+    })
     h.advance(SOURCE_TTL_MS.directory + 1)
     expect(await h.service.getMyArea(viewer("tg-login", ["people:self"]))).toEqual({
       state: "awaiting-approval",

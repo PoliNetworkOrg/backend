@@ -1,4 +1,6 @@
 import * as C from "./contract"
+import { evidenceBetween, strengthOf } from "./identity"
+import { accountOf, attachAccount, decideFor, reviewFor } from "./linking"
 import { academicYear, log, newPerson } from "./model"
 import type { PeopleState, Person } from "./types"
 
@@ -8,14 +10,6 @@ import type { PeopleState, Person } from "./types"
  * them through `PeopleRoles.change`, which checks again what the acting dashboard user may do.
  */
 export type RoleDirectory = {
-  proposals?: {
-    personId: string
-    sub: string
-    name: string
-    email: string | null
-    telegramId: string | null
-    reason: "verified-email" | "verified-telegram" | "telegram-username" | "name-only" | "conflicting-identities"
-  }[]
   roles: { key: string; name: string; binding: string }[]
   users: {
     sub: string
@@ -28,7 +22,10 @@ export type RoleDirectory = {
     declaredTelegramId?: string | null
     declaredTelegramUsername?: string | null
     name: string
+    /** Contact address, for display. */
     email: string | null
+    /** The address Auth verified; the only one People matches on. */
+    verifiedEmail?: string | null
     azureId?: string | null
     telegramId: string | null
     telegramUsername: string | null
@@ -188,7 +185,8 @@ export function flagForReview(p: Person, message: string) {
 
 /**
  * Mirrors PoliNetwork Auth's bound roles on People records:
- * - everyone holding one gets a record, found by account, then by Telegram ID or Microsoft 365 address, and linked;
+ * - everyone holding one gets a record: theirs, one matched by `linking.ts` (linked automatically only by a
+ *   Microsoft 365 identity, otherwise reviewed by HR), or a new one;
  * - on linked records, a bound role's entry starts when the role is held and ends when it was mirrored and is no
  *   longer held. Previously local entries on linked records also follow Auth.
  * Concepts with no bound role (for example a team nobody bound yet) stay owned by People.
@@ -199,50 +197,47 @@ export function syncDirectory(s: PeopleState, directory: RoleDirectory, at: Cloc
   const users = new Map(directory.users.map((u) => [u.sub, u]))
   for (const u of directory.users) {
     const wanted = wantedView(bound, u.roles)
+    const account = accountOf(u)
     const existing = persons().find(
       (p) => p.accountSub === u.sub || (u.registrationId && p.authRegistrationId === u.registrationId)
     )
+    const holds = wanted.admin || Object.keys(wanted.teams).length > 0
     // Accounts without a bound role only refresh the identities of the record already linked to them.
-    if (!existing && !u.registrationId && !wanted.admin && !Object.keys(wanted.teams).length) continue
-    const email = lower(u.email)
-    const matches = persons().filter(
-      (p) =>
-        p === existing ||
-        (!p.authProvisional &&
-          ((u.azureId && p.azureId === u.azureId) ||
-            (u.telegramId && p.profile.telegramId === u.telegramId) ||
-            (email?.endsWith("@polinetwork.org") && lower(p.member?.m365Email) === email)))
-    )
-    // Never guess between records, or move an identity off the record holding it: HR decides.
-    if (
-      matches.length > 1 ||
-      matches.some(
-        (p) =>
-          p.accountSub &&
-          p.accountSub !== u.sub &&
-          !(u.registrationId && p.authRegistrationId === u.registrationId && !u.provisional)
-      ) ||
-      (existing?.azureId && u.azureId && existing.azureId !== u.azureId)
-    ) {
-      for (const p of matches)
-        flagForReview(p, `PoliNetwork Auth account ${u.sub} matches more than one record: check their account links.`)
+    if (!existing && !u.registrationId && !holds) continue
+    // Records other than its own holding this account's verified identity.
+    const holders = persons().filter((other) => {
+      if (other === existing || other.authProvisional || (!existing && !other.accountSub)) return false
+      const evidence = evidenceBetween(other, account)
+      return !!evidence && strengthOf(evidence) === "verified"
+    })
+    let p: Person
+    // Never move an identity off the record holding it, or give it a second record: HR decides.
+    if (holders.length || (existing?.azureId && u.azureId && existing.azureId !== u.azureId)) {
+      for (const other of existing ? [existing, ...holders] : holders)
+        flagForReview(
+          other,
+          `PoliNetwork Auth account ${u.sub} matches more than one record: check their account links.`
+        )
       continue
     }
-    const p = matches[0] ?? blankPerson(s, splitName(u.name), at.date)
-    if (!matches.length) log(p, "system", "Created from a role held in PoliNetwork Auth", at.now)
     if (existing) {
-      if (existing.account.status === "linked") existing.account.email = u.email ?? existing.account.email
+      p = existing
+      if (p.account.status === "linked") p.account.email = u.email ?? p.account.email
+    } else if (u.registrationId) {
+      p = blankPerson(s, splitName(u.name), at.date)
+      log(p, "system", "Created from a preliminary person in PoliNetwork Auth", at.now)
     } else {
-      p.accountSub = u.sub
-      p.account = {
-        status: "linked",
-        email: u.email ?? "",
-        via: "PoliNetwork Auth",
-        linkedOn: at.date,
-        how: "Holds a People role in PoliNetwork Auth",
+      const decision = decideFor(s, account)
+      if (decision.action === "review") {
+        reviewFor(s, account, decision, at.date)
+        continue
       }
-      p.invite = null
-      log(p, "system", `Linked account ${u.sub}: holds a People role in PoliNetwork Auth`, at.now)
+      if (decision.action === "link") p = decision.person
+      else {
+        p = blankPerson(s, splitName(u.name), at.date)
+        log(p, "system", "Created from a role held in PoliNetwork Auth", at.now)
+      }
+      attachAccount(s, p, account, "system", "Holds a People role in PoliNetwork Auth", at, "PoliNetwork Auth")
     }
     if (u.registrationId) {
       p.authRegistrationId = u.registrationId

@@ -22,24 +22,6 @@ const signerDirectory = z.array(
   z.object({ sub: z.string(), name: z.string(), email: z.string().nullable(), emailVerified: z.boolean().optional() })
 )
 const peopleDirectory = z.object({
-  proposals: z
-    .array(
-      z.object({
-        personId: z.string(),
-        sub: z.string(),
-        name: z.string(),
-        email: z.string().nullable(),
-        telegramId: z.string().nullable(),
-        reason: z.enum([
-          "verified-email",
-          "verified-telegram",
-          "telegram-username",
-          "name-only",
-          "conflicting-identities",
-        ]),
-      })
-    )
-    .optional(),
   roles: z.array(z.object({ key: z.string(), name: z.string(), binding: z.string() })),
   users: z.array(
     z.object({
@@ -54,6 +36,7 @@ const peopleDirectory = z.object({
       declaredTelegramUsername: z.string().nullable().optional(),
       name: z.string(),
       email: z.string().nullable(),
+      verifiedEmail: z.string().nullish(),
       azureId: z.string().nullish(),
       telegramId: z.string().nullable(),
       telegramUsername: z.string().nullable(),
