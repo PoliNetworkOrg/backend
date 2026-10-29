@@ -5,8 +5,6 @@ import { sendRequestUpdateEmail, sendSignatureRequestEmail, sendSignedDocumentEm
 import { env } from "@/env"
 import { idp } from "@/idp"
 import { logger } from "@/logger"
-import { eligibleAtCommit, receiptEligibility, receiptVisibility } from "@/people"
-import { completeReceiptSignature, guardReceiptSignature } from "@/people/store-pg"
 import { createGraphDrive } from "./drive/graph"
 import { createMockDrive } from "./drive/mock"
 import { type Access, type AccessCatalog, createEsignService } from "./service"
@@ -42,12 +40,7 @@ function catalog(): AccessCatalog {
 }
 
 export const esign = createEsignService({
-  store: createPgStore(DB, {
-    beforeSignature: (tx, commit) => guardReceiptSignature(tx, commit, eligibleAtCommit),
-    afterSignature: completeReceiptSignature,
-  }),
-  receiptEligible: receiptEligibility,
-  receiptCanView: receiptVisibility,
+  store: createPgStore(DB),
   directory: idp?.directory ?? undefined,
   drives: resolveDrives(),
   mailer: {
