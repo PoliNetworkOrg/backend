@@ -12,12 +12,42 @@ import {
 import { z } from "zod"
 import { env } from "@/env"
 import { logger } from "@/logger"
+import { type PeopleRoles, RoleChangeError } from "@/people/roles"
 import { authenticate, type RequestAuth } from "./auth"
 import { dbPersistence } from "./persistence"
 
 /** The projection this backend reads from the IdP (RFC v3 §5.2). */
 const PROJECTION = "backend"
 const signerDirectory = z.array(z.object({ sub: z.string(), name: z.string(), email: z.string().nullable() }))
+const boundRoles = z.array(
+  z.object({
+    key: z.string(),
+    name: z.string(),
+    binding: z.string(),
+    permissions: z.array(z.string()).optional(),
+    bindings: z.array(z.string()).optional(),
+  })
+)
+/** `GET /api/internal/people-roles`: the roles bound to People and who holds them. */
+const peopleDirectory = z.object({
+  roles: boundRoles,
+  users: z.array(
+    z.object({
+      sub: z.string(),
+      name: z.string(),
+      email: z.string().nullable(),
+      telegramId: z.string().nullable(),
+      telegramUsername: z.string().nullable(),
+      roles: z.array(z.string()),
+      assigned: z.array(z.string()),
+      since: z.record(z.string(), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
+    })
+  ),
+})
+/** The person's bound roles after a role command, as `POST /api/internal/people-roles` answers. */
+const roleResult = z.object({ roles: boundRoles, held: z.array(z.string()), assigned: z.array(z.string()) })
+/** Lets the backend give and take back the roles bound to People, for the dashboard user it authenticated. */
+const PEOPLE_ROLES_SCOPE = "idp:people:roles"
 
 function report(component: string) {
   return (error: unknown) => {
@@ -54,6 +84,7 @@ function configure() {
   let snapshot = null
   let events = null
   let directory: (() => Promise<z.infer<typeof signerDirectory>>) | null = null
+  let peopleRoles: PeopleRoles | null = null
   if (env.OAUTH_INTERNAL_RESOURCE_URI && env.OAUTH_BACKEND_CLIENT_ID && env.OAUTH_BACKEND_PRIVATE_JWK) {
     const tokens = serviceTokenSource({
       clientId: env.OAUTH_BACKEND_CLIENT_ID,
@@ -83,6 +114,67 @@ function configure() {
       if (!response.ok) throw new Error(`IdP signer directory returned ${response.status}`)
       return signerDirectory.parse(await response.json())
     }
+    // A separate token, so a client not yet granted the write scope still pulls the snapshot.
+    const roleTokens = serviceTokenSource({
+      clientId: env.OAUTH_BACKEND_CLIENT_ID,
+      privateKey: parsePrivateKey(env.OAUTH_BACKEND_PRIVATE_JWK),
+      tokenUrl: endpoints.tokenUrl,
+      tokenAudience: endpoints.tokenAudience,
+      resource: env.OAUTH_INTERNAL_RESOURCE_URI,
+      scopes: [PEOPLE_ROLES_SCOPE],
+      onError: report("people roles token source"),
+    })
+    const peopleRolesUrl = new URL("/api/internal/people-roles", endpoints.snapshotUrl)
+    const sendCommand = async (body: unknown) => {
+      let token: string
+      try {
+        token = await roleTokens.getToken()
+      } catch {
+        throw new RoleChangeError(503, `no token to change roles; is ${PEOPLE_ROLES_SCOPE} granted to this backend?`)
+      }
+      try {
+        return await fetch(peopleRolesUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(10_000),
+        })
+      } catch {
+        throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
+      }
+    }
+    peopleRoles = {
+      async directory() {
+        const token = await tokens.getToken()
+        const response = await fetch(peopleRolesUrl, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10_000),
+        })
+        if (response.status === 401) tokens.invalidate()
+        if (!response.ok) throw new Error(`IdP People roles returned ${response.status}`)
+        return peopleDirectory.parse(await response.json())
+      },
+      async change(command) {
+        let response = await sendCommand(command)
+        // A stale cached token: ask for a new one and send the same command once more. A second 401 is a refusal.
+        if (response.status === 401) {
+          roleTokens.invalidate()
+          response = await sendCommand(command)
+          if (response.status === 401) roleTokens.invalidate()
+        }
+        if (response.ok) {
+          // The command was applied, but without a readable answer People can't confirm it: retry it by ID.
+          const result = roleResult.safeParse(await response.json().catch(() => null))
+          if (!result.success) throw new RoleChangeError(503, "PoliNetwork Auth sent an unreadable answer")
+          return result.data
+        }
+        const body = (await response.json().catch(() => null)) as { error?: unknown } | null
+        throw new RoleChangeError(
+          response.status,
+          typeof body?.error === "string" ? body.error : `request failed (${response.status})`
+        )
+      },
+    }
     events = createAccessEventHandler({
       keyStore,
       issuer: endpoints.issuer,
@@ -99,6 +191,8 @@ function configure() {
     keyStore,
     snapshot,
     directory,
+    /** The roles bound to People in Auth, and changes to them; null without a service client. */
+    peopleRoles,
     /** Fetch API handler for `POST /internal/events`, or null without a snapshot. */
     events,
     verify: (token: string) => verifyAccessToken(token, { issuer: endpoints.issuer, audience, keyStore }),
