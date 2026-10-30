@@ -57,6 +57,26 @@ The bot's socket.io client authenticates with its service token in `auth.token` 
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
 
+## People
+
+The `people` router is the admin dashboard's register of Group Admins, Capo Admins and team members. Each person
+is one record in `people_persons`; their roles are rows in `people_assignments`, with an append-only history in
+`people_activity`.
+
+- **A record linked to a login account** (`account_sub`): PoliNetwork Auth is the source of truth. People reads
+  who holds the roles bound to People from `GET /api/internal/people-roles` (15 s cache, the last answer during an
+  outage of up to an hour) and creates linked records for people given a bound role by hand in Auth. Changes go to
+  `POST /api/internal/people-roles` through the `people_role_commands` outbox: each command has an ID Auth applies at
+  most once, so the cron sends it again until Auth answers. The assignment shows `sent` until Auth confirms it, and
+  Auth's reason when it refuses.
+- **A record that isn't linked yet**: its assignments stay `pending` in the backend, and are sent when the record is
+  linked, acting as whoever links it by hand or, for an invite, as whoever made each assignment.
+
+The backend checks every role change with the same rules as Auth (`src/people/rules.ts`, shaped like Auth's
+`src/auth/people-binding.ts`): no self-grants, the right permission per kind, and bounded delegation against the
+role's permissions. A concept with no role bound in Auth, or with more than one, can't be assigned. Writes are
+serialized by one transaction lock. Grant `idp:people:roles` to the backend's OAuth client to let it change roles.
+
 ## E-signing with the CIE
 
 The `esign` router and `/esign/agent/*` endpoints let dashboard users sign PDFs with the Italian identity card

@@ -11,10 +11,8 @@ export const people = createPeopleService({
   dashboardUrl: env.ESIGN_DASHBOARD_URL.replace(/\/$/, ""),
   async directory() {
     if (!idp?.directory) fail("PRECONDITION_FAILED", "The IdP account directory is not configured")
-    return (await idp.directory()).map((a) => ({
-      ...a,
-      telegramId: idp?.snapshot?.current()?.bySub(a.sub)?.telegramId ?? null,
-    }))
+    return idp.directory()
   },
+  peopleRoles: idp?.peopleRoles ?? null,
   sendMail: sendPeopleEmail,
 })

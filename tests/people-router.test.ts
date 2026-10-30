@@ -56,7 +56,7 @@ describe("People tRPC contract", () => {
     await expect(
       r.createCaller(context()).persons.create({ ...profile(), firstName: "X".repeat(81) })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
-    expect(h.state().counters.person).toBe(3)
+    expect(Object.keys(h.state().persons)).toHaveLength(3)
   })
   it("mounts every People procedure with a dashboard policy", () => {
     const r = makeRouter(harness().service)
@@ -65,10 +65,15 @@ describe("People tRPC contract", () => {
     const defs = Object.entries(procedures)
     for (const [, proc] of defs) expect(proc._def.meta).toMatchObject({ policy: { user: { scope: "backend:admin" } } })
     expect(Object.keys(procedures).sort()).toEqual([
+      "admins.assign",
       "admins.end",
+      "admins.list",
       "admins.setCapoOfReference",
-      "admins.setCapoScope",
       "capo.get",
+      "capos.appoint",
+      "capos.end",
+      "capos.list",
+      "capos.setScope",
       "linking.invites",
       "linking.link",
       "linking.revokeInvite",

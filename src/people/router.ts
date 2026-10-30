@@ -7,11 +7,25 @@ import { requireGeneral } from "./model"
 import type { PeopleService } from "./service"
 import type { Viewer } from "./types"
 
-/** Factory keeps policy and shape tests independent of databases and external services. */
+/**
+ * Factory keeps policy and shape tests independent of databases and external services.
+ *
+ * The service checks every role change again with the same rules as PoliNetwork Auth (`rules.ts`). Team changes
+ * are open to every dashboard user here, since a team's Lead may add and remove its members.
+ */
 export function createPeopleRouter(people: PeopleService) {
   const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
     if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
-    const viewer: Viewer = { sub: ctx.actor.sub, telegramId: ctx.actor.telegramId, can: ctx.can }
+    const sub = ctx.actor.sub
+    const viewer: Viewer = {
+      sub,
+      telegramId: ctx.actor.telegramId,
+      can: ctx.can,
+      holdsRole: (role) => {
+        const index = ctx.access?.current()
+        return !!index && index.hasRole(index.bySub(sub), role)
+      },
+    }
     return next({ ctx: { viewer } })
   })
   const admin = (permission: string) =>
@@ -25,6 +39,7 @@ export function createPeopleRouter(people: PeopleService) {
   })
   const read = admin("people:read")
   const write = admin("people:write")
+  const appoint = admin("people:appoint")
   return createTRPCRouter({
     persons: createTRPCRouter({
       list: read.output(C.personRowSchema.array()).query(({ ctx }) => people.listPeople(ctx.viewer)),
@@ -42,13 +57,22 @@ export function createPeopleRouter(people: PeopleService) {
       setNote: write.input(C.setNoteInputSchema).mutation(({ ctx, input }) => people.setNote(ctx.viewer, input)),
     }),
     admins: createTRPCRouter({
-      end: write.input(C.endAdminInputSchema).mutation(({ ctx, input }) => people.endAdmin(ctx.viewer, input)),
-      setCapoScope: admin("people:appoint")
-        .input(C.capoScopeInputSchema)
-        .mutation(({ ctx, input }) => people.setCapoScope(ctx.viewer, input)),
+      list: read.output(C.adminSummarySchema.array()).query(({ ctx }) => people.listAdmins(ctx.viewer)),
+      assign: write.input(C.assignAdminInputSchema).mutation(({ ctx, input }) => people.assignAdmin(ctx.viewer, input)),
+      end: write.input(C.endAssignmentInputSchema).mutation(({ ctx, input }) => people.endAdmin(ctx.viewer, input)),
       setCapoOfReference: write
         .input(C.capoRefInputSchema)
         .mutation(({ ctx, input }) => people.setCapoOfReference(ctx.viewer, input)),
+    }),
+    capos: createTRPCRouter({
+      list: read.output(C.capoSummarySchema.array()).query(({ ctx }) => people.listCapos(ctx.viewer)),
+      appoint: appoint
+        .input(C.appointCapoInputSchema)
+        .mutation(({ ctx, input }) => people.appointCapo(ctx.viewer, input)),
+      setScope: appoint
+        .input(C.capoScopeInputSchema)
+        .mutation(({ ctx, input }) => people.setCapoScope(ctx.viewer, input)),
+      end: appoint.input(C.endAssignmentInputSchema).mutation(({ ctx, input }) => people.endCapo(ctx.viewer, input)),
     }),
     teams: createTRPCRouter({
       list: user.output(C.teamSummarySchema.array()).query(({ ctx }) => people.listTeams(ctx.viewer)),
