@@ -281,6 +281,8 @@ export const personIdSchema = z.string().regex(/^P-\d{4}$/)
 const dateSchema = z.iso.date()
 const opaqueIdSchema = z.string().min(1).max(128)
 const reasonSchema = z.string().trim().min(1).max(500)
+/** Starts the reason an unlink sends Auth, which takes at most 500 characters; the record's history keeps the rest. */
+export const UNLINK_REASON = "Unlinked from People: "
 const capoScopeSchema = z.string().trim().min(1).max(120)
 /** Telegram's own rule: 5–32 letters, digits or underscores. Empty when unknown; a leading @ is dropped. */
 export const TELEGRAM_USERNAME_PATTERN = /^@?[A-Za-z0-9_]{5,32}$/
@@ -338,7 +340,10 @@ export const endTeamInputSchema = z.object({
 export const personRefInputSchema = z.object({ personId: personIdSchema })
 export const inviteTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
 export const inviteTokenInputSchema = z.object({ token: inviteTokenSchema })
-export const unlinkAccountInputSchema = z.object({ personId: personIdSchema, reason: reasonSchema })
+export const unlinkAccountInputSchema = z.object({
+  personId: personIdSchema,
+  reason: reasonSchema.max(500 - UNLINK_REASON.length),
+})
 export const searchAccountsInputSchema = z.object({ query: z.string().trim().max(120) })
 export const linkAccountInputSchema = z.object({
   personId: personIdSchema,

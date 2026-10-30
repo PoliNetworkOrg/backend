@@ -81,8 +81,6 @@ export const DIRECTORY_TTL_MS = 15_000
 /** Past this without an answer, People refuses to work rather than decide who holds a role from an old one. */
 export const DIRECTORY_MAX_AGE_MS = 60 * 60_000
 const WAITING = "A role change for this person is waiting for PoliNetwork Auth; try again in a moment."
-/** Starts the reason an unlink sends Auth; the record's own history keeps only what follows. */
-const UNLINK_REASON = "Unlinked from People: "
 /** Why an assignment ended when Auth took its role back for an unlink that then found other roles held. */
 const TAKEN_BACK = "Taken back in PoliNetwork Auth to unlink the account"
 
@@ -100,10 +98,10 @@ export function createPeopleService(options: PeopleOptions) {
   let directoryRead: Read | null = null
   let stale = false
   /** Auth's answer, from cache for {@link DIRECTORY_TTL_MS}, or the last one during a short outage. */
-  async function readDirectory(): Promise<Read | null> {
+  async function readDirectory(fresh = false): Promise<Read | null> {
     if (!peopleRoles) return null
     const at = now().getTime()
-    if (!stale && directoryRead && at - directoryRead.at < DIRECTORY_TTL_MS) return directoryRead
+    if (!fresh && !stale && directoryRead && at - directoryRead.at < DIRECTORY_TTL_MS) return directoryRead
     // A role change Auth confirms while it answers makes this answer older than the register.
     const revision = await store.transaction(async (u) => u.state.counters.roleRevision ?? 0)
     try {
@@ -113,7 +111,7 @@ export function createPeopleService(options: PeopleOptions) {
       directoryRead = { value, at, revision }
       stale = false
     } catch (error) {
-      if (!directoryRead || at - directoryRead.at > DIRECTORY_MAX_AGE_MS)
+      if (fresh || !directoryRead || at - directoryRead.at > DIRECTORY_MAX_AGE_MS)
         fail("PRECONDITION_FAILED", "PoliNetwork Auth can't be reached: People can't tell who holds which role")
       console.error(error)
     }
@@ -129,17 +127,22 @@ export function createPeopleService(options: PeopleOptions) {
     /** Sends the command once the transaction commits; `strict` fails the call when Auth refuses it. */
     send: (personId: string, command: RoleCommand, strict: boolean, purpose?: StoredCommand["purpose"]) => void
   }
-  /** A People transaction that first lays Auth's answer over the register, then delivers the role commands it queued. */
-  async function tx<T>(fn: (u: UnitOfWork, ctx: Ctx) => Promise<T> | T): Promise<T> {
-    const read = await readDirectory()
+  /**
+   * A People transaction that first lays Auth's answer over the register, then delivers the role commands it queued.
+   * `fresh` asks Auth again instead of using the cache, and fails rather than fall back on an older answer.
+   */
+  async function tx<T>(fn: (u: UnitOfWork, ctx: Ctx) => Promise<T> | T, fresh = false): Promise<T> {
+    const read = await readDirectory(fresh)
     const deliveries: { id: string; strict: boolean }[] = []
     const result = await store.transaction(async (u) => {
       if (read) {
         // An older answer than the register's last confirmation, or than the last answer applied (by this or
         // another instance), would undo it: read again next time.
         const { roleRevision = 0, directoryReadAt = 0 } = u.state.counters
-        if (read.revision !== roleRevision || read.at < directoryReadAt) stale = true
-        else {
+        if (read.revision !== roleRevision || read.at < directoryReadAt) {
+          stale = true
+          if (fresh) fail("CONFLICT", "PoliNetwork Auth changed a role while People read it; try again")
+        } else {
           syncDirectory(u, read.value, clock())
           u.state.counters.directoryReadAt = read.at
         }
@@ -259,7 +262,7 @@ export function createPeopleService(options: PeopleOptions) {
           remaining = new RoleChangeError(409, "PoliNetwork Auth still holds roles for this account: unlink again")
           return
         }
-        detach(u, p, command.request.actor, command.request.reason.slice(UNLINK_REASON.length))
+        detach(u, p, command.request.actor, command.request.reason.slice(C.UNLINK_REASON.length))
         return
       }
       for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
@@ -800,7 +803,8 @@ export function createPeopleService(options: PeopleOptions) {
     },
     /**
      * Takes the record's roles back from the account in Auth, then detaches it; its assignments go back to
-     * `pending` for the next link. Without roles Auth holds, it detaches at once.
+     * `pending` for the next link. Without roles Auth holds, it detaches at once: it asks Auth afresh to tell,
+     * since a role given by hand in Auth since the last answer would otherwise stay with the detached account.
      */
     async unlinkAccount(v: Viewer, input: C.UnlinkAccountInput) {
       requireGeneral(v, "people:link")
@@ -820,12 +824,12 @@ export function createPeopleService(options: PeopleOptions) {
         const changes = desired(u, p, [...new Set(held.map(conceptOf))]).map((c) =>
           c.kind === "team" ? { ...c, role: null } : { ...c, active: false }
         )
-        const reason = `${UNLINK_REASON}${input.reason}`.slice(0, 500)
+        const reason = `${C.UNLINK_REASON}${input.reason}`
         ctx.send(p.id, { id, actor: v.sub, sub: p.accountSub, reason, changes }, true, "unlink")
         // An earlier refusal to end one stays: it shows again if Auth refuses the unlink.
         for (const a of held) Object.assign(a, { status: "sent", commandId: id })
         log(u, p.id, v.sub, "Asked PoliNetwork Auth to take the record's roles back before unlinking", now())
-      })
+      }, true)
     },
     async listRecentLinks(v: Viewer): Promise<C.RecentLink[]> {
       requireGeneral(v, "people:read")

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { myAreaSchema } from "@/people/contract"
+import { myAreaSchema, UNLINK_REASON, unlinkAccountInputSchema } from "@/people/contract"
 import { newAssignment } from "@/people/model"
 import { DIRECTORY_MAX_AGE_MS, DIRECTORY_TTL_MS } from "@/people/service"
 import { fakeAuth, harness, master, permissions, profile, viewer } from "./people-fixtures"
@@ -707,6 +707,31 @@ describe("Unlinking", () => {
     await h.service.acceptInvite(viewer("giulia-new", []), { token: tokenOf(h) })
     expect(h.auth.state.calls.at(-1)).toMatchObject({ actor: "president", sub: "giulia-new" })
     expect(assignmentsOf(h, "P-0001")).toMatchObject([{ status: "applied" }])
+  })
+  it("asks Auth afresh, so a role given by hand since the last answer is taken back too", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.listPeople(master)
+    h.auth.give("member", "it-member")
+    await h.service.unlinkAccount(master, { personId: "P-0003", reason: "Wrong person" })
+    expect(h.auth.held("member")).toEqual([])
+    expect(h.state().persons["P-0003"].accountSub).toBeNull()
+    expect(assignmentsOf(h, "P-0003")).toMatchObject([{ kind: "team", status: "pending", endedOn: null }])
+  })
+  it("refuses to unlink without a fresh answer from Auth", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.listPeople(master)
+    h.auth.state.mode = "down"
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    })
+    expect(h.state().persons["P-0003"].accountSub).toBe("member")
+  })
+  it("takes reasons that still fit Auth's 500 characters once prefixed", () => {
+    const max = 500 - UNLINK_REASON.length
+    expect(unlinkAccountInputSchema.safeParse({ personId: "P-0001", reason: "x".repeat(max) }).success).toBe(true)
+    expect(unlinkAccountInputSchema.safeParse({ personId: "P-0001", reason: "x".repeat(max + 1) }).success).toBe(false)
   })
   it("detaches at once when Auth holds nothing for the record", async () => {
     const h = harness()
