@@ -30,6 +30,9 @@ export const persons = createTable.people("persons", {
   telegramUsername: text("telegram_username"),
   notes: text(),
   accountSub: text("account_sub").unique(),
+  linkedAt: at("linked_at"),
+  linkedBy: text("linked_by"),
+  linkMethod: text("link_method").$type<"invite" | "manual" | "auth">(),
   createdBy: text("created_by").notNull(),
   createdAt: at("created_at").notNull(),
   updatedBy: text("updated_by").notNull(),
@@ -45,6 +48,7 @@ export const roleCommands = createTable.people(
       .notNull()
       .references(() => persons.id),
     request: jsonb().$type<RoleCommand>().notNull(),
+    purpose: text().$type<"roles" | "unlink">().notNull().default("roles"),
     status: text().$type<"queued" | "applied" | "refused">().notNull(),
     attempts: integer().notNull().default(0),
     error: text(),
@@ -54,6 +58,7 @@ export const roleCommands = createTable.people(
   (t) => [
     index("people_role_commands_queued_idx").on(t.createdAt).where(sql`${t.status} = 'queued'`),
     check("people_role_commands_status_check", sql`${t.status} in ('queued', 'applied', 'refused')`),
+    check("people_role_commands_purpose_check", sql`${t.purpose} in ('roles', 'unlink')`),
   ]
 )
 

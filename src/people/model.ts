@@ -100,6 +100,9 @@ export function newPerson(s: PeopleState, input: C.PersonInput, actor: string, n
     telegramUsername: blank(input.telegramUsername),
     notes: null,
     accountSub: null,
+    linkedAt: null,
+    linkedBy: null,
+    linkMethod: null,
     createdBy: actor,
     createdAt: at,
     updatedBy: actor,
@@ -165,7 +168,14 @@ export function openInvite(s: PeopleState, personId: string): Invite | null {
 }
 
 function account(s: PeopleState, p: Person): C.Account {
-  if (p.accountSub) return { status: "linked", sub: p.accountSub }
+  if (p.accountSub)
+    return {
+      status: "linked",
+      sub: p.accountSub,
+      method: p.linkMethod ?? "manual",
+      linkedOn: p.linkedAt?.slice(0, 10) ?? null,
+      linkedBy: p.linkedBy,
+    }
   const invite = openInvite(s, p.id)
   return invite
     ? {

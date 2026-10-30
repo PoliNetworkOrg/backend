@@ -40,6 +40,8 @@ export function createPeopleRouter(people: PeopleService) {
   const read = admin("people:read")
   const write = admin("people:write")
   const appoint = admin("people:appoint")
+  /** Linking hands an account the record's roles, so it has its own permission. */
+  const link = admin("people:link")
   return createTRPCRouter({
     persons: createTRPCRouter({
       list: read.output(C.personRowSchema.array()).query(({ ctx }) => people.listPeople(ctx.viewer)),
@@ -92,18 +94,20 @@ export function createPeopleRouter(people: PeopleService) {
     }),
     linking: createTRPCRouter({
       invites: read.output(C.inviteSchema.array()).query(({ ctx }) => people.listInvites(ctx.viewer)),
-      sendInvite: write
-        .input(C.personRefInputSchema)
-        .mutation(({ ctx, input }) => people.sendInvite(ctx.viewer, input)),
-      revokeInvite: write
+      recent: read.output(C.recentLinkSchema.array()).query(({ ctx }) => people.listRecentLinks(ctx.viewer)),
+      // People writers, or the Lead of one of the person's teams: the service decides.
+      sendInvite: user.input(C.personRefInputSchema).mutation(({ ctx, input }) => people.sendInvite(ctx.viewer, input)),
+      revokeInvite: user
         .input(C.personRefInputSchema)
         .mutation(({ ctx, input }) => people.revokeInvite(ctx.viewer, input)),
-      searchAccounts: write
+      searchAccounts: link
         .input(C.searchAccountsInputSchema)
         .output(C.accountMatchSchema.array())
         .query(({ ctx, input }) => people.searchAccounts(ctx.viewer, input)),
-      link: write.input(C.linkAccountInputSchema).mutation(({ ctx, input }) => people.linkAccount(ctx.viewer, input)),
-      unlink: write.input(C.personRefInputSchema).mutation(({ ctx, input }) => people.unlinkAccount(ctx.viewer, input)),
+      link: link.input(C.linkAccountInputSchema).mutation(({ ctx, input }) => people.linkAccount(ctx.viewer, input)),
+      unlink: link
+        .input(C.unlinkAccountInputSchema)
+        .mutation(({ ctx, input }) => people.unlinkAccount(ctx.viewer, input)),
     }),
     capo: createTRPCRouter({
       get: self.output(C.capoAreaSchema).query(({ ctx }) => people.getCapoArea(ctx.viewer)),
@@ -111,8 +115,13 @@ export function createPeopleRouter(people: PeopleService) {
     me: createTRPCRouter({
       roles: self.output(C.myRolesSchema).query(({ ctx }) => people.getMyRoles(ctx.viewer)),
       get: self.output(C.myAreaSchema).query(({ ctx }) => people.getMyArea(ctx.viewer)),
-      acceptInvite: self
-        .input(z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }))
+      // Any signed-in account with a valid token: someone new holds no People permission yet.
+      invite: user
+        .input(C.inviteTokenInputSchema)
+        .output(C.invitePreviewSchema)
+        .query(({ ctx, input }) => people.previewInvite(ctx.viewer, input)),
+      acceptInvite: user
+        .input(C.inviteTokenInputSchema)
         .mutation(({ ctx, input }) => people.acceptInvite(ctx.viewer, input)),
     }),
   })

@@ -1,7 +1,7 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { Context } from "@/trpc"
-import { harness, permissions, profile } from "./people-fixtures"
+import { harness, master, permissions, profile } from "./people-fixtures"
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -58,6 +58,18 @@ describe("People tRPC contract", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
     expect(Object.keys(h.state().persons)).toHaveLength(3)
   })
+  it("lets a signed-in account without People permissions open and accept an invite", async () => {
+    const h = harness()
+    await h.seed(false)
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    const token = Object.values(h.state().mail)[0].text.match(/peopleInvite=([A-Za-z0-9_-]{43})/)?.[1] ?? ""
+    const actor: Actor = { kind: "user", sub: "newcomer", client: "admin-dashboard", telegramId: null }
+    const caller = makeRouter(h.service).createCaller(context([], actor))
+    await expect(caller.me.get()).rejects.toMatchObject({ code: "FORBIDDEN" })
+    expect(await caller.me.invite({ token })).toMatchObject({ name: "Luca Verdi" })
+    await caller.me.acceptInvite({ token })
+    expect(h.state().persons["P-0003"].accountSub).toBe("newcomer")
+  })
   it("mounts every People procedure with a dashboard policy", () => {
     const r = makeRouter(harness().service)
     const procedures = (r as unknown as { _def: { procedures: Record<string, { _def: { meta: unknown } }> } })._def
@@ -76,12 +88,14 @@ describe("People tRPC contract", () => {
       "capos.setScope",
       "linking.invites",
       "linking.link",
+      "linking.recent",
       "linking.revokeInvite",
       "linking.searchAccounts",
       "linking.sendInvite",
       "linking.unlink",
       "me.acceptInvite",
       "me.get",
+      "me.invite",
       "me.roles",
       "persons.create",
       "persons.get",

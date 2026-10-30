@@ -33,6 +33,7 @@ import {
   bindingsOf,
   type Concept,
   conceptOf,
+  isBound,
   type PeopleRoles,
   RoleChangeError,
   type RoleCommand,
@@ -42,7 +43,26 @@ import {
 } from "./roles"
 import { type BoundRole, peopleRoleChangeProblem } from "./rules"
 import { reconcile, syncDirectory } from "./sync"
-import type { Account, Assignment, PeopleStore, Person, UnitOfWork, Viewer } from "./types"
+import type { Account, Assignment, PeopleStore, Person, StoredCommand, UnitOfWork, Viewer } from "./types"
+
+const longDate = (iso: string) =>
+  new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", day: "numeric", month: "long", year: "numeric" }).format(
+    new Date(iso)
+  )
+/** The invite email. Any account will do: the link is the proof, not the address it was sent to. */
+function inviteText(p: Person, url: string, expiresAt: string) {
+  return [
+    `Ciao ${p.firstName},`,
+    "",
+    "ti abbiamo aggiunto al registro delle persone di PoliNetwork. Per collegarlo al tuo account, apri questo link e accedi:",
+    "",
+    url,
+    "",
+    "Usa l'account con cui entrerai nella dashboard: quello PoliNetwork se fai parte dei soci, altrimenti un qualsiasi account Google. Non deve per forza essere questo indirizzo.",
+    "",
+    `Il link funziona una sola volta e scade il ${longDate(expiresAt)}. Se non sai di cosa si tratta, ignora questa email.`,
+  ].join("\n")
+}
 
 export type PeopleOptions = {
   store: PeopleStore
@@ -103,7 +123,7 @@ export function createPeopleService(options: PeopleOptions) {
     /** Auth's answer; null without Auth. */
     directory: RoleDirectory | null
     /** Sends the command once the transaction commits; `strict` fails the call when Auth refuses it. */
-    send: (personId: string, command: RoleCommand, strict: boolean) => void
+    send: (personId: string, command: RoleCommand, strict: boolean, purpose?: StoredCommand["purpose"]) => void
   }
   /** A People transaction that first lays Auth's answer over the register, then delivers the role commands it queued. */
   async function tx<T>(fn: (u: UnitOfWork, ctx: Ctx) => Promise<T> | T): Promise<T> {
@@ -122,11 +142,12 @@ export function createPeopleService(options: PeopleOptions) {
       }
       return fn(u, {
         directory: read?.value ?? null,
-        send(personId, command, strict) {
+        send(personId, command, strict, purpose = "roles") {
           u.state.commands[command.id] = {
             id: command.id,
             personId,
             request: command,
+            purpose,
             status: "queued",
             attempts: 0,
             error: null,
@@ -178,6 +199,20 @@ export function createPeopleService(options: PeopleOptions) {
         }
         command.status = "refused"
         command.answeredAt = now().toISOString()
+        if (command.purpose === "unlink") {
+          // The account stays linked, with the roles Auth still holds.
+          for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
+            Object.assign(a, { status: "applied", commandId: null })
+          log(
+            u,
+            command.personId,
+            command.request.actor,
+            `PoliNetwork Auth refused to unlink: ${failure.message}`,
+            now()
+          )
+          bumpRevision(u)
+          return
+        }
         for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id)) {
           // A refused start never took effect; a refused end leaves the role held.
           if (a.change === "start") Object.assign(a, { endedOn: date(), endReason: "Refused by PoliNetwork Auth" })
@@ -194,6 +229,12 @@ export function createPeopleService(options: PeopleOptions) {
       if (command?.status !== "queued") return
       Object.assign(command, { status: "applied", answeredAt: now().toISOString(), error: null })
       command.attempts += 1
+      const p = u.state.persons[command.personId]
+      if (command.purpose === "unlink") {
+        if (p) detach(u, p, command.request.actor, command.request.reason)
+        bumpRevision(u)
+        return
+      }
       for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
         Object.assign(a, { status: "applied", refusal: null, commandId: null })
       if (command.request.changes.some((c) => c.kind === "capo" && !c.active))
@@ -201,7 +242,6 @@ export function createPeopleService(options: PeopleOptions) {
       log(u, command.personId, command.request.actor, `PoliNetwork Auth confirmed: ${command.request.reason}`, now())
       // What Auth holds afterwards wins, for example a role still held through a parent role. Unless another
       // answer arrived meanwhile: this one may be older, and the next directory read settles it.
-      const p = u.state.persons[command.personId]
       if (p && (u.state.counters.roleRevision ?? 0) === revision) reconcile(u, p, result.roles, result.held, clock())
       bumpRevision(u)
     })
@@ -324,7 +364,7 @@ export function createPeopleService(options: PeopleOptions) {
     u.merges.push({ from: other.id, into: p.id })
     log(u, p.id, actor, `Absorbed ${other.id}, created for the account's roles in PoliNetwork Auth`, now())
   }
-  function link(u: UnitOfWork, p: Person, sub: string, actor: string, how: string) {
+  function link(u: UnitOfWork, p: Person, sub: string, actor: string, method: "invite" | "manual", how: string) {
     if (p.accountSub) fail("CONFLICT", p.accountSub === sub ? "Already linked" : "Unlink the existing account first")
     const other = Object.values(u.state.persons).find((o) => o.id !== p.id && o.accountSub === sub)
     if (other && !automatic(u, other)) fail("CONFLICT", `This account is already linked to ${other.id}`)
@@ -332,12 +372,36 @@ export function createPeopleService(options: PeopleOptions) {
       other.accountSub = null
       absorb(u, p, other, actor)
     }
-    p.accountSub = sub
+    Object.assign(p, { accountSub: sub, linkedAt: now().toISOString(), linkedBy: actor, linkMethod: method })
     for (const invite of Object.values(u.state.invites))
       if (invite.personId === p.id && !invite.revokedAt && !invite.acceptedAt) invite.revokedAt = now().toISOString()
     touch(p, actor, now())
-    log(u, p.id, actor, `Linked account ${sub}: ${how}`, now())
+    log(u, p.id, actor, `Linked account ${sub} (${method === "invite" ? "email invite" : "by hand"}): ${how}`, now())
     return p
+  }
+  /** Auth no longer holds the record's roles: its current assignments wait for the next link, as pending. */
+  function detach(u: UnitOfWork, p: Person, actor: string, reason: string) {
+    for (const a of assignmentsOf(u.state, p.id))
+      if (!a.endedOn) Object.assign(a, { status: "pending", change: "start", refusal: null, commandId: null })
+    log(u, p.id, actor, `Unlinked account ${p.accountSub}: ${reason}`, now())
+    Object.assign(p, { accountSub: null, linkedAt: null, linkedBy: null, linkMethod: null })
+    touch(p, actor, now())
+  }
+  /** Who may invite to a record: People writers, or the Lead of one of the person's teams. */
+  function inviteAccess(ctx: Ctx, u: UnitOfWork, v: Viewer, p: Person) {
+    if (general(v, "people:write")) return
+    const teams = assignmentsOf(u.state, p.id).flatMap((a) => (a.kind === "team" && !a.endedOn ? [a.team] : []))
+    const held = ctx.directory
+      ? bindingsOf(ctx.directory.roles, ctx.directory.users.find((user) => user.sub === v.sub)?.roles ?? [])
+      : []
+    if (!held.some((b) => b.kind === "team" && b.role === "lead" && teams.includes(b.team as C.TeamId)))
+      fail("FORBIDDEN", "Inviting needs people:write and admin:access, or leading one of the person's teams")
+  }
+  function inviteFor(u: UnitOfWork, token: string) {
+    const invite = Object.values(u.state.invites).find(
+      (i) => i.tokenHash === hash(token) && !i.revokedAt && !i.acceptedAt && i.expiresAt > now().toISOString()
+    )
+    return invite ?? fail("NOT_FOUND", "This invite link is no longer valid: ask for a new one")
   }
 
   function capoOf(u: UnitOfWork, capoId: string | null, personId: string) {
@@ -624,9 +688,9 @@ export function createPeopleService(options: PeopleOptions) {
       )
     },
     async sendInvite(v: Viewer, input: { personId: string }) {
-      requireGeneral(v, "people:write")
-      return tx((u) => {
+      return tx((u, ctx) => {
         const p = find(u.state, input.personId)
+        inviteAccess(ctx, u, v, p)
         if (p.accountSub || !p.contactEmail) fail("CONFLICT", "Account already linked or contact email missing")
         const previous = openInvite(u.state, p.id)
         if (previous) previous.revokedAt = now().toISOString()
@@ -650,22 +714,22 @@ export function createPeopleService(options: PeopleOptions) {
           `invite:${invite.id}`,
           p.contactEmail,
           "PoliNetwork · collega il tuo account",
-          `${dashboardUrl}/dashboard/account/me?peopleInvite=${token}`
+          inviteText(p, `${dashboardUrl}/dashboard/account/me?peopleInvite=${token}`, invite.expiresAt)
         )
         log(u, p.id, v.sub, "Queued an account invite", now())
       })
     },
     async revokeInvite(v: Viewer, input: { personId: string }) {
-      requireGeneral(v, "people:write")
-      return tx((u) => {
+      return tx((u, ctx) => {
         const p = find(u.state, input.personId)
+        inviteAccess(ctx, u, v, p)
         const invite = openInvite(u.state, p.id) ?? fail("CONFLICT", "No open invite")
         invite.revokedAt = now().toISOString()
         log(u, p.id, v.sub, "Revoked the account invite", now())
       })
     },
     async searchAccounts(v: Viewer, input: C.SearchAccountsInput): Promise<C.AccountMatch[]> {
-      requireGeneral(v, "people:write")
+      requireGeneral(v, "people:link")
       const accounts = await options.directory()
       return tx((u) => {
         const q = input.query.toLowerCase()
@@ -680,43 +744,83 @@ export function createPeopleService(options: PeopleOptions) {
     },
     /** Links by hand, then sends the record's pending assignments to Auth acting as whoever linked it. */
     async linkAccount(v: Viewer, input: C.LinkAccountInput) {
-      requireGeneral(v, "people:write")
+      requireGeneral(v, "people:link")
       const account = (await options.directory()).find((a) => a.sub === input.accountId)
       if (!account) fail("NOT_FOUND", "IdP account not found")
       // Its pending assignments would be sent as self-grants, which Auth refuses.
       if (account.sub === v.sub) fail("FORBIDDEN", "Ask someone else to link your own account")
       return tx((u, ctx) => {
-        const p = link(u, find(u.state, input.personId), account.sub, v.sub, input.reason)
+        const p = link(u, find(u.state, input.personId), account.sub, v.sub, "manual", input.reason)
         sendPending(u, ctx, p, () => v.sub, `Linked from People: ${input.reason}`)
       })
     },
-    async unlinkAccount(v: Viewer, input: { personId: string }) {
-      requireGeneral(v, "people:write")
-      return tx((u) => {
+    /**
+     * Takes the record's roles back from the account in Auth, then detaches it; its assignments go back to
+     * `pending` for the next link. Without roles Auth holds, it detaches at once.
+     */
+    async unlinkAccount(v: Viewer, input: C.UnlinkAccountInput) {
+      requireGeneral(v, "people:link")
+      return tx((u, ctx) => {
         const p = find(u.state, input.personId)
         if (!p.accountSub) fail("CONFLICT", "Account not linked")
-        if (assignmentsOf(u.state, p.id).some((a) => !a.endedOn) || waiting(u.state, p.id))
-          fail("CONFLICT", "End this record's roles before unlinking it: PoliNetwork Auth holds them for the account")
-        log(u, p.id, v.sub, `Unlinked account ${p.accountSub}`, now())
-        p.accountSub = null
-        touch(p, v.sub, now())
+        if (waiting(u.state, p.id)) fail("CONFLICT", WAITING)
+        const held = assignmentsOf(u.state, p.id).filter(
+          (a) => !a.endedOn && !!ctx.directory && isBound(ctx.directory.roles, conceptOf(a))
+        )
+        for (const a of held) {
+          const binding = a.kind === "team" ? `team:${a.team}:${a.teamRole}` : a.kind
+          authorize(ctx, u, v, p, binding, "unassign")
+        }
+        if (!held.length) return detach(u, p, v.sub, input.reason)
+        const id = randomUUID()
+        const changes = desired(u, p, [...new Set(held.map(conceptOf))]).map((c) =>
+          c.kind === "team" ? { ...c, role: null } : { ...c, active: false }
+        )
+        const reason = `Unlinked from People: ${input.reason}`.slice(0, 500)
+        ctx.send(p.id, { id, actor: v.sub, sub: p.accountSub, reason, changes }, true, "unlink")
+        for (const a of held) Object.assign(a, { status: "sent", refusal: null, commandId: id })
+        log(u, p.id, v.sub, "Asked PoliNetwork Auth to take the record's roles back before unlinking", now())
       })
+    },
+    async listRecentLinks(v: Viewer): Promise<C.RecentLink[]> {
+      requireGeneral(v, "people:read")
+      const accounts = await options.directory().catch(() => [] as Account[])
+      const since = new Date(now().getTime() - 30 * 86_400_000).toISOString()
+      return tx((u) =>
+        Object.values(u.state.persons)
+          .filter((p) => p.accountSub && p.linkedAt && p.linkedAt >= since)
+          .sort((a, b) => ((a.linkedAt as string) < (b.linkedAt as string) ? 1 : -1))
+          .map((p) => ({
+            person: ref(p),
+            sub: p.accountSub as string,
+            email: accounts.find((a) => a.sub === p.accountSub)?.email ?? null,
+            method: p.linkMethod ?? "manual",
+            linkedOn: (p.linkedAt as string).slice(0, 10),
+            linkedBy: p.linkedBy,
+          }))
+      )
     },
     /**
      * Links the signed-in account to the invited record. Each pending assignment is sent acting as whoever made
      * it: Auth refuses self-grants, so the invitee can't be the actor.
      */
+    /** The record an invite is for, so the landing page can ask "Link this account to <name>?". */
+    async previewInvite(_v: Viewer, input: { token: string }): Promise<C.InvitePreview> {
+      return tx((u) => {
+        const invite = inviteFor(u, input.token)
+        const p = find(u.state, invite.personId)
+        return { personId: p.id, name: nameOf(p), expiresOn: invite.expiresAt.slice(0, 10) }
+      })
+    },
+    /**
+     * Any signed-in account may accept: the single-use token is the proof, not the account's email, since people
+     * often sign in with another account than the one we know. Recently linked lists it, in case an invite was
+     * forwarded.
+     */
     async acceptInvite(v: Viewer, input: { token: string }) {
-      requireSelf(v)
-      const account = (await options.directory()).find((a) => a.sub === v.sub)
-      if (!account?.email) fail("FORBIDDEN", "Verified account email required")
       return tx((u, ctx) => {
-        const invite = Object.values(u.state.invites).find(
-          (i) => i.tokenHash === hash(input.token) && !i.revokedAt && !i.acceptedAt && i.expiresAt > now().toISOString()
-        )
-        if (!invite || invite.email.toLowerCase() !== account.email?.toLowerCase())
-          fail("NOT_FOUND", "Invitation expired or not addressed to this account")
-        const p = link(u, find(u.state, invite.personId), v.sub, v.sub, "Accepted the email invite")
+        const invite = inviteFor(u, input.token)
+        const p = link(u, find(u.state, invite.personId), v.sub, v.sub, "invite", "Accepted the email invite")
         Object.assign(invite, { revokedAt: null, acceptedAt: now().toISOString(), acceptedBy: v.sub })
         sendPending(u, ctx, p, (a) => a.assignedBy, "Linked by accepting an invite in People")
       })
