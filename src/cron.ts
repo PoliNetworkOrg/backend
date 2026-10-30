@@ -28,9 +28,9 @@ export function cron() {
   new Cron("0 * * * * *", async () => {
     try {
       const { people } = await import("./people")
-      await people.sweep()
+      await people.deliverPending()
     } catch (err) {
-      logger.error(err, "[CRON] People sweep")
+      logger.error(err, "[CRON] People mail outbox")
     }
   })
 }

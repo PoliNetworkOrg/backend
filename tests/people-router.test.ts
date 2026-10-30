@@ -49,36 +49,45 @@ describe("People tRPC contract", () => {
       r.createCaller(context(permissions, undefined, ["backend:public:read"])).me.get()
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
-  it("validates profiles and returns only the register projection", async () => {
+  it("validates profiles before reaching People", async () => {
     const h = harness()
     await h.seed()
     const r = makeRouter(h.service)
     await expect(
       r.createCaller(context()).persons.create({ ...profile(), firstName: "X".repeat(81) })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
-    const rows = await r.createCaller(context(["admin:access", "people:members:read"])).members.list()
-    expect(Object.keys(rows[0]).sort()).toEqual(["account", "id", "member", "profile"])
-    expect(rows[0].profile.personalEmail).toBeNull()
+    expect(h.state().counters.person).toBe(3)
   })
-  it("mounts every procedure used by admin #100 with a dashboard policy", () => {
+  it("mounts every People procedure with a dashboard policy", () => {
     const r = makeRouter(harness().service)
     const procedures = (r as unknown as { _def: { procedures: Record<string, { _def: { meta: unknown } }> } })._def
       .procedures
     const defs = Object.entries(procedures)
-    expect(defs.length).toBe(62)
     for (const [, proc] of defs) expect(proc._def.meta).toMatchObject({ policy: { user: { scope: "backend:admin" } } })
-    for (const path of [
-      "persons.list",
-      "members.list",
-      "teams.candidates",
-      "census.importPreview",
-      "linking.resolve",
-      "capo.approve",
+    expect(Object.keys(procedures).sort()).toEqual([
+      "admins.end",
+      "admins.setCapoOfReference",
+      "admins.setCapoScope",
+      "capo.get",
+      "linking.invites",
+      "linking.link",
+      "linking.revokeInvite",
+      "linking.searchAccounts",
+      "linking.sendInvite",
+      "linking.unlink",
+      "me.acceptInvite",
+      "me.get",
       "me.roles",
-      "fees.review",
-      "receipts.prepareSignatures",
-      "receipts.sendSigned",
+      "persons.create",
+      "persons.get",
+      "persons.list",
+      "persons.setNote",
+      "persons.update",
+      "teams.addMember",
+      "teams.candidates",
+      "teams.endMembership",
+      "teams.list",
+      "teams.updateFields",
     ])
-      expect(procedures[path]).toBeDefined()
   })
 })

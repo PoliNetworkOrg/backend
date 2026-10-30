@@ -211,6 +211,13 @@
       "when": 1793043027659,
       "tag": "0029_remove_audit_admin_id",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793284579739,
+      "tag": "0030_people_cleanup",
+      "breakpoints": true
     }
   ]
 }

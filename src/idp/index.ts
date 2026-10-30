@@ -17,9 +17,7 @@ import { dbPersistence } from "./persistence"
 
 /** The projection this backend reads from the IdP (RFC v3 §5.2). */
 const PROJECTION = "backend"
-const signerDirectory = z.array(
-  z.object({ sub: z.string(), name: z.string(), email: z.string().nullable(), emailVerified: z.boolean().optional() })
-)
+const signerDirectory = z.array(z.object({ sub: z.string(), name: z.string(), email: z.string().nullable() }))
 
 function report(component: string) {
   return (error: unknown) => {

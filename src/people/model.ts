@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto"
+import { createHash } from "node:crypto"
 import { TRPCError } from "@trpc/server"
 import * as C from "./contract"
-import type { Officer, PeopleConfig, PeopleState, Person, StoredReceipt, UnitOfWork, Viewer } from "./types"
+import type { PeopleState, Person, Viewer } from "./types"
 
 export function fail(
   code: "BAD_REQUEST" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "PRECONDITION_FAILED",
@@ -11,9 +11,6 @@ export function fail(
 }
 export const nameOf = (p: Person) => `${p.profile.firstName} ${p.profile.lastName}`
 export const ref = (p: Person) => ({ id: p.id, name: nameOf(p) })
-export const newestReceipts = (a: { number: string }, b: { number: string }) =>
-  Number(b.number.split("/")[0]) - Number(a.number.split("/")[0]) ||
-  Number(b.number.split("/")[1]) - Number(a.number.split("/")[1])
 export const hash = (v: Uint8Array | string) => createHash("sha256").update(v).digest("hex")
 export const today = (now: Date) =>
   new Intl.DateTimeFormat("en-CA", {
@@ -22,11 +19,6 @@ export const today = (now: Date) =>
     month: "2-digit",
     day: "2-digit",
   }).format(now)
-export function academicYear(date: string) {
-  const y = Number(date.slice(0, 4)) - (Number(date.slice(5, 7)) < 9 ? 1 : 0)
-  return `${y}/${String(y + 1).slice(-2)}`
-}
-export const dueDate = (year: string) => `${year.slice(0, 4)}-10-31`
 export function find(state: PeopleState, id: string) {
   return state.persons[id] ?? fail("NOT_FOUND", "Person not found")
 }
@@ -54,35 +46,7 @@ export function teamAccess(s: PeopleState, v: Viewer, team: C.TeamId, write: boo
 export function log(p: Person, actor: string, text: string, now: Date) {
   p.activity.unshift({ actor, text, at: now.toISOString() })
 }
-export function fee(p: Person, config: PeopleConfig, date: string) {
-  if (!p.member || p.member.status === "former") return null
-  const year = academicYear(date)
-  p.feeYears[year] ??= {
-    year,
-    status: "due",
-    amountCents: config.feeCents,
-    dueOn: dueDate(year),
-    upload: null,
-    rejection: null,
-    payment: null,
-    lastReminder: null,
-    rejections: [],
-    fileId: null,
-  }
-  const f = p.feeYears[year]
-  if (f.status === "due" || f.status === "unpaid") f.status = date > f.dueOn ? "unpaid" : "due"
-  p.member.fee = f.status
-  return f
-}
-export function row(
-  s: PeopleState,
-  p: Person,
-  v: Viewer,
-  config: PeopleConfig,
-  date: string,
-  scopedContacts = false
-): C.PersonRow {
-  fee(p, config, date)
+export function row(s: PeopleState, p: Person, v: Viewer, scopedContacts = false): C.PersonRow {
   const self = own(s, v)?.id === p.id
   const contacts = self || general(v, "people:read") || scopedContacts
   return C.personRowSchema.parse({
@@ -92,37 +56,16 @@ export function row(
       personalEmail: contacts ? p.profile.personalEmail : null,
       phone: contacts ? p.profile.phone : null,
     },
-    member: self || general(v, "people:members:read") ? p.member : null,
-    isMember: !!p.member && p.member.status !== "former",
     account: self || general(v, "people:read") ? p.account : { status: "none" },
   })
 }
-export function record(s: PeopleState, p: Person, v: Viewer, config: PeopleConfig, date: string): C.PersonRecord {
-  const self = own(s, v)?.id === p.id
+export function record(s: PeopleState, p: Person, v: Viewer): C.PersonRecord {
   const read = general(v, "people:read")
-  const pendingMessages = new Set(p.pendingGroupRemovals?.map((pending) => pending.message))
-  const discrepancies: C.Discrepancy[] = p.discrepancies.map((item) =>
-    pendingMessages.has(item.message) ? { ...item, kind: "admin-removal" } : item
-  )
   return C.personRecordSchema.parse({
-    ...row(s, p, v, config, date),
+    ...row(s, p, v),
     notes: read ? p.notes : null,
-    discrepancies: read ? discrepancies : self ? discrepancies.filter((d) => pendingMessages.has(d.message)) : [],
-    activity: read
-      ? p.activity
-      : self
-        ? p.activity.filter((a) => /fee|receipt|payment|consent|census/i.test(a.text))
-        : [],
-    fees:
-      p.member && (self || general(v, "people:members:read"))
-        ? {
-            current: fee(p, config, date),
-            receipts: Object.values(s.receipts)
-              .filter((r) => r.person.id === p.id)
-              .sort(newestReceipts)
-              .map((r) => C.receiptSchema.parse(r)),
-          }
-        : null,
+    discrepancies: read ? p.discrepancies : [],
+    activity: read ? p.activity : [],
   })
 }
 export function newPerson(s: PeopleState, input: C.CreatePersonInput, date: string): Person {
@@ -139,74 +82,30 @@ export function newPerson(s: PeopleState, input: C.CreatePersonInput, date: stri
       otherAssociations: [],
       studentRepresentative: null,
     },
-    member: null,
     admin: input.admin
       ? {
           status: "active",
           since: date,
           endedOn: null,
           endReason: null,
-          groups: [],
-          requested: [],
           availableAsCapo: false,
           capoOfReference: null,
           capoScope: null,
         }
       : null,
     teams: [],
-    census: [],
     consents: { privacy: null, photo: null },
     account: { status: "none" },
     notes: null,
     discrepancies: [],
     activity: [],
     accountSub: null,
-    azureId: null,
-    feeYears: {},
-    answers: {},
-    reminders: {},
     invite: null,
   }
   s.persons[p.id] = p
   return p
 }
-export function office(s: PeopleState, v: Viewer, config: PeopleConfig): Officer | null {
-  if (!general(v, "people:receipts:sign")) return null
-  const p = own(s, v)
-  if (!p) return null
-  return config.officers.president === p.id
-    ? "president"
-    : config.officers.vicePresident === p.id
-      ? "vicePresident"
-      : null
-}
-export function receiptEligible(
-  s: PeopleState,
-  r: StoredReceipt,
-  v: Viewer,
-  config: PeopleConfig,
-  requireEsign = true
-) {
-  return (
-    r.status === "toSign" &&
-    office(s, v, config) === r.signer &&
-    config.officers[r.signer] === r.officerPersonId &&
-    (!requireEsign || v.can("esign:sign"))
-  )
-}
-export function findReceipt(s: PeopleState, id: string) {
-  return s.receipts[id] ?? fail("NOT_FOUND", "Receipt not found")
-}
-export function queue(
-  s: PeopleState,
-  p: Person,
-  id: string,
-  to: string,
-  subject: string,
-  text: string,
-  fileId: string | null = null,
-  receiptId: string | null = null
-) {
+export function queue(s: PeopleState, p: Person, id: string, to: string, subject: string, text: string) {
   if (s.outbox[id]?.status === "failed") {
     s.outbox[id].status = "pending"
     s.outbox[id].attemptedAt = null
@@ -218,23 +117,11 @@ export function queue(
     to,
     subject,
     text,
-    fileId,
-    receiptId,
     status: "pending",
     attemptedAt: null,
     error: null,
   }
 }
-export async function filePayload(u: UnitOfWork, id: string) {
-  const file = await u.getFile(id)
-  if (!file) fail("NOT_FOUND", "File not found")
-  return {
-    fileName: file.fileName,
-    contentType: file.contentType,
-    base64: Buffer.from(file.content).toString("base64"),
-  }
-}
-export const csvCell = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replaceAll('"', '""')}"`
 export function validateFields(team: C.TeamId, fields: C.TeamFields) {
   for (const [key, value] of Object.entries(fields)) {
     const spec = C.TEAMS[team].fields.find((f) => f.key === key)
@@ -248,7 +135,4 @@ export function validateFields(team: C.TeamId, fields: C.TeamFields) {
     )
       fail("BAD_REQUEST", "Invalid team option")
   }
-}
-export function newFileId() {
-  return randomUUID()
 }
