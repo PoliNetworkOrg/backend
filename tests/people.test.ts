@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { myAreaSchema } from "@/people/contract"
+import { newAssignment } from "@/people/model"
 import { DIRECTORY_MAX_AGE_MS, DIRECTORY_TTL_MS } from "@/people/service"
 import { fakeAuth, harness, master, permissions, profile, viewer } from "./people-fixtures"
 
@@ -496,6 +497,32 @@ describe("Linking by invite", () => {
     ])
     expect(h.auth.held("member")).toEqual(["admin"])
   })
+  it("previews an invite without asking Auth, even when it has been down for long", async () => {
+    const h = harness()
+    await h.seed(false)
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    h.auth.state.mode = "down"
+    h.advance(DIRECTORY_MAX_AGE_MS + 1)
+    const reads = h.auth.state.reads
+    await expect(h.service.previewInvite(viewer("someone", []), { token: tokenOf(h) })).resolves.toMatchObject({
+      personId: "P-0003",
+    })
+    expect(h.auth.state.reads).toBe(reads)
+  })
+  it("lets a Lead invite their team's members without Auth, as they manage the team", async () => {
+    const h = harness({ peopleRoles: null })
+    await h.seed()
+    const { id } = await h.service.createPerson(master, profile("Sara", "Neri"))
+    await h.store.transaction(async (u) => {
+      const team = { kind: "team", team: "it", since, assignedBy: "seed", status: "applied" } as const
+      newAssignment(u.state, { ...team, personId: "P-0002", teamRole: "lead" })
+      newAssignment(u.state, { ...team, personId: id, teamRole: "member" })
+    })
+    await h.service.sendInvite(viewer("vice", ["admin:access", "people:self"]), { personId: id })
+    await expect(h.service.sendInvite(viewer("vice", ["admin:access"]), { personId: id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
+  })
   it("says in the email that any account will do", async () => {
     const h = harness()
     await h.seed(false)
@@ -538,6 +565,13 @@ describe("Linking by hand", () => {
     ])
     h.advance(31 * 86_400_000)
     expect(await h.service.listRecentLinks(master)).toEqual([])
+  })
+  it("lists recent links without asking the IdP directory when there are none", async () => {
+    const directory = vi.fn(async () => [])
+    const h = harness({ directory })
+    await h.seed()
+    expect(await h.service.listRecentLinks(master)).toEqual([])
+    expect(directory).not.toHaveBeenCalled()
   })
   it("keeps an assignment Auth refuses at link time on the record as refused", async () => {
     const h = harness()
@@ -635,6 +669,31 @@ describe("Unlinking", () => {
     expect(assignmentsOf(h, "P-0003").map((a) => [a.kind, a.status, a.endedOn])).toEqual([
       ["admin", "applied", "2026-10-18"],
       ["team", "applied", null],
+    ])
+    // Unlinking again ends as if the first unlink had gone through: what it took back is pending too.
+    h.auth.state.before = null
+    await h.service.unlinkAccount(master, { personId: "P-0003", reason: "Wrong person" })
+    expect(h.state().persons["P-0003"].accountSub).toBeNull()
+    expect(assignmentsOf(h, "P-0003").map((a) => [a.kind, a.status, a.endedOn])).toEqual([
+      ["admin", "pending", null],
+      ["team", "pending", null],
+    ])
+    expect(h.history().map((a) => a.text)).toContain("Unlinked account member: Wrong person")
+  })
+  it("keeps an earlier refusal on the record when Auth refuses the unlink", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    h.auth.state.refusal = { status: 409, message: "The admin role is inherited." }
+    await expect(h.service.endAdmin(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    })
+    h.auth.state.refusal = { status: 409, message: "Not now." }
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    })
+    expect(assignmentsOf(h, "P-0003")).toMatchObject([
+      { status: "refused", refusal: "The admin role is inherited.", endedOn: null },
     ])
   })
   it("gives assignments made in Auth a real actor, so the next link can send them", async () => {

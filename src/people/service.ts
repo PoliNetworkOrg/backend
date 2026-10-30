@@ -81,6 +81,10 @@ export const DIRECTORY_TTL_MS = 15_000
 /** Past this without an answer, People refuses to work rather than decide who holds a role from an old one. */
 export const DIRECTORY_MAX_AGE_MS = 60 * 60_000
 const WAITING = "A role change for this person is waiting for PoliNetwork Auth; try again in a moment."
+/** Starts the reason an unlink sends Auth; the record's own history keeps only what follows. */
+const UNLINK_REASON = "Unlinked from People: "
+/** Why an assignment ended when Auth took its role back for an unlink that then found other roles held. */
+const TAKEN_BACK = "Taken back in PoliNetwork Auth to unlink the account"
 
 const refusalCode = (status: number) =>
   status === 403 ? "FORBIDDEN" : status === 404 ? "NOT_FOUND" : status === 409 ? "CONFLICT" : "PRECONDITION_FAILED"
@@ -200,9 +204,9 @@ export function createPeopleService(options: PeopleOptions) {
         command.status = "refused"
         command.answeredAt = now().toISOString()
         if (command.purpose === "unlink") {
-          // The account stays linked, with the roles Auth still holds.
+          // The account stays linked, with the roles Auth still holds, and any earlier refusal still shown.
           for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
-            Object.assign(a, { status: "applied", commandId: null })
+            Object.assign(a, { status: a.refusal ? "refused" : "applied", commandId: null })
           log(
             u,
             command.personId,
@@ -232,19 +236,30 @@ export function createPeopleService(options: PeopleOptions) {
       command.attempts += 1
       const p = u.state.persons[command.personId]
       if (command.purpose === "unlink") {
+        const latest = (u.state.counters.roleRevision ?? 0) === revision
         bumpRevision(u)
         if (!p) return
         // Auth may still hold roles for the account, given since (by hand, or in Auth before a retry).
         // Detaching then would leave it that access: keep the link and show what Auth holds.
         if (bindingsOf(result.roles, result.held).length) {
+          // Auth took these back, so they end while the account stays linked; `detach` brings them back as
+          // pending once it is unlinked, as if this unlink had gone through.
           for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
-            Object.assign(a, { status: "applied", commandId: null })
-          reconcile(u, p, result.roles, result.held, clock())
+            Object.assign(a, {
+              endedOn: date(),
+              endReason: TAKEN_BACK,
+              change: "end",
+              status: "applied",
+              refusal: null,
+              commandId: null,
+            })
+          // Unless another answer arrived meanwhile: this one may be older, and the next directory read settles it.
+          if (latest) reconcile(u, p, result.roles, result.held, clock())
           log(u, p.id, command.request.actor, "Not unlinked: PoliNetwork Auth still holds roles for the account", now())
           remaining = new RoleChangeError(409, "PoliNetwork Auth still holds roles for this account: unlink again")
           return
         }
-        detach(u, p, command.request.actor, command.request.reason)
+        detach(u, p, command.request.actor, command.request.reason.slice(UNLINK_REASON.length))
         return
       }
       for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
@@ -277,7 +292,7 @@ export function createPeopleService(options: PeopleOptions) {
     const directory = ctx.directory as RoleDirectory
     const problem = peopleRoleChangeProblem({
       actor: v,
-      held: bindingsOf(directory.roles, directory.users.find((user) => user.sub === v.sub)?.roles ?? []),
+      held: heldBy(directory, v),
       targetSub: p.accountSub,
       role,
       action,
@@ -393,6 +408,14 @@ export function createPeopleService(options: PeopleOptions) {
   }
   /** Auth no longer holds the record's roles: its current assignments wait for the next link, as pending. */
   function detach(u: UnitOfWork, p: Person, actor: string, reason: string) {
+    // What an earlier attempt to unlink this link took back comes back too, unless it was given again since.
+    for (const a of assignmentsOf(u.state, p.id))
+      if (
+        a.endReason === TAKEN_BACK &&
+        (a.endedOn as string) >= (p.linkedAt?.slice(0, 10) ?? "") &&
+        !current(u.state, p.id, conceptOf(a))
+      )
+        Object.assign(a, { endedOn: null, endReason: null })
     for (const a of assignmentsOf(u.state, p.id)) {
       if (a.endedOn) continue
       Object.assign(a, { status: "pending", change: "start", refusal: null, commandId: null })
@@ -410,10 +433,7 @@ export function createPeopleService(options: PeopleOptions) {
   function inviteAccess(ctx: Ctx, u: UnitOfWork, v: Viewer, p: Person) {
     if (general(v, "people:write")) return
     const teams = assignmentsOf(u.state, p.id).flatMap((a) => (a.kind === "team" && !a.endedOn ? [a.team] : []))
-    const held = ctx.directory
-      ? bindingsOf(ctx.directory.roles, ctx.directory.users.find((user) => user.sub === v.sub)?.roles ?? [])
-      : []
-    if (!held.some((b) => b.kind === "team" && b.role === "lead" && teams.includes(b.team as C.TeamId)))
+    if (!teams.some((team) => leads(ctx, u, v, team as C.TeamId)))
       fail("FORBIDDEN", "Inviting needs people:write and admin:access, or leading one of the person's teams")
   }
   function inviteFor(u: UnitOfWork, token: string) {
@@ -433,17 +453,22 @@ export function createPeopleService(options: PeopleOptions) {
   function activeOrFail(u: UnitOfWork, personId: string, concept: Concept, message: string) {
     return current(u.state, personId, concept) ?? fail("CONFLICT", message)
   }
-  /** Whether a Lead (per Auth) or a People writer may work on a team's data. */
+  /** The People bindings of the roles the viewer holds in Auth. */
+  function heldBy(directory: RoleDirectory, v: Viewer) {
+    return bindingsOf(directory.roles, directory.users.find((user) => user.sub === v.sub)?.roles ?? [])
+  }
+  /** Whether the viewer leads `team`: as Auth says, or as their own record says when Auth isn't configured. */
+  function leads(ctx: Ctx, u: UnitOfWork, v: Viewer, team: C.TeamId) {
+    if (!v.can("people:self")) return false
+    if (ctx.directory)
+      return heldBy(ctx.directory, v).some((b) => b.kind === "team" && b.team === team && b.role === "lead")
+    const mine = own(u.state, v)
+    return !!mine && leadsOf(u.state, mine.id).includes(team)
+  }
+  /** Whether a Lead or a People writer may work on a team's data. */
   function teamAccess(ctx: Ctx, u: UnitOfWork, v: Viewer, team: C.TeamId, write: boolean) {
     if (general(v, write ? "people:write" : "people:read")) return
-    const held = ctx.directory
-      ? bindingsOf(ctx.directory.roles, ctx.directory.users.find((user) => user.sub === v.sub)?.roles ?? [])
-      : []
-    const mine = own(u.state, v)
-    const leads =
-      held.some((b) => b.kind === "team" && b.team === team && b.role === "lead") ||
-      (!ctx.directory && !!mine && leadsOf(u.state, mine.id).includes(team))
-    if (!v.can("people:self") || !leads) fail("FORBIDDEN", "You do not lead this team")
+    if (!leads(ctx, u, v, team)) fail("FORBIDDEN", "You do not lead this team")
   }
 
   return {
@@ -795,46 +820,52 @@ export function createPeopleService(options: PeopleOptions) {
         const changes = desired(u, p, [...new Set(held.map(conceptOf))]).map((c) =>
           c.kind === "team" ? { ...c, role: null } : { ...c, active: false }
         )
-        const reason = `Unlinked from People: ${input.reason}`.slice(0, 500)
+        const reason = `${UNLINK_REASON}${input.reason}`.slice(0, 500)
         ctx.send(p.id, { id, actor: v.sub, sub: p.accountSub, reason, changes }, true, "unlink")
-        for (const a of held) Object.assign(a, { status: "sent", refusal: null, commandId: id })
+        // An earlier refusal to end one stays: it shows again if Auth refuses the unlink.
+        for (const a of held) Object.assign(a, { status: "sent", commandId: id })
         log(u, p.id, v.sub, "Asked PoliNetwork Auth to take the record's roles back before unlinking", now())
       })
     },
     async listRecentLinks(v: Viewer): Promise<C.RecentLink[]> {
       requireGeneral(v, "people:read")
-      const accounts = await options.directory().catch(() => [] as Account[])
       const since = new Date(now().getTime() - 30 * 86_400_000).toISOString()
-      return tx((u) =>
+      const links = await tx((u) =>
         Object.values(u.state.persons)
           .filter((p) => p.accountSub && p.linkedAt && p.linkedAt >= since)
           .sort((a, b) => ((a.linkedAt as string) < (b.linkedAt as string) ? 1 : -1))
           .map((p) => ({
             person: ref(p),
             sub: p.accountSub as string,
-            email: accounts.find((a) => a.sub === p.accountSub)?.email ?? null,
             method: p.linkMethod ?? "manual",
             linkedOn: (p.linkedAt as string).slice(0, 10),
             linkedBy: p.linkedBy,
           }))
       )
+      if (!links.length) return []
+      // The emails are only a hint for spotting a forwarded invite: without the directory, the list still shows.
+      const accounts = await options.directory().catch((error) => {
+        console.error(error)
+        return [] as Account[]
+      })
+      return links.map((link) => ({ ...link, email: accounts.find((a) => a.sub === link.sub)?.email ?? null }))
     },
     /**
-     * Links the signed-in account to the invited record. Each pending assignment is sent acting as whoever made
-     * it: Auth refuses self-grants, so the invitee can't be the actor.
+     * The record an invite is for, so the landing page can ask "Link this account to <name>?". It only reads the
+     * register, so it neither waits for Auth nor lays Auth's answer over it.
      */
-    /** The record an invite is for, so the landing page can ask "Link this account to <name>?". */
     async previewInvite(_v: Viewer, input: { token: string }): Promise<C.InvitePreview> {
-      return tx((u) => {
+      return store.transaction(async (u) => {
         const invite = inviteFor(u, input.token)
         const p = find(u.state, invite.personId)
         return { personId: p.id, name: nameOf(p), expiresOn: invite.expiresAt.slice(0, 10) }
       })
     },
     /**
-     * Any signed-in account may accept: the single-use token is the proof, not the account's email, since people
-     * often sign in with another account than the one we know. Recently linked lists it, in case an invite was
-     * forwarded.
+     * Links the signed-in account to the invited record. Any signed-in account may accept: the single-use token is
+     * the proof, not the account's email, since people often sign in with another account than the one we know.
+     * Recently linked lists it, in case an invite was forwarded. Each pending assignment is sent acting as whoever
+     * made it: Auth refuses self-grants, so the invitee can't be the actor.
      */
     async acceptInvite(v: Viewer, input: { token: string }) {
       return tx((u, ctx) => {
