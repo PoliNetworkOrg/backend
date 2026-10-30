@@ -619,6 +619,36 @@ describe("Unlinking", () => {
     expect(h.state().persons["P-0003"].accountSub).toBe("member")
     expect(assignmentsOf(h, "P-0003")).toMatchObject([{ status: "applied", endedOn: null }])
   })
+  it("keeps the account linked when Auth still holds a role given meanwhile", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    // Given by hand in Auth after People read it, just before the unlink reaches Auth.
+    h.auth.state.before = (c) => {
+      if (c.reason.startsWith("Unlinked")) h.auth.give("member", "it-member")
+    }
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("still holds roles"),
+    })
+    expect(h.state().persons["P-0003"].accountSub).toBe("member")
+    expect(assignmentsOf(h, "P-0003").map((a) => [a.kind, a.status, a.endedOn])).toEqual([
+      ["admin", "applied", "2026-10-18"],
+      ["team", "applied", null],
+    ])
+  })
+  it("gives assignments made in Auth a real actor, so the next link can send them", async () => {
+    const h = harness()
+    h.auth.give("giulia", "it-member", "Giulia Neri")
+    await h.service.listPeople(master)
+    await h.service.unlinkAccount(master, { personId: "P-0001", reason: "Old account" })
+    expect(assignmentsOf(h, "P-0001")).toMatchObject([{ status: "pending", assignedBy: "president" }])
+    await h.service.updatePerson(master, { id: "P-0001", ...profile("Giulia", "Neri") })
+    await h.service.sendInvite(master, { personId: "P-0001" })
+    await h.service.acceptInvite(viewer("giulia-new", []), { token: tokenOf(h) })
+    expect(h.auth.state.calls.at(-1)).toMatchObject({ actor: "president", sub: "giulia-new" })
+    expect(assignmentsOf(h, "P-0001")).toMatchObject([{ status: "applied" }])
+  })
   it("detaches at once when Auth holds nothing for the record", async () => {
     const h = harness()
     await h.seed()

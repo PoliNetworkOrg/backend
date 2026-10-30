@@ -224,6 +224,7 @@ export function createPeopleService(options: PeopleOptions) {
       })
       return failure.unanswered ? null : failure
     }
+    let remaining: RoleChangeError | null = null
     await store.transaction(async (u) => {
       const command = u.state.commands[id]
       if (command?.status !== "queued") return
@@ -231,8 +232,19 @@ export function createPeopleService(options: PeopleOptions) {
       command.attempts += 1
       const p = u.state.persons[command.personId]
       if (command.purpose === "unlink") {
-        if (p) detach(u, p, command.request.actor, command.request.reason)
         bumpRevision(u)
+        if (!p) return
+        // Auth may still hold roles for the account, given since (by hand, or in Auth before a retry).
+        // Detaching then would leave it that access: keep the link and show what Auth holds.
+        if (bindingsOf(result.roles, result.held).length) {
+          for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
+            Object.assign(a, { status: "applied", commandId: null })
+          reconcile(u, p, result.roles, result.held, clock())
+          log(u, p.id, command.request.actor, "Not unlinked: PoliNetwork Auth still holds roles for the account", now())
+          remaining = new RoleChangeError(409, "PoliNetwork Auth still holds roles for this account: unlink again")
+          return
+        }
+        detach(u, p, command.request.actor, command.request.reason)
         return
       }
       for (const a of Object.values(u.state.assignments).filter((a) => a.commandId === id))
@@ -246,7 +258,7 @@ export function createPeopleService(options: PeopleOptions) {
       bumpRevision(u)
     })
     stale = true
-    return null
+    return remaining
   }
 
   /** The single role Auth binds to `binding`, or why People can't use it. */
@@ -381,8 +393,15 @@ export function createPeopleService(options: PeopleOptions) {
   }
   /** Auth no longer holds the record's roles: its current assignments wait for the next link, as pending. */
   function detach(u: UnitOfWork, p: Person, actor: string, reason: string) {
-    for (const a of assignmentsOf(u.state, p.id))
-      if (!a.endedOn) Object.assign(a, { status: "pending", change: "start", refusal: null, commandId: null })
+    for (const a of assignmentsOf(u.state, p.id)) {
+      if (a.endedOn) continue
+      Object.assign(a, { status: "pending", change: "start", refusal: null, commandId: null })
+      // Auth will need a real person to act for it at the next link: whoever unlinked takes it over.
+      if (a.assignedBy === "auth") {
+        a.assignedBy = actor
+        log(u, p.id, actor, `Took over the ${conceptOf(a)} assignment given in PoliNetwork Auth`, now())
+      }
+    }
     log(u, p.id, actor, `Unlinked account ${p.accountSub}: ${reason}`, now())
     Object.assign(p, { accountSub: null, linkedAt: null, linkedBy: null, linkMethod: null })
     touch(p, actor, now())
