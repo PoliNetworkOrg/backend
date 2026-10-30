@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
-import { myAreaSchema } from "@/people/contract"
+import { myAreaSchema, UNLINK_REASON, unlinkAccountInputSchema } from "@/people/contract"
+import { newAssignment } from "@/people/model"
 import { DIRECTORY_MAX_AGE_MS, DIRECTORY_TTL_MS } from "@/people/service"
 import { fakeAuth, harness, master, permissions, profile, viewer } from "./people-fixtures"
 
@@ -397,11 +398,152 @@ describe("Pending assignments follow Auth's rules", () => {
   })
 })
 
-describe("Linking sends pending assignments", () => {
-  it("acts as whoever links by hand", async () => {
+const tokenOf = (h: ReturnType<typeof harness>) =>
+  Object.values(h.state().mail)
+    .at(-1)
+    ?.text.match(/peopleInvite=([A-Za-z0-9_-]{43})/)?.[1] ?? ""
+
+describe("Linking by invite", () => {
+  it("links whichever account accepts, acting as each assigner, without People permissions or a matching email", async () => {
+    const h = harness()
+    await h.seed(false)
+    const vice = viewer("vice", permissions)
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    await h.service.addTeamMember(vice, { teamId: "it", personId: "P-0003", role: "member", since, fields: {} })
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    // Signed in with an account whose email isn't the invited one, holding no People permission.
+    const invitee = viewer("luca-google", [])
+    expect(await h.service.previewInvite(invitee, { token: tokenOf(h) })).toEqual({
+      personId: "P-0003",
+      name: "Luca Verdi",
+      expiresOn: "2026-11-01",
+    })
+    await h.service.acceptInvite(invitee, { token: tokenOf(h) })
+    expect(h.auth.state.calls.map((c) => [c.actor, c.sub, c.changes]).sort()).toEqual([
+      ["president", "luca-google", [{ kind: "admin", active: true }]],
+      ["vice", "luca-google", [{ kind: "team", team: "it", role: "member" }]],
+    ])
+    expect(h.auth.held("luca-google")).toEqual(["admin", "it-member"])
+    expect((await h.service.getPerson(master, { id: "P-0003" })).account).toEqual({
+      status: "linked",
+      sub: "luca-google",
+      method: "invite",
+      linkedOn: "2026-10-18",
+      linkedBy: "luca-google",
+    })
+  })
+  it("uses each token once, until it expires, and only the latest one", async () => {
+    const h = harness()
+    await h.seed(false)
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    const first = tokenOf(h)
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    const second = tokenOf(h)
+    const someone = viewer("someone", [])
+    await expect(h.service.acceptInvite(someone, { token: first })).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await h.service.revokeInvite(master, { personId: "P-0003" })
+    await expect(h.service.previewInvite(someone, { token: second })).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await h.service.sendInvite(master, { personId: "P-0002" })
+    const late = tokenOf(h)
+    h.advance(14 * 86_400_000 + 1)
+    await expect(h.service.acceptInvite(someone, { token: late })).rejects.toMatchObject({ code: "NOT_FOUND" })
+    await h.service.sendInvite(master, { personId: "P-0002" })
+    const fresh = tokenOf(h)
+    await h.service.acceptInvite(someone, { token: fresh })
+    await expect(h.service.acceptInvite(viewer("other", []), { token: fresh })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    })
+    expect(h.state().persons["P-0002"].accountSub).toBe("someone")
+  })
+  it("refuses an account already linked to another record", async () => {
+    const h = harness()
+    await h.seed()
+    const { id } = await h.service.createPerson(master, profile("Sara", "Neri"))
+    await h.service.sendInvite(master, { personId: id })
+    await expect(h.service.acceptInvite(viewer("member", []), { token: tokenOf(h) })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "This account is already linked to P-0003",
+    })
+    expect(h.state().persons[id].accountSub).toBeNull()
+  })
+  it("lets a Lead invite their team's members, and nobody else's", async () => {
+    const h = harness()
+    await h.seed(false)
+    h.auth.give("vice", "it-lead")
+    await h.service.addTeamMember(master, { teamId: "it", personId: "P-0003", role: "member", since, fields: {} })
+    const lead = viewer("vice", ["admin:access", "people:self"])
+    await h.service.sendInvite(lead, { personId: "P-0003" })
+    await expect(h.service.sendInvite(lead, { personId: "P-0001" })).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await h.service.revokeInvite(lead, { personId: "P-0003" })
+  })
+  it("keeps on the record what Auth refuses, and applies the rest", async () => {
     const h = harness()
     await h.seed(false)
     await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    await h.service.addTeamMember(viewer("vice", permissions), {
+      teamId: "it",
+      personId: "P-0003",
+      role: "member",
+      since,
+      fields: {},
+    })
+    h.auth.state.refuse = (c) =>
+      c.actor === "vice" ? { status: 403, message: "Changing this role needs people:write and admin:access." } : null
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    await h.service.acceptInvite(viewer("member", []), { token: tokenOf(h) })
+    expect(assignmentsOf(h, "P-0003").map((a) => [a.kind, a.status, a.endedOn])).toEqual([
+      ["admin", "applied", null],
+      ["team", "refused", "2026-10-18"],
+    ])
+    expect(h.auth.held("member")).toEqual(["admin"])
+  })
+  it("previews an invite without asking Auth, even when it has been down for long", async () => {
+    const h = harness()
+    await h.seed(false)
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    h.auth.state.mode = "down"
+    h.advance(DIRECTORY_MAX_AGE_MS + 1)
+    const reads = h.auth.state.reads
+    await expect(h.service.previewInvite(viewer("someone", []), { token: tokenOf(h) })).resolves.toMatchObject({
+      personId: "P-0003",
+    })
+    expect(h.auth.state.reads).toBe(reads)
+  })
+  it("lets a Lead invite their team's members without Auth, as they manage the team", async () => {
+    const h = harness({ peopleRoles: null })
+    await h.seed()
+    const { id } = await h.service.createPerson(master, profile("Sara", "Neri"))
+    await h.store.transaction(async (u) => {
+      const team = { kind: "team", team: "it", since, assignedBy: "seed", status: "applied" } as const
+      newAssignment(u.state, { ...team, personId: "P-0002", teamRole: "lead" })
+      newAssignment(u.state, { ...team, personId: id, teamRole: "member" })
+    })
+    await h.service.sendInvite(viewer("vice", ["admin:access", "people:self"]), { personId: id })
+    await expect(h.service.sendInvite(viewer("vice", ["admin:access"]), { personId: id })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
+  })
+  it("says in the email that any account will do", async () => {
+    const h = harness()
+    await h.seed(false)
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    const [mail] = Object.values(h.state().mail)
+    expect(mail.text).toContain("Ciao Luca,")
+    expect(mail.text).toContain("Non deve per forza essere questo indirizzo")
+    expect(mail.text).toContain("scade il 1 novembre 2026")
+  })
+})
+
+describe("Linking by hand", () => {
+  it("needs people:link, and acts as whoever links", async () => {
+    const h = harness()
+    await h.seed(false)
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    const writer = viewer("vice", ["admin:access", "people:write", "people:read"])
+    await expect(
+      h.service.linkAccount(writer, { personId: "P-0003", accountId: "member", reason: "x" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN", message: expect.stringContaining("people:link") })
+    await expect(h.service.searchAccounts(writer, { query: "" })).rejects.toMatchObject({ code: "FORBIDDEN" })
     await h.service.linkAccount(viewer("vice", permissions), {
       personId: "P-0003",
       accountId: "member",
@@ -411,42 +553,38 @@ describe("Linking sends pending assignments", () => {
       { actor: "vice", sub: "member", changes: [{ kind: "admin", active: true }] },
     ])
     expect(assignmentsOf(h, "P-0003")).toMatchObject([{ status: "applied" }])
-  })
-  it("acts as each assigner when the invitee accepts, so nobody grants themselves a role", async () => {
-    const h = harness()
-    await h.seed(false)
-    const vice = viewer("vice", permissions)
-    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
-    await h.service.addTeamMember(vice, { teamId: "it", personId: "P-0003", role: "member", since, fields: {} })
-    await h.service.sendInvite(master, { personId: "P-0003" })
-    const first = Object.values(h.state().mail).at(-1)?.text.split("peopleInvite=")[1] ?? ""
-    await h.service.sendInvite(master, { personId: "P-0003" })
-    const last = Object.values(h.state().mail).at(-1)?.text.split("peopleInvite=")[1] ?? ""
-    const invitee = viewer("member", ["people:self"])
-    await expect(h.service.acceptInvite(invitee, { token: first })).rejects.toMatchObject({ code: "NOT_FOUND" })
-    await expect(h.service.acceptInvite(viewer("vice", ["people:self"]), { token: last })).rejects.toMatchObject({
-      code: "NOT_FOUND",
-    })
-    await h.service.acceptInvite(invitee, { token: last })
-    expect(h.auth.state.calls.map((c) => [c.actor, c.changes]).sort()).toEqual([
-      ["president", [{ kind: "admin", active: true }]],
-      ["vice", [{ kind: "team", team: "it", role: "member" }]],
+    expect(await h.service.listRecentLinks(master)).toEqual([
+      {
+        person: { id: "P-0003", name: "Luca Verdi" },
+        sub: "member",
+        email: "luca@example.org",
+        method: "manual",
+        linkedOn: "2026-10-18",
+        linkedBy: "vice",
+      },
     ])
-    expect(h.auth.held("member")).toEqual(["admin", "it-member"])
-    expect(await h.service.getMyRoles(invitee)).toEqual({ capoScope: null, leads: [] })
+    h.advance(31 * 86_400_000)
+    expect(await h.service.listRecentLinks(master)).toEqual([])
+  })
+  it("lists recent links without asking the IdP directory when there are none", async () => {
+    const directory = vi.fn(async () => [])
+    const h = harness({ directory })
+    await h.seed()
+    expect(await h.service.listRecentLinks(master)).toEqual([])
+    expect(directory).not.toHaveBeenCalled()
   })
   it("keeps an assignment Auth refuses at link time on the record as refused", async () => {
     const h = harness()
     await h.seed(false)
     await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
     h.auth.state.refusal = { status: 403, message: "Changing this role needs people:write and admin:access." }
-    await h.service.linkAccount(master, { personId: "P-0003", accountId: "member", reason: "In person" })
+    await h.service.linkAccount(viewer("vice", permissions), { personId: "P-0003", accountId: "member", reason: "x" })
     expect(h.state().persons["P-0003"].accountSub).toBe("member")
     expect(assignmentsOf(h, "P-0003")).toMatchObject([
       { status: "refused", refusal: expect.stringContaining("people:write") },
     ])
   })
-  it("refuses an account already linked elsewhere, and unlinking while Auth holds roles", async () => {
+  it("refuses your own account and one linked elsewhere", async () => {
     const h = harness()
     await h.seed()
     await expect(
@@ -456,11 +594,151 @@ describe("Linking sends pending assignments", () => {
     await expect(
       h.service.linkAccount(master, { personId: id, accountId: "vice", reason: "Test" })
     ).rejects.toMatchObject({ code: "CONFLICT", message: "This account is already linked to P-0002" })
+  })
+})
+
+describe("Unlinking", () => {
+  it("takes the roles back in Auth, then detaches the account and puts the assignments back to pending", async () => {
+    const h = harness()
+    await h.seed()
     await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
-    await expect(h.service.unlinkAccount(master, { personId: "P-0003" })).rejects.toMatchObject({ code: "CONFLICT" })
-    await h.service.endAdmin(master, { personId: "P-0003", reason: "Done" })
-    await h.service.unlinkAccount(master, { personId: "P-0003" })
+    await h.service.addTeamMember(master, { teamId: "it", personId: "P-0003", role: "member", since, fields: {} })
+    await expect(
+      h.service.unlinkAccount(viewer("vice", ["admin:access", "people:write"]), { personId: "P-0003", reason: "x" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await h.service.unlinkAccount(viewer("vice", permissions), { personId: "P-0003", reason: "Wrong person" })
+    expect(h.auth.held("member")).toEqual([])
+    expect(h.auth.state.calls.at(-1)).toMatchObject({
+      actor: "vice",
+      changes: [
+        { kind: "admin", active: false },
+        { kind: "team", team: "it", role: null },
+      ],
+    })
+    expect(h.state().persons["P-0003"]).toMatchObject({ accountSub: null, linkMethod: null })
+    expect(assignmentsOf(h, "P-0003").map((a) => [a.kind, a.status, a.endedOn])).toEqual([
+      ["admin", "pending", null],
+      ["team", "pending", null],
+    ])
+    // Linking again sends them as for any pending assignment.
+    await h.service.linkAccount(viewer("vice", permissions), {
+      personId: "P-0003",
+      accountId: "member",
+      reason: "Right one",
+    })
+    expect(h.auth.held("member")).toEqual(["admin", "it-member"])
+  })
+  it("retries a lost answer with the same ID before detaching", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    h.auth.state.mode = "lost"
+    await h.service.unlinkAccount(master, { personId: "P-0003", reason: "Wrong person" })
+    expect(h.state().persons["P-0003"].accountSub).toBe("member")
+    expect(assignmentsOf(h, "P-0003")).toMatchObject([{ status: "sent" }])
+    await h.service.deliverPending()
+    const ids = h.auth.state.calls.slice(-2).map((c) => c.id)
+    expect(ids[0]).toBe(ids[1])
     expect(h.state().persons["P-0003"].accountSub).toBeNull()
+    expect(assignmentsOf(h, "P-0003")).toMatchObject([{ status: "pending", endedOn: null }])
+  })
+  it("keeps the account linked when Auth refuses", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    h.auth.state.refusal = { status: 409, message: "The admin role is inherited. Change its granting role in Auth." }
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    })
+    expect(h.state().persons["P-0003"].accountSub).toBe("member")
+    expect(assignmentsOf(h, "P-0003")).toMatchObject([{ status: "applied", endedOn: null }])
+  })
+  it("keeps the account linked when Auth still holds a role given meanwhile", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    // Given by hand in Auth after People read it, just before the unlink reaches Auth.
+    h.auth.state.before = (c) => {
+      if (c.reason.startsWith("Unlinked")) h.auth.give("member", "it-member")
+    }
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("still holds roles"),
+    })
+    expect(h.state().persons["P-0003"].accountSub).toBe("member")
+    expect(assignmentsOf(h, "P-0003").map((a) => [a.kind, a.status, a.endedOn])).toEqual([
+      ["admin", "applied", "2026-10-18"],
+      ["team", "applied", null],
+    ])
+    // Unlinking again ends as if the first unlink had gone through: what it took back is pending too.
+    h.auth.state.before = null
+    await h.service.unlinkAccount(master, { personId: "P-0003", reason: "Wrong person" })
+    expect(h.state().persons["P-0003"].accountSub).toBeNull()
+    expect(assignmentsOf(h, "P-0003").map((a) => [a.kind, a.status, a.endedOn])).toEqual([
+      ["admin", "pending", null],
+      ["team", "pending", null],
+    ])
+    expect(h.history().map((a) => a.text)).toContain("Unlinked account member: Wrong person")
+  })
+  it("keeps an earlier refusal on the record when Auth refuses the unlink", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.assignAdmin(master, { personId: "P-0003", since, capoId: null })
+    h.auth.state.refusal = { status: 409, message: "The admin role is inherited." }
+    await expect(h.service.endAdmin(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    })
+    h.auth.state.refusal = { status: 409, message: "Not now." }
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    })
+    expect(assignmentsOf(h, "P-0003")).toMatchObject([
+      { status: "refused", refusal: "The admin role is inherited.", endedOn: null },
+    ])
+  })
+  it("gives assignments made in Auth a real actor, so the next link can send them", async () => {
+    const h = harness()
+    h.auth.give("giulia", "it-member", "Giulia Neri")
+    await h.service.listPeople(master)
+    await h.service.unlinkAccount(master, { personId: "P-0001", reason: "Old account" })
+    expect(assignmentsOf(h, "P-0001")).toMatchObject([{ status: "pending", assignedBy: "president" }])
+    await h.service.updatePerson(master, { id: "P-0001", ...profile("Giulia", "Neri") })
+    await h.service.sendInvite(master, { personId: "P-0001" })
+    await h.service.acceptInvite(viewer("giulia-new", []), { token: tokenOf(h) })
+    expect(h.auth.state.calls.at(-1)).toMatchObject({ actor: "president", sub: "giulia-new" })
+    expect(assignmentsOf(h, "P-0001")).toMatchObject([{ status: "applied" }])
+  })
+  it("asks Auth afresh, so a role given by hand since the last answer is taken back too", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.listPeople(master)
+    h.auth.give("member", "it-member")
+    await h.service.unlinkAccount(master, { personId: "P-0003", reason: "Wrong person" })
+    expect(h.auth.held("member")).toEqual([])
+    expect(h.state().persons["P-0003"].accountSub).toBeNull()
+    expect(assignmentsOf(h, "P-0003")).toMatchObject([{ kind: "team", status: "pending", endedOn: null }])
+  })
+  it("refuses to unlink without a fresh answer from Auth", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.listPeople(master)
+    h.auth.state.mode = "down"
+    await expect(h.service.unlinkAccount(master, { personId: "P-0003", reason: "x" })).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+    })
+    expect(h.state().persons["P-0003"].accountSub).toBe("member")
+  })
+  it("takes reasons that still fit Auth's 500 characters once prefixed", () => {
+    const max = 500 - UNLINK_REASON.length
+    expect(unlinkAccountInputSchema.safeParse({ personId: "P-0001", reason: "x".repeat(max) }).success).toBe(true)
+    expect(unlinkAccountInputSchema.safeParse({ personId: "P-0001", reason: "x".repeat(max + 1) }).success).toBe(false)
+  })
+  it("detaches at once when Auth holds nothing for the record", async () => {
+    const h = harness()
+    await h.seed()
+    await h.service.unlinkAccount(master, { personId: "P-0003", reason: "Wrong person" })
+    expect(h.state().persons["P-0003"].accountSub).toBeNull()
+    expect(h.auth.state.calls).toEqual([])
   })
 })
 

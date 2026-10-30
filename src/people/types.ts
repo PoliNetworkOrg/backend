@@ -22,6 +22,10 @@ export type Person = {
   notes: string | null
   /** The login account the record is linked to. */
   accountSub: string | null
+  /** When and how it was linked, and by whom (`auth` for a record created from a role held in Auth). */
+  linkedAt: string | null
+  linkedBy: string | null
+  linkMethod: "invite" | "manual" | "auth" | null
   createdBy: string
   createdAt: string
   updatedBy: string
@@ -55,6 +59,8 @@ export type StoredCommand = {
   id: string
   personId: string
   request: RoleCommand
+  /** `unlink` revokes the record's roles, then detaches the account once Auth confirms. */
+  purpose: "roles" | "unlink"
   status: "queued" | "applied" | "refused"
   attempts: number
   error: string | null

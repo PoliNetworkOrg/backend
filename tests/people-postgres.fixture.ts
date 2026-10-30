@@ -25,7 +25,14 @@ const checked: string[] = []
 try {
   await migrate(db, { migrationsFolder: "./drizzle" })
   const store = createPeoplePgStore(db)
-  const permissionSet = new Set(["admin:access", "people:self", "people:read", "people:write", "people:appoint"])
+  const permissionSet = new Set([
+    "admin:access",
+    "people:self",
+    "people:read",
+    "people:write",
+    "people:appoint",
+    "people:link",
+  ])
   const viewer = (sub: string): Viewer => ({
     sub,
     telegramId: null,
@@ -129,6 +136,19 @@ try {
   assert.equal(count, 1)
   assert.equal((await db.select().from(persons)).length, 4)
   checked.push("constraints hold one account and one current assignment per concept")
+
+  // Unlinking takes the roles back in Auth, then detaches the account with its link details.
+  await service().unlinkAccount(hr, { personId: "P-0001", reason: "Wrong person" })
+  assert.deepEqual(auth.held("mario"), [])
+  const [unlinked] = await db.select().from(persons).where(eq(persons.id, "P-0001"))
+  assert.equal(unlinked.accountSub, null)
+  assert.equal(unlinked.linkedAt, null)
+  const recent = await service().listRecentLinks(hr)
+  assert.deepEqual(
+    recent.map((r) => [r.person.id, r.method]),
+    [[hrAnna, "manual"]]
+  )
+  checked.push("unlinking revokes in Auth and detaches, with link details")
 
   await people.sendInvite(hr, { personId: "P-0003" })
   await Promise.all([people.deliverPending(), people.deliverPending()])

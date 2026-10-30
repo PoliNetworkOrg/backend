@@ -72,6 +72,17 @@ is one record in `people_persons`; their roles are rows in `people_assignments`,
 - **A record that isn't linked yet**: its assignments stay `pending` in the backend, and are sent when the record is
   linked, acting as whoever links it by hand or, for an invite, as whoever made each assignment.
 
+A record is linked to a login account in exactly two ways, never by matching emails, names or Telegram:
+
+- **Email invite** (`people:write`, or the Lead of one of the person's teams): a single-use link to the contact
+  email, stored hashed, valid for 14 days; a new invite revokes the previous one. Any signed-in account can open it
+  (`me.invite`) and accept it (`me.acceptInvite`), with no People permission and whatever its email.
+- **By hand** (`admin:access` + `people:link`): search the IdP directory and link an account; nobody links their own.
+
+Unlinking (`people:link`) takes the record's roles back in Auth with a role command, then detaches the account; its
+assignments go back to `pending`. `linking.recent` lists the links of the last 30 days, with method, date and who
+made them, so a mistake or a forwarded invite is easy to spot and undo.
+
 The backend checks every role change with the same rules as Auth (`src/people/rules.ts`, shaped like Auth's
 `src/auth/people-binding.ts`): no self-grants, the right permission per kind, and bounded delegation against the
 role's permissions. A concept with no role bound in Auth, or with more than one, can't be assigned. Writes are

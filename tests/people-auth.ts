@@ -40,6 +40,10 @@ export function fakeAuth(roles: BoundRole[] = structuredClone(BOUND)) {
   const state = {
     mode: "up" as "up" | "down" | "lost",
     refusal: null as { status: number; message: string } | null,
+    /** Runs before a command is applied, e.g. to change Auth between People's read and its command. */
+    before: null as ((command: RoleCommand) => void) | null,
+    /** Refuses only the commands it returns a refusal for, e.g. one actor's. */
+    refuse: null as ((command: RoleCommand) => { status: number; message: string } | null) | null,
     calls: [] as RoleCommand[],
     reads: 0,
   }
@@ -75,7 +79,9 @@ export function fakeAuth(roles: BoundRole[] = structuredClone(BOUND)) {
     async change(command) {
       state.calls.push(structuredClone(command))
       if (state.mode === "down") throw new RoleChangeError(503, "PoliNetwork Auth could not be reached")
-      if (state.refusal) throw new RoleChangeError(state.refusal.status, state.refusal.message)
+      state.before?.(command)
+      const refusal = state.refusal ?? state.refuse?.(command)
+      if (refusal) throw new RoleChangeError(refusal.status, refusal.message)
       if (!applied.has(command.id)) {
         applied.add(command.id)
         const keys = rolesOf(command.sub)

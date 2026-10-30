@@ -22,11 +22,13 @@ const TABLES = [
     id: persons.id,
     load: (r: typeof persons.$inferSelect) => ({
       ...r,
+      linkedAt: iso(r.linkedAt),
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
     }),
     save: (p: PeopleState["persons"][string]) => ({
       ...p,
+      linkedAt: time(p.linkedAt),
       createdAt: new Date(p.createdAt),
       updatedAt: new Date(p.updatedAt),
     }),

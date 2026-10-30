@@ -22,7 +22,14 @@ export const viewer = (sub: string, permissions: string[], roles: string[] = [])
   can: (key) => permissions.includes(key),
   holdsRole: (key) => roles.includes(key),
 })
-export const permissions = ["admin:access", "people:self", "people:read", "people:write", "people:appoint"]
+export const permissions = [
+  "admin:access",
+  "people:self",
+  "people:read",
+  "people:write",
+  "people:appoint",
+  "people:link",
+]
 /** HR with every People permission, and nothing else Auth knows of. */
 export const master = viewer("president", permissions)
 
