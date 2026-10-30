@@ -33,7 +33,7 @@ CREATE TABLE "people_assignments" (
 --> statement-breakpoint
 CREATE TABLE "people_counters" (
 	"key" text PRIMARY KEY NOT NULL,
-	"value" integer NOT NULL
+	"value" bigint NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "people_invites" (

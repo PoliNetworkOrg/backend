@@ -131,8 +131,14 @@ async function saveState(tx: Transaction, uow: UnitOfWork, before: PeopleState) 
   for (const [key, value] of Object.entries(state.counters))
     if (before.counters[key] !== value)
       await tx.insert(counters).values({ key, value }).onConflictDoUpdate({ target: counters.key, set: { value } })
+  // A record merged in this transaction may never have been saved: its new entries go straight to `into`.
+  const mergedInto = new Map(merges.map((m) => [m.from, m.into]))
+  const survivor = (personId: string): string =>
+    mergedInto.has(personId) ? survivor(mergedInto.get(personId) as string) : personId
   if (uow.activity.length)
-    await tx.insert(activity).values(uow.activity.map((entry) => ({ ...entry, at: new Date(entry.at) })))
+    await tx
+      .insert(activity)
+      .values(uow.activity.map((entry) => ({ ...entry, personId: survivor(entry.personId), at: new Date(entry.at) })))
   for (const { from, into } of merges) {
     await tx.update(activity).set({ personId: into }).where(eq(activity.personId, from))
     await tx.delete(persons).where(eq(persons.id, from))

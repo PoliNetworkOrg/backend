@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { myAreaSchema } from "@/people/contract"
 import { DIRECTORY_MAX_AGE_MS, DIRECTORY_TTL_MS } from "@/people/service"
-import { harness, master, permissions, profile, viewer } from "./people-fixtures"
+import { fakeAuth, harness, master, permissions, profile, viewer } from "./people-fixtures"
 
 const since = "2026-10-01"
 const assignmentsOf = (h: ReturnType<typeof harness>, personId: string) =>
@@ -256,6 +256,31 @@ describe("Review regressions", () => {
     await h.service.endAdmin(writer, { personId: id, reason: "Mistake" })
     expect(assignmentsOf(h, id)).toMatchObject([{ endedOn: "2026-10-18", status: "pending" }])
   })
+  it("never lays an answer from Auth over one from a read that started later", async () => {
+    const auth = fakeAuth()
+    const gates: (() => void)[] = []
+    let hold = true
+    const h = harness({
+      peopleRoles: {
+        change: auth.auth.change,
+        async directory() {
+          const answer = await auth.auth.directory()
+          if (hold) await new Promise<void>((resolve) => gates.push(resolve))
+          return answer
+        },
+      },
+    })
+    auth.give("member", "it-member", "Luca Verdi")
+    const slow = h.service.listPeople(master)
+    await vi.waitFor(() => expect(gates).toHaveLength(1))
+    hold = false
+    auth.take("member", "it-member")
+    h.advance(1)
+    await expect(h.service.listPeople(master)).resolves.toEqual([])
+    gates[0]()
+    await expect(slow).resolves.toEqual([])
+    expect(h.state().persons).toEqual({})
+  })
 })
 
 describe("Linking absorbs the record made for roles given in Auth", () => {
@@ -288,6 +313,17 @@ describe("Linking absorbs the record made for roles given in Auth", () => {
     expect(current[0]).toMatchObject({ since: "2026-09-01", fields: { github: "luca" } })
     expect(h.auth.state.calls).toMatchObject([{ actor: "vice", changes: [{ kind: "admin", active: true }] }])
     expect(record.activity.map((a) => a.text)).toContain("Created from a role held in PoliNetwork Auth")
+  })
+  it("never gives the absorbed record's ID to another record", async () => {
+    const h = harness()
+    const { id } = await h.service.createPerson(master, profile("Luca", "Verdi"))
+    h.auth.give("member", "it-member", "Luca Verdi")
+    h.advance(DIRECTORY_TTL_MS + 1)
+    await h.service.linkAccount(viewer("vice", permissions), { personId: id, accountId: "member", reason: "Same" })
+    expect(h.history().map((a) => a.text)).toContain(
+      "Absorbed P-0002, created for the account's roles in PoliNetwork Auth"
+    )
+    expect(await h.service.createPerson(master, profile("Sara", "Neri"))).toEqual({ id: "P-0003" })
   })
   it("never merges records people made", async () => {
     const h = harness()

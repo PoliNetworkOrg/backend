@@ -101,7 +101,8 @@ try {
   // Linking HR's record to that account folds the automatic one into it, in one transaction.
   const automaticId = anna?.id as string
   const { id: hrAnna } = await people.createPerson(hr, input("Anna"))
-  await people.addTeamMember(hr, { teamId: "it", personId: hrAnna, role: "lead", since: "2026-10-01", fields: {} })
+  // As a member: the automatic record already leads IT, and an older answer from Auth must not undo that.
+  await people.addTeamMember(hr, { teamId: "it", personId: hrAnna, role: "member", since: "2026-10-01", fields: {} })
   await service().linkAccount(hr, { personId: hrAnna, accountId: "anna", reason: "Same person" })
   const absorbed = await service().getPerson(hr, { id: hrAnna })
   assert.equal(absorbed.assignments.filter((a) => !a.endedOn).length, 1)
@@ -134,6 +135,22 @@ try {
   assert.equal(sent.length, 1)
   assert.equal((await people.listInvites(hr))[0].personId, "P-0003")
   checked.push("an invitation is delivered once from the durable outbox")
+
+  // A service that hasn't read Auth yet makes the automatic record and absorbs it in the linking transaction.
+  directory.push({ sub: "luca", name: "Luca Neri", email: "luca@example.org" })
+  const { id: hrLuca } = await people.createPerson(hr, input("Luca"))
+  auth.give("luca", "it-member", "Luca Neri")
+  await service().linkAccount(hr, { personId: hrLuca, accountId: "luca", reason: "Same person" })
+  const luca = await service().getPerson(hr, { id: hrLuca })
+  assert.deepEqual(
+    luca.assignments.filter((a) => !a.endedOn).map((a) => [a.team, a.teamRole]),
+    [["it", "member"]]
+  )
+  assert.ok(luca.activity.some((a) => a.text === "Created from a role held in PoliNetwork Auth"))
+  const absorbedId = luca.activity.find((a) => a.text.startsWith("Absorbed "))?.text.split(/[ ,]/)[1] as string
+  const { id: next } = await people.createPerson(hr, input("Giulia"))
+  assert.ok(next > absorbedId, `${next} reuses or precedes the absorbed ${absorbedId}`)
+  checked.push("a record made and absorbed in one transaction keeps its history, and its ID isn't given again")
   console.log(JSON.stringify({ checked }))
 } finally {
   await client.close()

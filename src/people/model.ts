@@ -79,10 +79,15 @@ export function clearCapoReferences(u: UnitOfWork, capoId: string, actor: string
 }
 
 const blank = (value: string) => value.trim() || null
-/** The next `P-0000` ID, or null once the four digits are used up. */
+/**
+ * Allocates the next `P-0000` ID, or null once the four digits are used up. The `person` counter only moves
+ * forward, so the ID of a record merged into another is never given again.
+ */
 export function nextPersonId(s: PeopleState) {
-  const sequence = Math.max(0, ...Object.keys(s.persons).map((id) => Number(id.slice(2)))) + 1
-  return sequence > 9999 ? null : `P-${String(sequence).padStart(4, "0")}`
+  const sequence = Math.max(s.counters.person ?? 0, ...Object.keys(s.persons).map((id) => Number(id.slice(2)))) + 1
+  if (sequence > 9999) return null
+  s.counters.person = sequence
+  return `P-${String(sequence).padStart(4, "0")}`
 }
 export function newPerson(s: PeopleState, input: C.PersonInput, actor: string, now: Date): Person {
   const at = now.toISOString()

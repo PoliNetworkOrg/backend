@@ -83,7 +83,10 @@ export function createPeopleService(options: PeopleOptions) {
     // A role change Auth confirms while it answers makes this answer older than the register.
     const revision = await store.transaction(async (u) => u.state.counters.roleRevision ?? 0)
     try {
-      directoryRead = { value: await peopleRoles.directory(), at, revision }
+      const value = await peopleRoles.directory()
+      // Answers can arrive out of order: one from a read that started earlier never replaces a later one.
+      if (directoryRead && at < directoryRead.at) return directoryRead
+      directoryRead = { value, at, revision }
       stale = false
     } catch (error) {
       if (!directoryRead || at - directoryRead.at > DIRECTORY_MAX_AGE_MS)
@@ -108,9 +111,14 @@ export function createPeopleService(options: PeopleOptions) {
     const deliveries: { id: string; strict: boolean }[] = []
     const result = await store.transaction(async (u) => {
       if (read) {
-        // An older answer than the register's last confirmation would undo it: read again next time.
-        if (read.revision === (u.state.counters.roleRevision ?? 0)) syncDirectory(u, read.value, clock())
-        else stale = true
+        // An older answer than the register's last confirmation, or than the last answer applied (by this or
+        // another instance), would undo it: read again next time.
+        const { roleRevision = 0, directoryReadAt = 0 } = u.state.counters
+        if (read.revision !== roleRevision || read.at < directoryReadAt) stale = true
+        else {
+          syncDirectory(u, read.value, clock())
+          u.state.counters.directoryReadAt = read.at
+        }
       }
       return fn(u, {
         directory: read?.value ?? null,

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm"
 import {
   type AnyPgColumn,
+  bigint,
   check,
   date,
   index,
@@ -150,7 +151,8 @@ export const activity = createTable.people(
 
 export const counters = createTable.people("counters", {
   key: text().primaryKey(),
-  value: integer().notNull(),
+  /** Wide enough for a timestamp in milliseconds, like `directoryReadAt`. */
+  value: bigint({ mode: "number" }).notNull(),
 })
 
 export const schema = {

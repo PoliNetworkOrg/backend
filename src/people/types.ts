@@ -95,7 +95,10 @@ export type PeopleState = {
   commands: Record<string, StoredCommand>
   invites: Record<string, Invite>
   mail: Record<string, Mail>
-  /** `roleRevision` advances whenever Auth confirms or refuses a role change. */
+  /**
+   * `roleRevision` advances whenever Auth confirms or refuses a role change; `person` is the last person ID
+   * given; `directoryReadAt` is when the last directory read applied to the register started, in milliseconds.
+   */
   counters: Record<string, number>
 }
 export const emptyState = (): PeopleState => ({
