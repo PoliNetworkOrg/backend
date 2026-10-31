@@ -761,7 +761,7 @@ export function createPeopleService(options: PeopleOptions) {
           `invite:${invite.id}`,
           p.contactEmail,
           "PoliNetwork · collega il tuo account",
-          inviteText(p, `${dashboardUrl}/dashboard/account/me?peopleInvite=${token}`, invite.expiresAt)
+          inviteText(p, `${dashboardUrl}/people/invite?token=${token}`, invite.expiresAt)
         )
         log(u, p.id, v.sub, "Queued an account invite", now())
       })
