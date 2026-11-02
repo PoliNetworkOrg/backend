@@ -207,8 +207,14 @@ try {
     delibera: { body: "consiglio_direttivo", date: "2026-11-09" },
   })
   await rejects(emanation.start(dir, a.id), "FORBIDDEN")
+  assert.deepEqual(
+    [(await service.getDraft(pres, a.id)).can.emanate, (await service.getDraft(pres, a.id)).can.emanateBlockedBy],
+    [true, null]
+  )
   const started = await emanation.start(pres, a.id)
   assert.equal(started.steps[0].key, "pr")
+  // While it waits on CI, retry just checks GitHub again.
+  assert.equal((await emanation.retry(pres, a.id)).steps.find((x) => x.key === "pr")?.state, "done")
   await rejects(emanation.start(pres, a.id), "CONFLICT")
   await until(
     "the PR merged, tagged and released",
@@ -305,7 +311,9 @@ try {
     from: { kind: "version", id: versionId },
     kind: "rettifica",
   })
-  assert.equal((await service.getDraft(delegato, oldR.id)).can.emanate, false)
+  const oldView = await service.getDraft(delegato, oldR.id)
+  assert.equal(oldView.can.emanate, false)
+  assert.match(oldView.can.emanateBlockedBy ?? "", /versione superata/)
   await rejects(emanation.start(delegato, oldR.id), "PRECONDITION_FAILED", /superata/)
   const r = await service.createDraft(delegato, {
     documentKey: "sample",

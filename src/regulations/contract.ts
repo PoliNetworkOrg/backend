@@ -293,6 +293,11 @@ export const capabilitiesSchema = z.object({
   approve: z.boolean(),
   /** "Emana e notifica" (or, for a rettifica, "Emana rettifica"). */
   emanate: z.boolean(),
+  /**
+   * Why the caller, who could otherwise emanate in this state, can't right now (e.g. a superseded base, text that
+   * doesn't parse, missing differences), or `null`. `null` too when emanation isn't an option at all.
+   */
+  emanateBlockedBy: z.string().nullable(),
   /** The caller may emanate rettifiche of this document (permission or delega). */
   rectify: z.boolean(),
   regenerateDiff: z.boolean(),

@@ -342,12 +342,18 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const emanateRule = config.transitions.find(
       (r) => r.effect === "emanate" && r.from === draft.state && r.kinds.includes(draft.kind)
     )
-    const emanate =
-      !!emanateRule &&
-      !emanation &&
-      !superseded &&
-      allowed(viewer, emanateRule.who, rectify) &&
-      (draft.kind !== "rettifica" || draft.parses !== false)
+    let emanateBlockedBy: string | null = null
+    if (emanateRule && !emanation && allowed(viewer, emanateRule.who, rectify)) {
+      if (superseded) emanateBlockedBy = superseded
+      else if (draft.kind === "rettifica" && draft.parses === false)
+        emanateBlockedBy = "Il testo non è valido: correggi gli errori prima di emanare."
+      else if (draft.kind === "modifica" && diffStatus !== "ready")
+        emanateBlockedBy =
+          diffStatus === "pending"
+            ? "Le differenze sono ancora in generazione."
+            : "Mancano le differenze: generale prima di emanare."
+    }
+    const emanate = !!emanateRule && !emanation && allowed(viewer, emanateRule.who, rectify) && !emanateBlockedBy
 
     const deadlines: C.Deadline[] = []
     for (const rule of config.deadlines) {
@@ -381,6 +387,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
         transitions,
         approve: transitions.some((t) => t.to === "approvata" && !t.blockedBy),
         emanate,
+        emanateBlockedBy,
         rectify,
         regenerateDiff:
           viewer.can(P.manage) &&

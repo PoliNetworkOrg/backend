@@ -689,6 +689,12 @@ export function createEmanationService(deps: {
     const e = await emanationOf(draft.id)
     if (!e) fail("NOT_FOUND", "Emanazione non avviata.")
     if (e.status === "done") fail("PRECONDITION_FAILED", "L'emanazione è già completa.")
+    // Waiting on GitHub: check again now instead of at the next poll.
+    if (e.status === "waiting" || e.status === "running") {
+      await db.update(emanations).set({ nextCheckAt: null }).where(eq(emanations.draftId, draft.id))
+      await advance(draft.id)
+      return view(draft.id)
+    }
     const steps = Object.fromEntries(
       EMANATION_STEPS.map((k) => [
         k,
