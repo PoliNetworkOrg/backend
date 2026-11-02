@@ -50,8 +50,12 @@ if (import.meta.main) {
     const proc = Bun.spawn(cmd, { cwd: root, env, stdout: "pipe", stderr: "pipe" })
     const pipe = async (stream: ReadableStream<Uint8Array>) => {
       const decoder = new TextDecoder()
-      for await (const chunk of stream)
-        for (const line of decoder.decode(chunk).split("\n")) if (line.trim()) console.log(`[${name}] ${line}`)
+      const reader = stream.getReader()
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) return
+        for (const line of decoder.decode(value).split("\n")) if (line.trim()) console.log(`[${name}] ${line}`)
+      }
     }
     void pipe(proc.stdout)
     void pipe(proc.stderr)
