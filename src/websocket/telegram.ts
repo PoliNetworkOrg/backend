@@ -8,6 +8,8 @@ export type PostRegulation = {
   chatId: number
   /** Forum topic (message_thread_id), from REGULATIONS_TELEGRAM_TOPIC_ID. */
   topicId: number | null
+  /** Stable per notification and reused on retries (the backend's notification id): post at most once per key. */
+  idempotencyKey: string
   /** Telegram HTML (parse_mode "HTML"), escaped, short enough for a caption. */
   text: string
   /** The fields behind `text`, for a bot that formats its own message. */
@@ -23,7 +25,11 @@ export type PostRegulation = {
     tag: string
     releaseUrl: string
   }
-  files: { filename: string; contentType: string; data: Uint8Array }[]
+  /**
+   * Base64 in the JSON payload: binary attachments (Uint8Array) don't reach the bot through this server's engine
+   * (verified in tests/regulations-telegram.fixture.ts).
+   */
+  files: { filename: string; contentType: string; base64: string }[]
 }
 
 // the backend ask the telegram bot to do something

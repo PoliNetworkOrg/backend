@@ -18,7 +18,8 @@ export async function sendOnce(
     draftId?: string | null
     delegaId?: string | null
   },
-  send: () => Promise<void>,
+  /** Gets the notification's id, stable across retries: an idempotency key for the receiver. */
+  send: (notificationId: string) => Promise<void>,
   now: () => Date = () => new Date()
 ): Promise<"sent" | "already"> {
   await db
@@ -39,7 +40,7 @@ export async function sendOnce(
   const [row] = await db.select().from(notifications).where(eq(notifications.key, record.key))
   if (row.status === "sent") return "already"
   try {
-    await send()
+    await send(row.id)
   } catch (error) {
     await db
       .update(notifications)

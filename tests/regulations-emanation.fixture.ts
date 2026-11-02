@@ -136,6 +136,7 @@ try {
   const emails: { to: string; kind: string; replyTo?: string; attachments: number }[] = []
   const posts: { files: string[]; text: string }[] = []
   let botUp = false
+  const keys: string[] = []
   const notifier: EmanationNotifier = {
     email: async (input) => {
       emails.push({
@@ -149,6 +150,7 @@ try {
       emails.push({ to: input.to, kind: `delega:${input.props.change}`, attachments: 0 })
     },
     telegram: async (payload) => {
+      keys.push(payload.idempotencyKey)
       if (!botUp) throw new Error("Il bot Telegram non è connesso")
       posts.push({ files: payload.files.map((f) => f.filename), text: payload.text })
       return { messageIds: [101, 102] }
@@ -259,6 +261,13 @@ try {
   assert.equal(resumed.status, "done")
   assert.equal(posts.length, 1)
   assert.deepEqual(posts[0].files, ["sample.pdf", "differenze-sample-v2026.11.09.pdf"])
+  // The failed attempt and the retry carried the same idempotency key: the notification's id.
+  assert.equal(keys.length, 2)
+  assert.equal(keys[0], keys[1])
+  const [telegramRow] = (await db.select().from(notifications).where(eq(notifications.draftId, a.id))).filter(
+    (n) => n.channel === "telegram"
+  )
+  assert.equal(keys[0], telegramRow.id)
   assert.ok(posts[0].text.includes("Pareri contrari e ricorsi entro il 20/11/2026"))
   // Resuming didn't send the email again, and the records are the proof.
   assert.equal(emails.length, 1)
