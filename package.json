@@ -9,11 +9,12 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch --no-clear-screen ./src/server.ts | pino-pretty",
-    "build": "shx rm -rf dist && bun build ./src/server.ts --production --outdir ./dist --sourcemap=linked --target bun && shx cp -r ./drizzle ./dist/",
+    "build": "shx rm -rf dist && bun build ./src/server.ts ./src/collab.ts --production --outdir ./dist --sourcemap=linked --target bun && shx cp -r ./drizzle ./dist/",
     "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
     "email": "email dev --port 3012 --dir src/emails/templates",
     "start": "bun run ./dist/server.js",
     "worker": "bun ./src/regulations/worker/server.ts",
+    "collab": "bun --watch ./src/collab.ts | pino-pretty",
     "test": "vitest run",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",
+    "@hocuspocus/provider": "^3.4.4",
     "@microsoft/microsoft-graph-types": "^2.43.1",
     "@peculiar/x509": "^2.2.0",
     "@react-email/preview-server": "5.2.5",
@@ -42,11 +44,13 @@
     "superjson": "^2.2.6",
     "tsup": "^8.5.1",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.4",
+    "ws": "^8.22.1"
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
     "@azure/storage-blob": "^12.31.0",
+    "@hocuspocus/server": "^3.4.4",
     "@hono/trpc-server": "^0.4.2",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@polinetwork/auth-kit": "^1.2.0",
@@ -68,6 +72,7 @@
     "react-dom": "19.2.0",
     "redis": "^6.2.1",
     "socket.io": "^4.8.3",
+    "yjs": "^13.6.33",
     "zod": "^4.1.11"
   }
 }
