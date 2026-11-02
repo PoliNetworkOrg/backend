@@ -142,7 +142,7 @@ export const env = createEnv({
     REGULATIONS_DIRETTIVO_EMAIL: z.email().default("direttivo@polinetwork.org"),
     REGULATIONS_TELEGRAM_CHAT_ID: z.coerce.number().int().optional(),
     REGULATIONS_TELEGRAM_TOPIC_ID: z.coerce.number().int().optional(),
-    /** The dashboard's page of a draft, for the email: `{documentKey}` and `{draftId}` are replaced. */
+    /** The dashboard's page of a draft's changes, for the email (default `…/dashboard/regulations/drafts/{draftId}/diff`). */
     REGULATIONS_WEB_URL: z.string().optional(),
 
     // env config

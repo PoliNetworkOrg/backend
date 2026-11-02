@@ -165,7 +165,7 @@ export const regulationsEmanation: EmanationService | null = createEmanationServ
         ? { chatId: env.REGULATIONS_TELEGRAM_CHAT_ID, topicId: env.REGULATIONS_TELEGRAM_TOPIC_ID ?? null }
         : null,
     webUrl: (draftId, documentKey) =>
-      (env.REGULATIONS_WEB_URL ?? `${dashboard}/dashboard/regolamenti/{documentKey}/bozze/{draftId}`)
+      (env.REGULATIONS_WEB_URL ?? `${dashboard}/dashboard/regulations/drafts/{draftId}/diff`)
         .replace("{draftId}", draftId)
         .replace("{documentKey}", documentKey),
   },
