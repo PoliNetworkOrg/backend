@@ -324,6 +324,8 @@ export const draftCompiles = createTable.regulations("draft_compiles", {
   hash: text(),
   lastGoodHash: text("last_good_hash"),
   compiledAt: at("compiled_at"),
+  /** Why the latest compile couldn't run (e.g. the worker is unreachable); compile errors are in `compiles`. */
+  error: text(),
   updatedAt: at("updated_at").notNull(),
 })
 

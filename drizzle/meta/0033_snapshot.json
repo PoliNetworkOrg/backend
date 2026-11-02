@@ -1,5 +1,5 @@
 {
-  "id": "0a63540f-d569-49cf-9c5d-2180ce72b51c",
+  "id": "2ae717e5-b6fc-4dd4-9730-def168724579",
   "prevId": "e5e83f23-209c-4eb1-a909-bf427b65e42d",
   "version": "7",
   "dialect": "postgresql",
@@ -2615,6 +2615,12 @@
         "compiled_at": {
           "name": "compiled_at",
           "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

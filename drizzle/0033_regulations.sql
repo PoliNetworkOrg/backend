@@ -126,6 +126,7 @@ CREATE TABLE "regulations_draft_compiles" (
 	"hash" text,
 	"last_good_hash" text,
 	"compiled_at" timestamp (3) with time zone,
+	"error" text,
 	"updated_at" timestamp (3) with time zone NOT NULL
 );
 --> statement-breakpoint
