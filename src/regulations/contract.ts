@@ -85,6 +85,18 @@ export const meSchema = z.object({
   /** Active deleghe held by the account (rectification on behalf of the Segretario). */
   deleghe: z.number().int(),
   permissions: z.object({ read: z.boolean(), write: z.boolean(), manage: z.boolean(), rectify: z.boolean() }),
+  /**
+   * Documents the caller may rectify: every document with `regulations:rectify`, the scope of their active deleghe
+   * otherwise. Lets a delegate without `regulations:read` start a rettifica from the latest version.
+   */
+  rectifiable: z.array(
+    z.object({
+      documentKey: z.string(),
+      title: z.string(),
+      latestVersionId: z.string().nullable(),
+      latestVersionLabel: z.string().nullable(),
+    })
+  ),
 })
 export type Me = z.infer<typeof meSchema>
 
