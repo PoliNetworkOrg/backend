@@ -171,7 +171,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
    * null. A draft is current when the latest version is the one its lineage starts from, or was merged into it (or
    * into a draft it descends from).
    */
-  async function supersededReason(draft: DraftRow): Promise<string | null> {
+  async function supersededReason(draft: DraftRow, viewer: Viewer): Promise<string | null> {
     const [latest] = await db
       .select()
       .from(versions)
@@ -194,7 +194,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
       ;[cursor] = await db.select().from(drafts).where(eq(drafts.id, cursor.baseDraftId))
     }
     const root = await rootVersion(draft)
-    return `La bozza parte da una versione superata (${root.label}): unisci prima la versione in vigore ${latest.label}.`
+    const lead = `La bozza parte da una versione superata (${root.label}):`
+    // Say what this caller can do about it: merging needs regulations:write.
+    if (viewer.can(P.write)) return `${lead} unisci prima la versione in vigore ${latest.label}.`
+    if (draft.kind === "rettifica") return `${lead} crea una nuova rettifica dalla versione in vigore ${latest.label}.`
+    return `${lead} chiedi al Consiglio Direttivo di unire la versione in vigore ${latest.label}.`
   }
 
   async function rootVersion(draft: DraftRow) {
@@ -320,7 +324,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const other = await inApproval(draft.documentKey, draft.id)
     const versionId = emanation?.versionId ?? null
     // Only drafts still on their way: an emanated one is the latest version itself.
-    const superseded = draft.state === "emanata" || emanation ? null : await supersededReason(draft)
+    const superseded = draft.state === "emanata" || emanation ? null : await supersededReason(draft, viewer)
 
     const transitions: C.Capabilities["transitions"] = []
     for (const rule of config.transitions) {
@@ -693,7 +697,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
     if (rule.effect === "freeze") {
       const other = await inApproval(draft.documentKey, draft.id)
       if (other) fail("CONFLICT", `C'è già una bozza in approvazione per questo documento: «${other.title}».`)
-      const superseded = await supersededReason(draft)
+      const superseded = await supersededReason(draft, viewer)
       if (superseded) fail("PRECONDITION_FAILED", superseded)
       let files: C.Files
       let parses: boolean

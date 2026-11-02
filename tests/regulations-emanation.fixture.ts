@@ -313,7 +313,11 @@ try {
   })
   const oldView = await service.getDraft(delegato, oldR.id)
   assert.equal(oldView.can.emanate, false)
-  assert.match(oldView.can.emanateBlockedBy ?? "", /versione superata/)
+  // The delegate can't merge: they're told what they can do instead.
+  assert.match(
+    oldView.can.emanateBlockedBy ?? "",
+    /versione superata \(import.*\): crea una nuova rettifica dalla versione in vigore v2026\.11\.09\./
+  )
   await rejects(emanation.start(delegato, oldR.id), "PRECONDITION_FAILED", /superata/)
   const r = await service.createDraft(delegato, {
     documentKey: "sample",

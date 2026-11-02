@@ -171,7 +171,7 @@ export function createEmanationService(deps: {
     if (!deps.github) fail("PRECONDITION_FAILED", "La GitHub App del repository legal non è configurata.")
     if (await emanationOf(draft.id)) fail("CONFLICT", "L'emanazione è già stata avviata.")
     // Emanating a draft based on a superseded version would undo what was published since.
-    const superseded = await supersededReason(draft)
+    const superseded = await supersededReason(draft, viewer)
     if (superseded) fail("PRECONDITION_FAILED", superseded)
     const document = await loadDocument(draft.documentKey)
 
