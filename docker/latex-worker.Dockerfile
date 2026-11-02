@@ -18,7 +18,8 @@ FROM ${TEXLIVE_IMAGE}
 USER root
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=build /build/worker.js /app/worker.js
-RUN mkdir -p /work && chown 1000:1000 /work
+# The root filesystem is read-only at runtime: build the fontconfig cache now.
+RUN mkdir -p /work && chown 1000:1000 /work && fc-cache -f
 USER 1000
 ENV WORKER_PORT=4200 WORKER_WORK_DIR=/work WORKER_TMP_DIR=/tmp WORKER_CONCURRENCY=2 WORKER_TIMEOUT_MS=45000
 EXPOSE 4200
