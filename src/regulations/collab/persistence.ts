@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, max } from "drizzle-orm"
+import { and, asc, desc, eq, lte, max, sql } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import * as Y from "yjs"
 import type { SnapshotKind } from "@/db/schema/regulations"
@@ -40,7 +40,15 @@ export function createYjsPersistence(db: RegulationsDb) {
         await tx
           .insert(ydocs)
           .values({ draftId, state, compactedThrough, updatedAt: new Date() })
-          .onConflictDoUpdate({ target: ydocs.draftId, set: { state, compactedThrough, updatedAt: new Date() } })
+          .onConflictDoUpdate({
+            target: ydocs.draftId,
+            // An empty log keeps the marker where it was.
+            set: {
+              state,
+              compactedThrough: sql`greatest(${ydocs.compactedThrough}, ${compactedThrough})`,
+              updatedAt: new Date(),
+            },
+          })
         if (through !== null)
           await tx.delete(yupdates).where(and(eq(yupdates.draftId, draftId), lte(yupdates.id, compactedThrough)))
       })

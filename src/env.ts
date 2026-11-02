@@ -93,6 +93,22 @@ export const env = createEnv({
     OAUTH_BACKEND_PRIVATE_JWK: z.string().min(1).optional(),
     IDP_SNAPSHOT_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
 
+    // Regulations editor. Every part is optional: without it the matching feature answers PRECONDITION_FAILED.
+    /** Public websocket URL of the collab service, handed to browsers with each ticket. */
+    REGULATIONS_COLLAB_PUBLIC_URL: z
+      .string()
+      .regex(/^wss?:\/\//)
+      .optional(),
+    /** In-cluster URL of the collab service's internal API. */
+    REGULATIONS_COLLAB_INTERNAL_URL: z.url().optional(),
+    /** Shared with the collab service (internal API). */
+    REGULATIONS_INTERNAL_SECRET: z.string().min(32).optional(),
+    /** The LaTeX worker, to compile published versions without an official PDF. */
+    REGULATIONS_WORKER_URL: z.url().optional(),
+    REGULATIONS_WORKER_SECRET: z.string().min(1).optional(),
+    /** A local clone of PoliNetworkOrg/legal to import documents from (development); otherwise the GitHub App. */
+    REGULATIONS_LEGAL_DIR: z.string().min(1).optional(),
+
     // env config
     NODE_ENV: NODE_ENV.default(nodeEnv),
     LOG_LEVEL: z.string().default("DEBUG"),
