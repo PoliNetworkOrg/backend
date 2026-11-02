@@ -226,7 +226,8 @@ CREATE TABLE "regulations_versions" (
 	"draft_id" text,
 	"published_at" timestamp (3) with time zone NOT NULL,
 	"release_url" text,
-	"pdf_blob" text
+	"pdf_blob" text,
+	"assets_blob" text
 );
 --> statement-breakpoint
 CREATE TABLE "regulations_ydocs" (

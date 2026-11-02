@@ -1,5 +1,5 @@
 {
-  "id": "de861783-4b8d-44c1-9fc7-626497a6e30b",
+  "id": "0a63540f-d569-49cf-9c5d-2180ce72b51c",
   "prevId": "e5e83f23-209c-4eb1-a909-bf427b65e42d",
   "version": "7",
   "dialect": "postgresql",
@@ -3424,6 +3424,12 @@
         },
         "pdf_blob": {
           "name": "pdf_blob",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "assets_blob": {
+          "name": "assets_blob",
           "type": "text",
           "primaryKey": false,
           "notNull": false

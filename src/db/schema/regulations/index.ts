@@ -68,6 +68,11 @@ export const versions = createTable.regulations(
     releaseUrl: text("release_url"),
     /** Hash in `regulations_blobs` of the official PDF, once downloaded or compiled. */
     pdfBlob: text("pdf_blob"),
+    /**
+     * Hash in `regulations_blobs` of the non-editable files the compile needs (fonts, the shared class, images),
+     * as an asset bundle. Drafts compile with the assets of the version their lineage starts from.
+     */
+    assetsBlob: text("assets_blob"),
   },
   (t) => [
     index("regulations_versions_document_idx").on(t.documentKey, t.publishedAt),
