@@ -41,7 +41,8 @@ export const documents = createTable.regulations("documents", {
   entry: text().notNull(),
   /** Globs (relative to `dir`) of the editable sources. */
   sources: jsonb().$type<string[]>().notNull(),
-  outputs: jsonb().$type<string[]>().notNull(),
+  /** Release asset names, e.g. `{ pdf: "RaccoltaRegolamentiInterni.pdf", markdown: "…md" }`. */
+  outputs: jsonb().$type<Record<string, string>>().notNull(),
   tagPrefix: text("tag_prefix").notNull(),
   /** Procedure configuration key (see `regulations/procedure.ts`). */
   procedure: text().notNull(),
