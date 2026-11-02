@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
-import { App, type Octokit } from "octokit"
+import { App, type Octokit, Octokit as OctokitCore } from "octokit"
 import { matchesGlob } from "../compile/assets"
 
 /**
@@ -49,9 +49,20 @@ export type LegalGitHub = {
 
 const status = (e: unknown) => (e as { status?: number }).status
 
-export function githubAppClient(options: { appId: string; privateKey: string; repo: string }): LegalGitHub {
+export function githubAppClient(options: {
+  appId: string
+  privateKey: string
+  repo: string
+  /** Another API host (GitHub Enterprise, tests); uploads go to the same host. */
+  baseUrl?: string
+}): LegalGitHub {
   const [owner, repo] = options.repo.split("/")
-  const app = new App({ appId: options.appId, privateKey: options.privateKey })
+  const app = new App({
+    appId: options.appId,
+    privateKey: options.privateKey,
+    ...(options.baseUrl ? { Octokit: OctokitCore.defaults({ baseUrl: options.baseUrl }) } : {}),
+  })
+  const uploadsUrl = options.baseUrl ?? "https://uploads.github.com"
   let cached: { octokit: Octokit; at: number } | null = null
   /** Installation tokens last an hour; the App is installed only on the legal repository. */
   async function gh(): Promise<Octokit> {
@@ -253,7 +264,7 @@ export function githubAppClient(options: { appId: string; privateKey: string; re
         name,
         data: Buffer.from(content) as unknown as string,
         headers: { "content-type": contentType },
-        baseUrl: "https://uploads.github.com",
+        baseUrl: uploadsUrl,
       })
     },
     async downloadAsset(assetId) {
