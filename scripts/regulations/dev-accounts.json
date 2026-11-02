@@ -1,0 +1,50 @@
+[
+  {
+    "sub": "dev-segretario",
+    "name": "Sara Segretario",
+    "email": "segretario@dev.polinetwork.org",
+    "roles": ["direttivo", "segretario"],
+    "permissions": [
+      "admin:access",
+      "regulations:read",
+      "regulations:write",
+      "regulations:manage",
+      "regulations:rectify"
+    ]
+  },
+  {
+    "sub": "dev-presidente",
+    "name": "Paolo Presidente",
+    "email": "presidente@dev.polinetwork.org",
+    "roles": ["direttivo", "presidente"],
+    "permissions": ["admin:access", "regulations:read", "regulations:write", "regulations:manage"]
+  },
+  {
+    "sub": "dev-direttivo",
+    "name": "Dario Direttivo",
+    "email": "direttivo@dev.polinetwork.org",
+    "roles": ["direttivo"],
+    "permissions": ["admin:access", "regulations:read", "regulations:write"]
+  },
+  {
+    "sub": "dev-editor",
+    "name": "Elena Editor",
+    "email": "editor@dev.polinetwork.org",
+    "roles": [],
+    "permissions": []
+  },
+  {
+    "sub": "dev-commenter",
+    "name": "Carlo Commenter",
+    "email": "commenter@dev.polinetwork.org",
+    "roles": [],
+    "permissions": []
+  },
+  {
+    "sub": "dev-delegato",
+    "name": "Davide Delegato",
+    "email": "delegato@dev.polinetwork.org",
+    "roles": [],
+    "permissions": []
+  }
+]

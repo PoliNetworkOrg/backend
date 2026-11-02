@@ -1,0 +1,44 @@
+# Local stack for the regulations editor: Postgres and the sandboxed LaTeX worker. The backend, the collab service and
+# the dev IdP run on the host with `bun run regulations:dev` (see docs/regulations-dev.md).
+#   TEXLIVE_IMAGE=ghcr.io/polinetworkorg/legal-texlive:local docker compose -f docker/regulations-dev.compose.yaml up -d --build
+name: regulations-dev
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: regulations
+      POSTGRES_PASSWORD: regulations
+      POSTGRES_DB: polinetwork_backend
+    ports:
+      - "127.0.0.1:54329:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "regulations", "-d", "polinetwork_backend"]
+      interval: 2s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql
+
+  latex-worker:
+    build:
+      context: ..
+      dockerfile: docker/latex-worker.Dockerfile
+      args:
+        TEXLIVE_IMAGE: ${TEXLIVE_IMAGE:-ghcr.io/polinetworkorg/legal-texlive:latest}
+    environment:
+      WORKER_SECRET: dev-worker-secret
+      WORKER_CONCURRENCY: "2"
+    ports:
+      - "127.0.0.1:4200:4200"
+    # The same sandbox as in the cluster: non-root, read-only root, tmpfs, no capabilities, limits.
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /work:size=512m,uid=1000,gid=1000
+      - /tmp:size=64m,uid=1000,gid=1000
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1536m
+    cpus: 2
+
+volumes:
+  pgdata:
