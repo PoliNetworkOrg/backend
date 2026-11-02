@@ -24,6 +24,24 @@ export function cron() {
     }
   })
 
+  // Regulations: the GitHub webhook (/public/webhooks/github) drives emanations; this reconciles missed deliveries.
+  new Cron("* * * * * *", { protect: true, interval: env.REGULATIONS_RECONCILE_SECONDS }, async () => {
+    try {
+      const { regulationsEmanation } = await import("./regulations")
+      await regulationsEmanation?.tick()
+    } catch (err) {
+      logger.error(err, "[CRON] regulations emanation")
+    }
+  })
+  new Cron("0 41 4 * * *", async () => {
+    try {
+      const { pruneWebhookDeliveries } = await import("./public/github-webhook")
+      await pruneWebhookDeliveries(DB)
+    } catch (err) {
+      logger.error(err, "[CRON] webhook deliveries")
+    }
+  })
+
   logger.info("[CRON] scheduled")
   new Cron("0 * * * * *", async () => {
     try {

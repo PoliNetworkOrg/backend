@@ -39,6 +39,9 @@ export const DEV_ENV: Record<string, string> = {
   REGULATIONS_LEGAL_DIR: process.env.REGULATIONS_LEGAL_DIR ?? resolve(root, "../legal"),
   REGULATIONS_LLM_PROVIDER: process.env.REGULATIONS_LLM_PROVIDER ?? "fake",
   REGULATIONS_GITHUB_MODE: process.env.REGULATIONS_GITHUB_MODE ?? "fake",
+  REGULATIONS_FAKE_GITHUB_STATE: resolve(root, ".dev-idp/fake-github.json"),
+  // The fake GitHub sends no webhooks: reconcile often.
+  REGULATIONS_RECONCILE_SECONDS: "15",
   COLLAB_PORT: "4100",
   COLLAB_INTERNAL_PORT: "4101",
   ...keys,

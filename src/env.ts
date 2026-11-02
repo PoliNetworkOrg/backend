@@ -118,6 +118,36 @@ export const env = createEnv({
     REGULATIONS_LLM_API_KEY: z.string().min(1).optional(),
     REGULATIONS_LLM_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
 
+    /** `app`: the GitHub App on the legal repository; `fake`: in memory (the default outside production). */
+    REGULATIONS_GITHUB_MODE: z.enum(["app", "fake"]).optional(),
+    REGULATIONS_GITHUB_APP_ID: z.string().min(1).optional(),
+    /** PEM; `\\n` escapes are accepted. */
+    REGULATIONS_GITHUB_PRIVATE_KEY: z
+      .string()
+      .min(1)
+      .optional()
+      .transform((v) => v?.replace(/\\n/g, "\n")),
+    /** The App's webhook secret, for `POST /public/webhooks/github`. Without it the route answers 404. */
+    REGULATIONS_GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
+    /** Seconds between reconciliations of emanations waiting on GitHub, for webhook deliveries that got lost. */
+    REGULATIONS_RECONCILE_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
+    REGULATIONS_GITHUB_REPO: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/)
+      .default("PoliNetworkOrg/legal"),
+    REGULATIONS_GITHUB_BASE: z.string().min(1).default("main"),
+    /** Development: where the in-memory GitHub keeps its state across restarts. */
+    REGULATIONS_FAKE_GITHUB_STATE: z.string().min(1).optional(),
+    /** Notifications. The sender is still to be decided: AZURE_EMAIL_SENDER unless set. */
+    REGULATIONS_EMAIL_SENDER: z.email().optional(),
+    REGULATIONS_EMAIL_TO: z.email().default("soci@polinetwork.org"),
+    REGULATIONS_EMAIL_REPLY_TO: z.email().default("direttivo@polinetwork.org"),
+    REGULATIONS_DIRETTIVO_EMAIL: z.email().default("direttivo@polinetwork.org"),
+    REGULATIONS_TELEGRAM_CHAT_ID: z.coerce.number().int().optional(),
+    REGULATIONS_TELEGRAM_TOPIC_ID: z.coerce.number().int().optional(),
+    /** The dashboard's page of a draft's changes, for the email (default `…/dashboard/regulations/drafts/{draftId}/diff`). */
+    REGULATIONS_WEB_URL: z.string().optional(),
+
     // env config
     NODE_ENV: NODE_ENV.default(nodeEnv),
     LOG_LEVEL: z.string().default("DEBUG"),

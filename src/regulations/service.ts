@@ -166,6 +166,41 @@ export function createRegulationsService(deps: RegulationsDeps) {
   }
 
   /** The published version a draft's lineage starts from. */
+  /**
+   * Why the draft can't go forward because a newer version was published after it started (it would undo it), or
+   * null. A draft is current when the latest version is the one its lineage starts from, or was merged into it (or
+   * into a draft it descends from).
+   */
+  async function supersededReason(draft: DraftRow, viewer: Viewer): Promise<string | null> {
+    const [latest] = await db
+      .select()
+      .from(versions)
+      .where(eq(versions.documentKey, draft.documentKey))
+      .orderBy(desc(versions.publishedAt))
+      .limit(1)
+    if (!latest || latest.draftId === draft.id) return null
+    let cursor: DraftRow | undefined = draft
+    for (let depth = 0; cursor && depth < 50; depth++) {
+      if (cursor.baseVersionId === latest.id) return null
+      const [merged] = await db
+        .select({ id: merges.id })
+        .from(merges)
+        .where(
+          and(eq(merges.targetDraftId, cursor.id), eq(merges.sourceKind, "version"), eq(merges.sourceId, latest.id))
+        )
+        .limit(1)
+      if (merged) return null
+      if (!cursor.baseDraftId) break
+      ;[cursor] = await db.select().from(drafts).where(eq(drafts.id, cursor.baseDraftId))
+    }
+    const root = await rootVersion(draft)
+    const lead = `La bozza parte da una versione superata (${root.label}):`
+    // Say what this caller can do about it: merging needs regulations:write.
+    if (viewer.can(P.write)) return `${lead} unisci prima la versione in vigore ${latest.label}.`
+    if (draft.kind === "rettifica") return `${lead} crea una nuova rettifica dalla versione in vigore ${latest.label}.`
+    return `${lead} chiedi al Consiglio Direttivo di unire la versione in vigore ${latest.label}.`
+  }
+
   async function rootVersion(draft: DraftRow) {
     let cursor: DraftRow = draft
     for (let depth = 0; depth < 50; depth++) {
@@ -288,6 +323,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const editable = isEditable(draft) && !emanation
     const other = await inApproval(draft.documentKey, draft.id)
     const versionId = emanation?.versionId ?? null
+    // Only drafts still on their way: an emanated one is the latest version itself.
+    const superseded = draft.state === "emanata" || emanation ? null : await supersededReason(draft, viewer)
 
     const transitions: C.Capabilities["transitions"] = []
     for (const rule of config.transitions) {
@@ -297,6 +334,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
       if (rule.requires.includes("parses") && draft.parses === false)
         blockedBy = "Il testo non è valido: correggi gli errori prima."
       if (rule.to === "in_approvazione" && other) blockedBy = `C'è già una bozza in approvazione: «${other.title}».`
+      if (rule.effect === "freeze" && superseded) blockedBy = superseded
       if (emanation) blockedBy = "L'emanazione è in corso."
       transitions.push({
         to: rule.to,
@@ -308,11 +346,18 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const emanateRule = config.transitions.find(
       (r) => r.effect === "emanate" && r.from === draft.state && r.kinds.includes(draft.kind)
     )
-    const emanate =
-      !!emanateRule &&
-      !emanation &&
-      allowed(viewer, emanateRule.who, rectify) &&
-      (draft.kind !== "rettifica" || draft.parses !== false)
+    let emanateBlockedBy: string | null = null
+    if (emanateRule && !emanation && allowed(viewer, emanateRule.who, rectify)) {
+      if (superseded) emanateBlockedBy = superseded
+      else if (draft.kind === "rettifica" && draft.parses === false)
+        emanateBlockedBy = "Il testo non è valido: correggi gli errori prima di emanare."
+      else if (draft.kind === "modifica" && diffStatus !== "ready")
+        emanateBlockedBy =
+          diffStatus === "pending"
+            ? "Le differenze sono ancora in generazione."
+            : "Mancano le differenze: generale prima di emanare."
+    }
+    const emanate = !!emanateRule && !emanation && allowed(viewer, emanateRule.who, rectify) && !emanateBlockedBy
 
     const deadlines: C.Deadline[] = []
     for (const rule of config.deadlines) {
@@ -346,12 +391,15 @@ export function createRegulationsService(deps: RegulationsDeps) {
         transitions,
         approve: transitions.some((t) => t.to === "approvata" && !t.blockedBy),
         emanate,
+        emanateBlockedBy,
         rectify,
         regenerateDiff:
           viewer.can(P.manage) &&
-          (diffStatus === "ready" || diffStatus === "failed") &&
+          (diffStatus === "ready" ||
+            diffStatus === "failed" ||
+            (diffStatus === "none" && draft.state === "approvata")) &&
           !draft.notifiedAt &&
-          !emanation?.steps.email?.state.startsWith("done"),
+          !emanation,
         delete:
           (viewer.can(P.write) || (draft.kind === "rettifica" && draft.createdBy.id === viewer.sub)) &&
           draft.state === "bozza" &&
@@ -649,6 +697,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
     if (rule.effect === "freeze") {
       const other = await inApproval(draft.documentKey, draft.id)
       if (other) fail("CONFLICT", `C'è già una bozza in approvazione per questo documento: «${other.title}».`)
+      const superseded = await supersededReason(draft, viewer)
+      if (superseded) fail("PRECONDITION_FAILED", superseded)
       let files: C.Files
       let parses: boolean
       if (deps.collab) ({ files, parses } = await deps.collab.freeze(draft.id))
@@ -1178,7 +1228,17 @@ export function createRegulationsService(deps: RegulationsDeps) {
     createDelega,
     revokeDelega,
     // For the procedure modules (diff, emanation).
-    internal: { access, loadDraft, loadDocument, currentFiles, rootVersion, rectifyRight, draftView, emanationOf },
+    internal: {
+      access,
+      loadDraft,
+      loadDocument,
+      currentFiles,
+      rootVersion,
+      rectifyRight,
+      draftView,
+      emanationOf,
+      supersededReason,
+    },
   }
 }
 

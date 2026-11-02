@@ -6,6 +6,8 @@ import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import MemberNumberChanged from "./templates/member-number-changed"
+import RegulationDelegaEmail, { delegaSubject, type RegulationDelegaProps } from "./templates/regulation-delega"
+import RegulationEmanatedEmail, { type RegulationEmanatedProps } from "./templates/regulation-emanated"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
@@ -33,6 +35,7 @@ async function devSendMail(
 ) {
   const html = await render(component)
   const res = await transporter.sendMail({
+    from: options.from,
     to,
     replyTo: options.replyTo,
     subject,
@@ -131,4 +134,41 @@ export async function sendPeopleEmail(input: { id: string; to: string; subject: 
       messageId: `<people-${Buffer.from(input.id).toString("base64url")}@polinetwork.org>`,
     })
   }
+}
+
+/** Regulations: errors propagate, so the notification record says why it failed and the emanation retries. */
+async function sendRegulationsMail(
+  to: string | string[],
+  subject: string,
+  component: JSX.Element,
+  attachments: EmailAttachment[],
+  options: EmailOptions
+) {
+  if (env.NODE_ENV === "development" && env.USE_DEV_MAILER)
+    await devSendMail(to, subject, component, attachments, options)
+  else await azureSendEmail(to, subject, component, attachments, { ...options, throwOnError: true })
+}
+
+export async function sendRegulationEmanatedEmail(
+  input: { to: string; from?: string; replyTo?: { name: string; address: string }; messageId: string },
+  props: RegulationEmanatedProps,
+  attachments: EmailAttachment[]
+) {
+  await sendRegulationsMail(
+    input.to,
+    makeSubject(`${props.documentTitle}: nuova versione ${props.tag}`),
+    <RegulationEmanatedEmail {...props} />,
+    attachments,
+    { from: input.from, replyTo: input.replyTo, messageId: input.messageId }
+  )
+}
+
+export async function sendRegulationDelegaEmail(
+  input: { to: string; from?: string; messageId: string },
+  props: RegulationDelegaProps
+) {
+  await sendRegulationsMail(input.to, makeSubject(delegaSubject(props)), <RegulationDelegaEmail {...props} />, [], {
+    from: input.from,
+    messageId: input.messageId,
+  })
 }

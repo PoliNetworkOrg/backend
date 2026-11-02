@@ -123,6 +123,20 @@ export class WebSocketServer {
     })
   }
 
+  /** Posts a regulation to the Soci group; throws with the bot's reason, so the caller records and retries it. */
+  async postRegulation(data: Parameters<ServerToClientEvents["postRegulation"]>[0]): Promise<{ messageIds: number[] }> {
+    const tgSocket = this.telegramSocket("postRegulation")
+    if (!tgSocket) throw new Error("Il bot Telegram non è connesso")
+    return new Promise((res, rej) => {
+      // Uploading two PDFs can take a while.
+      tgSocket.timeout(60_000).emit("postRegulation", data, (timeout, err, result) => {
+        if (timeout) rej(new Error("Il bot Telegram non ha risposto"))
+        else if (err) rej(new Error(err))
+        else res(result ?? { messageIds: [] })
+      })
+    })
+  }
+
   async leaveChat(data: Parameters<ServerToClientEvents["leaveChat"]>[0]): Promise<boolean> {
     const tgSocket = this.telegramSocket("leaveChat")
     if (!tgSocket) return false

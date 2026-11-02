@@ -19,11 +19,12 @@ import { runXelatex } from "./xelatex"
  */
 
 const config = {
-  port: Number(process.env.WORKER_PORT ?? 4200),
+  // PORT and WORKDIR as set by polinetwork-cd; the WORKER_ names win when both are set.
+  port: Number(process.env.WORKER_PORT ?? process.env.PORT ?? 4200),
   secret: process.env.WORKER_SECRET ?? "",
   concurrency: Number(process.env.WORKER_CONCURRENCY ?? 2),
   timeoutMs: Number(process.env.WORKER_TIMEOUT_MS ?? 45_000),
-  workDir: process.env.WORKER_WORK_DIR ?? "/work",
+  workDir: process.env.WORKER_WORK_DIR ?? process.env.WORKDIR ?? "/work",
   tmpDir: process.env.WORKER_TMP_DIR ?? "/tmp",
   maxWorkdirs: Number(process.env.WORKER_MAX_WORKDIRS ?? 40),
   memoryLimitMb: process.env.WORKER_MEMORY_LIMIT_MB ? Number(process.env.WORKER_MEMORY_LIMIT_MB) : 1024,

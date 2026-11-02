@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { z } from "zod"
-import { readDocument } from "./compile/assets"
+import { readDocument, readDocumentWith } from "./compile/assets"
 import type { AssetBundle } from "./compile/protocol"
+import type { LegalGitHub } from "./emanation/github"
 
 /** `legal.json` at the root of PoliNetworkOrg/legal. */
 export const manifestSchema = z.object({
@@ -50,5 +51,40 @@ export function localLegalSource(root: string): LegalSource {
       return manifestSchema.parse(JSON.parse(await readFile(join(root, "legal.json"), "utf8")))
     },
     readDocument: (document, shared) => readDocument(root, { ...document, shared }),
+  }
+}
+
+/** The legal repository on GitHub, through the App, at the head of `ref`. */
+export function githubLegalSource(gh: LegalGitHub, ref: string): LegalSource {
+  let pinned: string | null = null
+  const sha = async () => {
+    pinned ??= await gh.headSha(ref)
+    return pinned
+  }
+  return {
+    async head() {
+      pinned = null
+      const head = await sha()
+      return { sha: head, label: `import ${head.slice(0, 7)}` }
+    },
+    async manifest() {
+      const text = await gh.readText("legal.json", await sha())
+      if (!text) throw new Error("legal.json not found in the legal repository")
+      return manifestSchema.parse(JSON.parse(text))
+    },
+    async readDocument(document, shared) {
+      const at = await sha()
+      return readDocumentWith(
+        {
+          list: (dir) => gh.listFiles(dir, at),
+          read: async (path) => {
+            const bytes = await gh.readBytes(path, at)
+            if (!bytes) throw new Error(`${path} not found`)
+            return bytes
+          },
+        },
+        { ...document, shared }
+      )
+    },
   }
 }

@@ -193,6 +193,8 @@ export function createDiffService(deps: {
       fail("PRECONDITION_FAILED", "Le differenze si generano quando la bozza è in approvazione.")
     if (await locked(draft))
       fail("PRECONDITION_FAILED", "Le differenze sono già state notificate: non si rigenerano più.")
+    if (await emanationOf(draftId))
+      fail("PRECONDITION_FAILED", "L'emanazione è già avviata: le differenze non cambiano più.")
     const row = await latestRow(draftId)
     if (row?.status === "pending" || running.has(draftId)) fail("CONFLICT", "Le differenze sono già in generazione.")
     await generate(draftId, viewer.person)
