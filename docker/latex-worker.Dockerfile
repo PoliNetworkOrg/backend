@@ -2,6 +2,9 @@
 # Built FROM the legal repository's TeX Live image, so previews use the same packages as the official PDFs.
 #   docker build -f docker/latex-worker.Dockerfile -t ghcr.io/polinetworkorg/latex-worker .
 # Run it as in polinetwork-cd: non-root, read-only root, tmpfs on /work and /tmp, no network egress, CPU/memory limits.
+# Give it a uid of its own (polinetwork-cd uses 10200), not one shared with other apps on the node: xelatex can read
+# anything its uid can, and per-uid limits are node-wide. The image works under any uid (files are world-readable,
+# the workdirs are emptyDirs).
 ARG TEXLIVE_IMAGE=ghcr.io/polinetworkorg/legal-texlive:latest
 
 FROM oven/bun:1-debian AS build

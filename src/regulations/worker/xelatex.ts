@@ -8,7 +8,11 @@ export type XelatexOptions = {
   timeoutMs: number
   /** Scratch directory for TeX's caches (TEXMFVAR, HOME): the root filesystem is read-only. */
   tmpDir: string
-  /** Address-space limit per process, through `prlimit` when available (Linux). */
+  /**
+   * Address-space limit per process, through `prlimit` when available (Linux). No RLIMIT_NPROC: it counts every task
+   * of the uid on the whole node, so with a shared uid it made xelatex fail to start xdvipdfmx in production; the
+   * number of processes is bounded by the Pod's pids limit instead.
+   */
   memoryLimitMb?: number
   maxRuns?: number
   binary?: string
@@ -72,7 +76,7 @@ export async function runXelatex(dir: string, entry: string, options: XelatexOpt
   ]
   const cmd =
     options.memoryLimitMb && existsSync("/usr/bin/prlimit")
-      ? ["/usr/bin/prlimit", `--as=${options.memoryLimitMb * 1024 * 1024}`, "--nproc=64", "--", ...args]
+      ? ["/usr/bin/prlimit", `--as=${options.memoryLimitMb * 1024 * 1024}`, "--", ...args]
       : args
 
   let runs = 0
