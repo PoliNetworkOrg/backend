@@ -25,7 +25,7 @@ export function botReadOrDashboard(permission: string): Policy {
 /** Public website data, also readable in the dashboard. */
 export const publicData: Policy = { service: { scope: SCOPE.publicRead }, ...dashboard("admin:access") }
 
-/** Hidden groups are dashboard data (RFC v3 §8); anonymous callers (only while `LEGACY_ANONYMOUS=allow`) keep the old behaviour. */
-export function seesHiddenGroups(actor: Actor | null): boolean {
-  return actor === null || actor.kind === "user"
+/** Hidden groups are dashboard data (RFC v3 §8). */
+export function seesHiddenGroups(actor: Actor): boolean {
+  return actor.kind === "user"
 }

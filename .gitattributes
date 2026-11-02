@@ -1,0 +1,3 @@
+# drizzle-kit regenerates a full copy of the schema with every migration: collapse it in PR reviews
+# (linguist-generated) and in local `git diff` output (-diff). Merges still treat it as text.
+drizzle/meta/*_snapshot.json linguist-generated=true -diff

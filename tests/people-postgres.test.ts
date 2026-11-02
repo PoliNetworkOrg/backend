@@ -3,7 +3,7 @@ import { promisify } from "node:util"
 import { expect, it } from "vitest"
 
 it.skipIf(!process.env.SEED_TEST_DB_PORT)(
-  "commits receipt signatures and delivery against real PostgreSQL",
+  "persists People records, assignments, role commands and the mail outbox in real PostgreSQL",
   async () => {
     const { stdout } = await promisify(execFile)("bun", ["tests/people-postgres.fixture.ts"], {
       env: process.env,

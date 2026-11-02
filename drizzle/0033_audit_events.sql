@@ -27,11 +27,11 @@ SELECT
 	'tg.moderation.' || "type",
 	CASE
 		WHEN "client" IS NULL THEN 'legacy'
-		WHEN coalesce("actor_tg_id", "admin_id") IS NOT NULL THEN 'telegram'
+		WHEN "actor_tg_id" IS NOT NULL THEN 'telegram'
 		ELSE 'service'
 	END,
 	"actor_sub",
-	coalesce("actor_tg_id", "admin_id"),
+	"actor_tg_id",
 	"client",
 	'tg.user',
 	"target_id"::text,

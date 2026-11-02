@@ -54,7 +54,7 @@ export default createTRPCRouter({
       return result
     }),
 
-  addFaqs: policy(dashboard("web:content:write"), { tokenOnly: true })
+  addFaqs: policy(dashboard("web:content:write"))
     .input(
       z.object({
         titleIt: z.string(),
@@ -82,7 +82,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  addFaqsCategory: policy(dashboard("web:content:write"), { tokenOnly: true })
+  addFaqsCategory: policy(dashboard("web:content:write"))
     .input(
       z.object({
         titleIt: z.string(),
@@ -106,7 +106,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editFaqs: policy(dashboard("web:content:write"), { tokenOnly: true })
+  editFaqs: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),
@@ -138,7 +138,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editFaqsCategory: policy(dashboard("web:content:write"), { tokenOnly: true })
+  editFaqsCategory: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),

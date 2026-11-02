@@ -23,19 +23,15 @@ const router = createTRPCRouter({
   }).query(({ ctx }) => ({ actor: ctx.actor })),
   dashboardOnly: policy({ user: { scope: "backend:admin", permission: "admin:access" } }).query(() => "ok"),
   multiScope: policy({ service: { scope: ["backend:tg:read", "backend:public:read"] } }).query(() => "ok"),
-  tokenOnly: policy({ service: { scope: "backend:tg:read" } }, { tokenOnly: true }).query(({ ctx }) => ({
-    client: ctx.actor.client,
-  })),
 })
 
 const bot: Actor = { kind: "service", client: "telegram-bot" }
 const moderator: Actor = { kind: "telegram", client: "telegram-bot", telegramId: "123", sub: "usr_mod" }
 const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_admin", telegramId: null }
 
-function caller(auth: RequestAuth, permissions: string[] = [], legacyAnonymous?: "allow" | "deny") {
+function caller(auth: RequestAuth, permissions: string[] = []) {
   const ctx: Context = {
     auth,
-    legacyAnonymous,
     access: {
       has: (actor, permission) => actor.kind !== "service" && actor.sub !== null && permissions.includes(permission),
       current: () => null,
@@ -55,19 +51,8 @@ const code = (promise: Promise<unknown>) =>
   )
 
 describe("policy", () => {
-  it("refuses anonymous calls unless LEGACY_ANONYMOUS allows them", async () => {
-    expect(await code(caller({ kind: "anonymous" }).lookup())).toBe("UNAUTHORIZED")
-    expect(await code(caller({ kind: "anonymous" }, [], "deny").lookup())).toBe("UNAUTHORIZED")
-    expect(await caller({ kind: "anonymous" }, [], "allow").lookup()).toEqual({ actor: null })
-  })
-
-  it("refuses anonymous calls to token-only procedures even while allowed", async () => {
-    expect(await code(caller({ kind: "anonymous" }, [], "allow").tokenOnly())).toBe("UNAUTHORIZED")
-  })
-
-  it("treats a direct caller without auth as anonymous", async () => {
+  it("refuses a direct caller without a token", async () => {
     expect(await code(router.createCaller({}).lookup())).toBe("UNAUTHORIZED")
-    expect(await router.createCaller({ legacyAnonymous: "allow" }).lookup()).toEqual({ actor: null })
   })
 
   it("passes on authentication rejections", async () => {
@@ -80,7 +65,6 @@ describe("policy", () => {
     expect(await caller(token(bot, ["backend:tg:read"])).lookup()).toEqual({ actor: bot })
     expect(await code(caller(token(bot, ["backend:tg:ingest"])).lookup())).toBe("FORBIDDEN")
     expect(await caller(token(bot, ["backend:public:read"])).multiScope()).toBe("ok")
-    expect(await caller(token(bot, ["backend:tg:read"])).tokenOnly()).toEqual({ client: "telegram-bot" })
   })
 
   it("requires both the scope and the person's permission", async () => {

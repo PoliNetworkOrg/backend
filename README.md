@@ -47,9 +47,9 @@ Requirements:
 Every caller authenticates with a PoliNetwork IdP token ([RFC v3](https://github.com/PoliNetworkOrg/auth/blob/main/docs/idp-telegram-integration-rfc-v3.md), Phase 5):
 
 - **With a token** (`Authorization: Bearer <IdP access token>`): the token is verified with [`@polinetwork/auth-kit`](https://github.com/PoliNetworkOrg/auth-kit), and the call is fully enforced. Every procedure declares, per actor kind, the scope it needs and, for people, the permission they must hold in the IdP's access snapshot. A token that fails verification is rejected. The bot acts for a Telegram user with `X-PN-Actor: telegram:<id>`, which only a service token with `backend:tg:act-as` may send.
-- **Without a token**: refused (`UNAUTHORIZED`). `LEGACY_ANONYMOUS=allow` is only a rollback switch: it lets anonymous requests run procedures that do not record who acted, with a null actor and no permissions, and logs each call as `[AUTH] legacy anonymous call`. Writes that record their actor (grants, `tg.groups.leaveChat`, label and web content writes) and the IdP procedures are token-only and refuse anonymous calls either way.
+- **Without a token**: refused (`UNAUTHORIZED`). There is no anonymous access, and handlers always receive the token's actor in `ctx.actor`.
 
-Procedures are built with `policy(...)` from `src/trpc.ts`; the bare tRPC procedure is not exported, and `tests/idp-router.test.ts` fails if any procedure lacks a policy. `policy(rules, { tokenOnly: true })` refuses anonymous calls and gives the handler a non-null `ctx.actor`.
+Procedures are built with `policy(...)` from `src/trpc.ts`; the bare tRPC procedure is not exported, and `tests/idp-router.test.ts` fails if any procedure lacks a policy.
 
 Who acted always comes from the token, never from the input: procedures take no actor fields (`createdBy`, `modifiedBy`, `updatedBy`, `adderId`, `interruptedById`, `performerId`, `adminId`). Inputs are plain zod objects, so a key an older client still sends is stripped, not rejected. Content tables record the author in `*_by_sub` columns; rows written before the IdP migration keep their author's Telegram ID in `legacy_*_by_tg_id`. Grants are in `tg_grants` and record the grantor's IdP subject. People sign in only through the IdP: the backend has no login of its own. The bot records moderation actions with `tg.auditLog.record`, which takes an idempotency key and flags `idp_permission` actions the snapshot does not back.
 
@@ -73,6 +73,37 @@ the migration copies the existing `tg_audit_log`. Dashboard users with the IdP p
 
 Changes made outside the backend are not in the log: directly in Telegram or WhatsApp unless the bot reports them, the
 cron jobs, the e-signing agent endpoints (each request keeps its own history) and roles and permissions in the IdP.
+
+## People
+
+The `people` router is the admin dashboard's register of Group Admins, Capo Admins and team members. Each person
+is one record in `people_persons`; their roles are rows in `people_assignments`, with an append-only history in
+`people_activity`.
+
+- **A record linked to a login account** (`account_sub`): PoliNetwork Auth is the source of truth. People reads
+  who holds the roles bound to People from `GET /api/internal/people-roles` (15 s cache, the last answer during an
+  outage of up to an hour) and creates linked records for people given a bound role by hand in Auth. Changes go to
+  `POST /api/internal/people-roles` through the `people_role_commands` outbox: each command has an ID Auth applies at
+  most once, so the cron sends it again until Auth answers. The assignment shows `sent` until Auth confirms it, and
+  Auth's reason when it refuses.
+- **A record that isn't linked yet**: its assignments stay `pending` in the backend, and are sent when the record is
+  linked, acting as whoever links it by hand or, for an invite, as whoever made each assignment.
+
+A record is linked to a login account in exactly two ways, never by matching emails, names or Telegram:
+
+- **Email invite** (`people:write`, or the Lead of one of the person's teams): a single-use link to the contact
+  email, stored hashed, valid for 14 days; a new invite revokes the previous one. Any signed-in account can open it
+  (`me.invite`) and accept it (`me.acceptInvite`), with no People permission and whatever its email.
+- **By hand** (`admin:access` + `people:link`): search the IdP directory and link an account; nobody links their own.
+
+Unlinking (`people:link`) takes the record's roles back in Auth with a role command, then detaches the account; its
+assignments go back to `pending`. `linking.recent` lists the links of the last 30 days, with method, date and who
+made them, so a mistake or a forwarded invite is easy to spot and undo.
+
+The backend checks every role change with the same rules as Auth (`src/people/rules.ts`, shaped like Auth's
+`src/auth/people-binding.ts`): no self-grants, the right permission per kind, and bounded delegation against the
+role's permissions. A concept with no role bound in Auth, or with more than one, can't be assigned. Writes are
+serialized by one transaction lock. Grant `idp:people:roles` to the backend's OAuth client to let it change roles.
 
 ## E-signing with the CIE
 

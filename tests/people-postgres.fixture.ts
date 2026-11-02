@@ -4,20 +4,11 @@ import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { schema } from "@/db/schema"
-import { jobs, requests as requestTable } from "@/db/schema/esign/esign"
-import { identities, receiptRequests, receipts } from "@/db/schema/people"
-import { buildSignedData, CMS_OID, dataToBeSigned, sha256, signedAttributes } from "@/esign/pdf/cms"
-import { children, contextTag, octetString, oid, read, sequence } from "@/esign/pdf/der"
-import { inspectPdf } from "@/esign/pdf/inspect"
-import { finalizeSignature, prepareSignature } from "@/esign/pdf/pades"
-import { createEsignService } from "@/esign/service"
-import { createPgStore } from "@/esign/store-pg"
-import { transferType } from "@/people/files"
-import { newPerson, receiptEligible } from "@/people/model"
+import { assignments, persons } from "@/db/schema/people"
 import { createPeopleService } from "@/people/service"
-import { completeReceiptSignature, createPeoplePgStore, guardReceiptSignature } from "@/people/store-pg"
-import type { PeopleConfig, PeopleState, Viewer } from "@/people/types"
-import { cardSign, createTestCa } from "./esign-fixtures"
+import { createPeoplePgStore } from "@/people/store-pg"
+import type { Viewer } from "@/people/types"
+import { fakeAuth } from "./people-auth"
 
 const connection = {
   hostname: "127.0.0.1",
@@ -34,293 +25,152 @@ const checked: string[] = []
 try {
   await migrate(db, { migrationsFolder: "./drizzle" })
   const store = createPeoplePgStore(db)
-  const config: PeopleConfig = {
-    officers: { president: "P-0001", vicePresident: "P-0002" },
-    feeCents: 1000,
-    beneficiary: "PoliNetwork APS",
-    iban: "IT60X0542811101000000123456",
-    legalName: "PoliNetwork APS",
-    address: "Via Test 1, Milano",
-    taxCode: "12345678901",
-    dashboardUrl: "https://admin.example.org",
-  }
   const permissionSet = new Set([
     "admin:access",
     "people:self",
     "people:read",
     "people:write",
-    "people:members:read",
-    "people:members:write",
-    "people:fees:write",
-    "people:receipts:sign",
     "people:appoint",
-    "esign:sign",
+    "people:link",
   ])
-  const viewer = (sub: string): Viewer => ({ sub, telegramId: null, can: (p) => permissionSet.has(p) })
-  const president = viewer("president")
-  const vice = viewer("vice")
+  const viewer = (sub: string): Viewer => ({
+    sub,
+    telegramId: null,
+    can: (p) => permissionSet.has(p),
+    holdsRole: () => false,
+  })
+  const hr = viewer("hr")
   const directory = [
-    { sub: "president", name: "Mario Rossi", email: "president@example.org", emailVerified: true, telegramId: "101" },
-    { sub: "vice", name: "Anna Bianchi", email: "vice@example.org", emailVerified: true, telegramId: "102" },
-    { sub: "member", name: "Luca Verdi", email: "member@example.org", emailVerified: true, telegramId: "103" },
+    { sub: "mario", name: "Mario Rossi", email: "mario@example.org" },
+    { sub: "anna", name: "Anna Bianchi", email: "anna@example.org" },
   ]
-  const outboxCalls: string[] = []
-  const eligible = (r: PeopleState["receipts"][string], sub: string, state: PeopleState, requireEsign: boolean) =>
-    receiptEligible(state, r, viewer(sub), config, requireEsign)
-  const esignStore = createPgStore(db, {
-    beforeSignature: (tx, commit) => guardReceiptSignature(tx, commit, eligible),
-    afterSignature: completeReceiptSignature,
-  })
-  const esign = createEsignService({
-    store: esignStore,
-    drives: [],
-    directory: async () => directory,
-    access: () => ({ roles: [], permissions: [...permissionSet] }),
-    receiptCanView: (receiptId, sub) => people.canViewReceipt(receiptId, sub, viewer(sub).can),
-    receiptEligible: async (id, sub, requireEsign) => people.eligibleReceipt(id, sub, viewer(sub).can, requireEsign),
-    mailer: {
-      signatureRequest: async () => true,
-      signedDocument: async () => {
-        throw new Error("eSign must never send receipt email")
+  const auth = fakeAuth()
+  const sent: string[] = []
+  /** A new service reads Auth again instead of its cached answer. */
+  const service = () =>
+    createPeopleService({
+      store,
+      dashboardUrl: "https://admin.example.org",
+      directory: async () => directory,
+      peopleRoles: auth.auth,
+      sendMail: async (m) => {
+        sent.push(m.id)
       },
-      requestUpdate: async () => true,
-    },
-    logger: { info() {}, warn() {}, error() {} },
-    dashboardUrl: config.dashboardUrl,
-    allowTestCertificates: true,
-    revocation: "off",
+    })
+  const people = service()
+  const input = (firstName: string) => ({
+    firstName,
+    lastName: "Neri",
+    contactEmail: `${firstName.toLowerCase()}@example.org`,
+    phone: "",
+    telegramUsername: "",
   })
-  const people = createPeopleService({
-    store,
-    config,
-    directory: async () => directory,
-    telegramGroups: async () => [],
-    telegramUsers: async () => [],
-    provisionMember: async (p) => ({
-      id: `azure-${p.id}`,
-      email: `${p.profile.firstName.toLowerCase()}@polinetwork.org`,
-    }),
-    setMemberNumber: async () => {},
-    sendMail: async (m) => {
-      outboxCalls.push(m.id)
-    },
-    inspectSigned: (sub, bytes) => esign.inspectUpload(sub, bytes),
-    verifySigned: (sub, id, bytes) => esign.verifyUpload({ sub, canManage: false, peopleManual: true }, id, bytes),
-    completeSigned: async (sub, id, bytes) => {
-      await esign.uploadSigned({ sub, canManage: false, peopleManual: true }, id, bytes)
-    },
-    transferType,
-  })
-  await store.transaction(async ({ state }) => {
-    for (const a of directory) {
-      const [firstName, lastName] = a.name.split(" ")
-      const p = newPerson(
-        state,
-        {
-          firstName,
-          lastName,
-          personalEmail: a.email,
-          phone: "",
-          telegramUsername: "",
-          course: "Informatica",
-          year: "2nd year",
-          campus: "Leonardo",
-          admin: true,
-        },
-        "2026-10-01"
-      )
-      p.accountSub = a.sub
-      p.profile.telegramId = a.telegramId
-      p.account = { status: "linked", email: a.email, via: "IdP", linkedOn: "2026-10-01", how: "fixture" }
-    }
-  })
-  assert.equal((await people.listPeople(president)).length, 3)
-  checked.push("migrations and PostgreSQL metadata round-trip")
-  await people.createMember(president, { personId: "P-0003", number: "0003", admittedOn: "2026-10-01", fee: "due" })
-  const payment = {
-    personId: "P-0003",
-    paidOn: "2026-10-17",
-    amountCents: 1000,
-    method: "cash" as const,
-    note: "Integration test",
-  }
-  const issueResults = await Promise.allSettled([
-    people.markFeePaid(president, payment),
-    people.markFeePaid(president, payment),
-  ])
-  assert.equal(issueResults.filter((r) => r.status === "fulfilled").length, 1)
-  let [receipt] = await db.select().from(receipts)
-  assert.equal(receipt.number, "2026/001")
-  const [a, b] = await Promise.all([
-    people.prepareReceiptSignatures(president, { receiptIds: [receipt.id] }),
-    people.prepareReceiptSignatures(president, { receiptIds: [receipt.id] }),
-  ])
-  assert.equal(a[0].requestId, b[0].requestId)
-  assert.equal((await db.select().from(receiptRequests)).length, 1)
-  checked.push("concurrent issue and idempotent receipt/request uniqueness")
-  const requestId = a[0].requestId
-  const caller = { sub: "president", canManage: true }
-  assert.deepEqual((await esign.getRequest(caller, requestId)).request.peopleReceipt, {
-    receiptId: receipt.id,
-    number: receipt.number,
-    year: "2026/27",
-  })
-  assert.equal((await esign.listRequests(caller, "inbox"))[0].myTurn, true)
-  await assert.rejects(esign.cancelRequest(caller, requestId), /Void receipts/)
-  await assert.rejects(esign.deleteRequest(caller, requestId), /retained/)
-  await assert.rejects(
-    esign.createJob(caller, requestId, [{ page: 0, x: 0.1, y: 0.1, width: 0.1, height: 0.1 }]),
-    /fixed/
-  )
-  checked.push("eSign provenance, fixed placement and permanent receipt retention")
-  const ca = await createTestCa()
-  const signer = await ca.issue("ROSSI MARIO", "RSSMRA80A01F205X")
-  const { ticket } = await esign.createJob(caller, requestId)
-  await esign.agentJob(ticket)
-  const prepared = await esign.agentPrepare(ticket, Buffer.from(signer.cert).toString("base64"), [], 2)
-  const signature = await cardSign(signer, new Uint8Array(Buffer.from(prepared.toBeSigned, "base64")))
-  permissionSet.delete("people:receipts:sign")
-  assert.equal((await esign.getRequest(caller, requestId)).request.myTurn, false)
-  await assert.rejects(esign.agentComplete(ticket, Buffer.from(signature).toString("base64")), /assigned/)
-  permissionSet.add("people:receipts:sign")
-  await esign.agentComplete(ticket, Buffer.from(signature).toString("base64"))
-  ;[receipt] = await db.select().from(receipts)
-  assert.equal(receipt.data.status, "signed")
-  assert.equal((await store.transaction(async ({ state }) => Object.keys(state.outbox))).length, 1)
-  // No browser callbacks: a fresh service worker drains the persistent outbox.
-  await Promise.all([people.deliverPending(), people.deliverPending()])
-  assert.equal(outboxCalls.length, 1)
-  ;[receipt] = await db.select().from(receipts)
-  assert.equal(receipt.data.status, "sent")
-  const own = await people.downloadMyReceipt(viewer("member"), { receiptId: receipt.id })
-  assert.equal((await inspectPdf(new Uint8Array(Buffer.from(own.base64, "base64")))).signatures[0].verified, true)
-  checked.push("real RSA/CIE job, permission revocation, atomic completion and one durable email")
-  await assert.rejects(people.downloadMyReceipt(vice, { receiptId: receipt.id }), /not found/)
-  await people.voidReceipt(president, { receiptId: receipt.id, reason: "Test replacement" })
-  await people.markFeePaid(president, payment)
-  const all = await db.select().from(receipts)
-  const replacement = all.find((r) => r.number === "2026/002")
-  assert.ok(replacement)
-  const [replacementRequest] = await people.prepareReceiptSignatures(president, { receiptIds: [replacement.id] })
-  const replacementOriginal = await esignStore.latestDocument(replacementRequest.requestId)
-  assert.ok(replacementOriginal)
-  const external = await prepareSignature(replacementOriginal.content, signer.cert, {
-    placement: { page: 0, x: 0.56, y: 0.69, width: 0.35, height: 0.09 },
-    signerName: "Mario Rossi",
-    fieldName: "Firma",
-    signingTime: new Date(),
-    reason: "Membership fee",
-    appearance: { lines: [{ text: "Mario Rossi" }] },
-  })
-  const signedPdf = finalizeSignature(external, await cardSign(signer, external.toBeSigned))
-  const pendingJob = await esign.createJob(caller, replacementRequest.requestId)
-  // The manual path commits through exactly the same transaction and cancels the agent's older job.
-  const upload = await people.previewSignedReceipts(president, {
-    files: [new File([new Uint8Array(signedPdf)], "unmatched.pdf")],
-  })
-  assert.equal(upload.files[0].signature.valid, true)
-  assert.equal(upload.files[0].receiptId, null)
+
+  const created = await Promise.all(["Sara", "Paolo", "Luca"].map((name) => people.createPerson(hr, input(name))))
+  assert.deepEqual(created.map((c) => c.id).sort(), ["P-0001", "P-0002", "P-0003"])
+  checked.push("concurrent writes are serialized")
+
+  await people.assignAdmin(hr, { personId: "P-0001", since: "2026-10-01", capoId: null })
+  await people.linkAccount(hr, { personId: "P-0001", accountId: "mario", reason: "Checked in person" })
+  assert.deepEqual(auth.held("mario"), ["admin"])
+  await people.appointCapo(hr, { personId: "P-0001", since: "2026-10-01", scope: "Ingegneria Informatica" })
+  await people.assignAdmin(hr, { personId: "P-0002", since: "2026-10-01", capoId: "P-0001" })
+  const record = await people.getPerson(hr, { id: "P-0001" })
   assert.deepEqual(
-    await people.sendSignedReceipts(president, {
-      uploadId: upload.uploadId,
-      assignments: { [upload.files[0].fileId]: replacement.id },
-    }),
-    { sent: 1, failed: 0 }
-  )
-  assert.equal((await esignStore.getJob(pendingJob.jobId))?.status, "cancelled")
-  await assert.rejects(
-    esign.agentPrepare(pendingJob.ticket, Buffer.from(signer.cert).toString("base64"), [], 2),
-    /cancelled|no longer|already signed/
-  )
-  checked.push("manual PAdES correction, shared completion, race invalidation and non-reused numbers")
-  await people.voidReceipt(president, { receiptId: replacement.id, reason: "Voided after signing" })
-  assert.equal(
-    (await db.select().from(requestTable).where(eq(requestTable.id, replacementRequest.requestId)))[0].status,
-    "completed"
+    record.assignments.map((a) => [a.kind, a.status, a.endedOn]),
+    [
+      ["admin", "applied", null],
+      ["capo", "applied", null],
+    ]
   )
   assert.equal(
-    (await db.select().from(jobs)).filter((j) => j.status === "prepared" || j.status === "pending").length,
-    0
+    record.activity[0].text,
+    "PoliNetwork Auth confirmed: Appointed Capo Admin from People (Ingegneria Informatica)"
   )
-  assert.equal((await db.select().from(receiptRequests)).length, 2)
-  checked.push("voiding preserves signed files, association history and finished eSign requests")
-  await people.markFeePaid(president, payment)
-  const third = (await db.select().from(receipts)).find((r) => r.number === "2026/003")
-  assert.ok(third)
-  const [thirdRequest] = await people.prepareReceiptSignatures(president, { receiptIds: [third.id] })
-  const thirdOriginal = await esignStore.latestDocument(thirdRequest.requestId)
-  assert.ok(thirdOriginal)
-  const attrs = signedAttributes(sha256(thirdOriginal.content), signer.cert)
-  const detached = buildSignedData({
-    signedAttrs: attrs,
-    signature: await cardSign(signer, dataToBeSigned(attrs)),
-    certDer: signer.cert,
-  })
-  const sd = children(children(children(read(detached))[1])[0])
-  const envelope = sequence(
-    oid(CMS_OID.signedData),
-    contextTag(
-      0,
-      sequence(
-        ...sd.map((part, index) =>
-          index === 2 ? sequence(oid(CMS_OID.data), contextTag(0, octetString(thirdOriginal.content))) : part.raw
-        )
-      )
-    )
-  )
-  const cmsUpload = await people.previewSignedReceipts(president, {
-    files: [new File([new Uint8Array(envelope)], "Ricevuta_2026-003.pdf.p7m")],
-  })
-  assert.equal(cmsUpload.files[0].signature.valid, true)
+  assert.equal((await people.listCapos(hr))[0].admins[0].id, "P-0002")
+  checked.push("assignments, role commands and the Capo relation round-trip")
+
+  // Changing a team role in Auth ends one assignment and starts another for the same concept in one transaction.
+  auth.give("anna", "it-member", "Anna Bianchi")
+  assert.equal((await service().listPeople(hr)).length, 4)
+  auth.take("anna", "it-member")
+  auth.give("anna", "it-lead")
+  const anna = (await service().listPeople(hr)).find((p) => p.account.status === "linked" && p.account.sub === "anna")
   assert.deepEqual(
-    await people.sendSignedReceipts(president, {
-      uploadId: cmsUpload.uploadId,
-      assignments: { [cmsUpload.files[0].fileId]: third.id },
-    }),
-    { sent: 1, failed: 0 }
+    anna?.assignments.map((a) => [a.teamRole, a.endedOn === null]),
+    [
+      ["member", false],
+      ["lead", true],
+    ]
   )
-  const signedEnvelope = await people.downloadMyReceipt(viewer("member"), { receiptId: third.id })
-  assert.equal(signedEnvelope.contentType, "application/pkcs7-mime")
-  assert.deepEqual(Buffer.from(signedEnvelope.base64, "base64"), Buffer.from(envelope))
-  checked.push("CAdES envelope verifies the exact issued PDF and retains the original cryptographic evidence")
-  const duplicates = await store.transaction(async ({ state }) =>
-    ["104", null].map((telegramId) => {
-      const p = newPerson(
-        state,
-        {
-          firstName: "Sara",
-          lastName: "Neri",
-          personalEmail: "sara@example.org",
-          phone: "",
-          telegramUsername: "",
-          course: "Informatica",
-          year: "1st year",
-          campus: "Leonardo",
-          admin: false,
-        },
-        "2026-10-01"
-      )
-      p.profile.telegramId = telegramId
-      return p.id
+  checked.push("a record is created for a role given in Auth, and follows it")
+
+  // Linking HR's record to that account folds the automatic one into it, in one transaction.
+  const automaticId = anna?.id as string
+  const { id: hrAnna } = await people.createPerson(hr, input("Anna"))
+  // As a member: the automatic record already leads IT, and an older answer from Auth must not undo that.
+  await people.addTeamMember(hr, { teamId: "it", personId: hrAnna, role: "member", since: "2026-10-01", fields: {} })
+  await service().linkAccount(hr, { personId: hrAnna, accountId: "anna", reason: "Same person" })
+  const absorbed = await service().getPerson(hr, { id: hrAnna })
+  assert.equal(absorbed.assignments.filter((a) => !a.endedOn).length, 1)
+  assert.ok(absorbed.activity.some((a) => a.text === "Created from a role held in PoliNetwork Auth"))
+  assert.equal((await db.select().from(persons).where(eq(persons.id, automaticId))).length, 0)
+  checked.push("an automatic record is absorbed by the record linked to its account")
+
+  await assert.rejects(
+    people.linkAccount(hr, { personId: "P-0003", accountId: "mario", reason: "Wrong person" }),
+    /already linked/
+  )
+  await assert.rejects(
+    db.insert(assignments).values({
+      id: crypto.randomUUID(),
+      personId: "P-0001",
+      kind: "admin",
+      since: "2026-10-01",
+      assignedBy: "x",
+      change: "start",
+      status: "applied",
     })
   )
-  await people.createMember(president, {
-    personId: duplicates[1],
-    number: "0042",
-    admittedOn: "2026-10-01",
-    fee: "due",
-  })
-  directory.push({ sub: "sara", name: "Sara Neri", email: "sara@example.org", emailVerified: true, telegramId: "104" })
-  await people.getMyArea(viewer("sara"))
-  const review = (await people.listReviews(president)).find((r) => r.kind === "two-records")
-  assert.ok(review)
-  await people.resolveReview(president, { reviewId: review.id, resolution: "merge-first", reason: "Same student" })
-  // The removed record's unique identities are released before the retained record takes them over.
-  const merged = (await db.select().from(identities)).find((i) => i.personId === duplicates[0])
-  assert.deepEqual(merged, { personId: duplicates[0], accountSub: "sara", memberNumber: "0042", telegramId: "104" })
-  assert.equal((await db.select().from(identities)).filter((i) => i.personId === duplicates[1]).length, 0)
-  assert.equal((await people.getMyArea(viewer("sara"))).state, "linked")
-  checked.push("merging duplicates moves membership and identities without unique violations")
+  const [{ count }] = await client`select count(*)::int as count from people_persons where account_sub = 'mario'`
+  assert.equal(count, 1)
+  assert.equal((await db.select().from(persons)).length, 4)
+  checked.push("constraints hold one account and one current assignment per concept")
+
+  // Unlinking takes the roles back in Auth, then detaches the account with its link details.
+  await service().unlinkAccount(hr, { personId: "P-0001", reason: "Wrong person" })
+  assert.deepEqual(auth.held("mario"), [])
+  const [unlinked] = await db.select().from(persons).where(eq(persons.id, "P-0001"))
+  assert.equal(unlinked.accountSub, null)
+  assert.equal(unlinked.linkedAt, null)
+  const recent = await service().listRecentLinks(hr)
+  assert.deepEqual(
+    recent.map((r) => [r.person.id, r.method]),
+    [[hrAnna, "manual"]]
+  )
+  checked.push("unlinking revokes in Auth and detaches, with link details")
+
+  await people.sendInvite(hr, { personId: "P-0003" })
+  await Promise.all([people.deliverPending(), people.deliverPending()])
+  assert.equal(sent.length, 1)
+  assert.equal((await people.listInvites(hr))[0].personId, "P-0003")
+  checked.push("an invitation is delivered once from the durable outbox")
+
+  // A service that hasn't read Auth yet makes the automatic record and absorbs it in the linking transaction.
+  directory.push({ sub: "luca", name: "Luca Neri", email: "luca@example.org" })
+  const { id: hrLuca } = await people.createPerson(hr, input("Luca"))
+  auth.give("luca", "it-member", "Luca Neri")
+  await service().linkAccount(hr, { personId: hrLuca, accountId: "luca", reason: "Same person" })
+  const luca = await service().getPerson(hr, { id: hrLuca })
+  assert.deepEqual(
+    luca.assignments.filter((a) => !a.endedOn).map((a) => [a.team, a.teamRole]),
+    [["it", "member"]]
+  )
+  assert.ok(luca.activity.some((a) => a.text === "Created from a role held in PoliNetwork Auth"))
+  const absorbedId = luca.activity.find((a) => a.text.startsWith("Absorbed "))?.text.split(/[ ,]/)[1] as string
+  const { id: next } = await people.createPerson(hr, input("Giulia"))
+  assert.ok(next > absorbedId, `${next} reuses or precedes the absorbed ${absorbedId}`)
+  checked.push("a record made and absorbed in one transaction keeps its history, and its ID isn't given again")
   console.log(JSON.stringify({ checked }))
 } finally {
   await client.close()

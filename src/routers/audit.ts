@@ -1,10 +1,8 @@
-import { TRPCError } from "@trpc/server"
 import { and, desc, eq, ilike, lt, or, type SQL } from "drizzle-orm"
 import { z } from "zod"
 import { telegramNames, userNames } from "@/audit/names"
 import { DB, SCHEMA } from "@/db"
 import { AUDIT_OUTCOME } from "@/db/schema/common/audit-events"
-import { env } from "@/env"
 import { dashboard } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 
@@ -32,9 +30,7 @@ export const auditRouter = createTRPCRouter({
         target: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
       })
     )
-    .query(async ({ input, ctx }) => {
-      // The legacy path only serves the dashboard's agent mode, in development.
-      if (ctx.actor === null && env.NODE_ENV !== "development") throw new TRPCError({ code: "UNAUTHORIZED" })
+    .query(async ({ input }) => {
       const conditions: SQL[] = []
       if (input.cursor) conditions.push(lt(EVENTS.id, input.cursor))
       if (input.area) conditions.push(ilike(EVENTS.action, `${input.area}.%`))

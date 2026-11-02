@@ -48,9 +48,9 @@ export default createTRPCRouter({
   /**
    * How many Telegram users were first stored on each day, from `created_at`, oldest day first. Days without new users
    * are omitted. Only dates and counts leave the database: the dashboard charts user growth without loading or
-   * decrypting the users themselves. New procedures take tokens only (no legacy anonymous path).
+   * decrypting the users themselves.
    */
-  getCreationHistory: policy(dashboard("tg:users:read"), { tokenOnly: true })
+  getCreationHistory: policy(dashboard("tg:users:read"))
     .output(CreationHistorySchema)
     .query(async () => {
       try {

@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto"
 import { TRPCError } from "@trpc/server"
 import * as C from "./contract"
-import type { Officer, PeopleConfig, PeopleState, Person, StoredReceipt, UnitOfWork, Viewer } from "./types"
+import { type Concept, conceptOf } from "./roles"
+import type { Activity, Assignment, Invite, PeopleState, Person, UnitOfWork, Viewer } from "./types"
 
 export function fail(
   code: "BAD_REQUEST" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "PRECONDITION_FAILED",
@@ -9,11 +10,8 @@ export function fail(
 ): never {
   throw new TRPCError({ code, message })
 }
-export const nameOf = (p: Person) => `${p.profile.firstName} ${p.profile.lastName}`
+export const nameOf = (p: Person) => `${p.firstName} ${p.lastName}`
 export const ref = (p: Person) => ({ id: p.id, name: nameOf(p) })
-export const newestReceipts = (a: { number: string }, b: { number: string }) =>
-  Number(b.number.split("/")[0]) - Number(a.number.split("/")[0]) ||
-  Number(b.number.split("/")[1]) - Number(a.number.split("/")[1])
 export const hash = (v: Uint8Array | string) => createHash("sha256").update(v).digest("hex")
 export const today = (now: Date) =>
   new Intl.DateTimeFormat("en-CA", {
@@ -22,16 +20,11 @@ export const today = (now: Date) =>
     month: "2-digit",
     day: "2-digit",
   }).format(now)
-export function academicYear(date: string) {
-  const y = Number(date.slice(0, 4)) - (Number(date.slice(5, 7)) < 9 ? 1 : 0)
-  return `${y}/${String(y + 1).slice(-2)}`
-}
-export const dueDate = (year: string) => `${year.slice(0, 4)}-10-31`
 export function find(state: PeopleState, id: string) {
   return state.persons[id] ?? fail("NOT_FOUND", "Person not found")
 }
 export function own(state: PeopleState, viewer: Viewer) {
-  return Object.values(state.persons).find((p) => p.accountSub === viewer.sub && p.account.status === "linked") ?? null
+  return Object.values(state.persons).find((p) => p.accountSub === viewer.sub) ?? null
 }
 export const general = (v: Viewer, permission: string) => v.can("admin:access") && v.can(permission)
 export function requireGeneral(v: Viewer, permission: string) {
@@ -42,199 +35,114 @@ export function requireSelf(v: Viewer) {
 }
 export function requireOwn(s: PeopleState, v: Viewer) {
   requireSelf(v)
-  return own(s, v) ?? fail("FORBIDDEN", "Confirm your account link first")
+  return own(s, v) ?? fail("FORBIDDEN", "Your account is not linked to a People record")
 }
-export function leads(p: Person | null, team?: C.TeamId) {
-  return p?.teams.filter((m) => !m.endedOn && m.role === "lead" && (!team || m.team === team)).map((m) => m.team) ?? []
+
+const order = (a: Assignment) =>
+  [a.since, C.ASSIGNMENT_KINDS.indexOf(a.kind), a.team ?? "", a.endedOn ?? "9999-12-31", a.id].join("|")
+/** A person's assignments, oldest first; on the same day admin, then Capo Admin, then teams, ended ones first. */
+export function assignmentsOf(s: PeopleState, personId: string) {
+  return Object.values(s.assignments)
+    .filter((a) => a.personId === personId)
+    .sort((a, b) => order(a).localeCompare(order(b)))
 }
-export function teamAccess(s: PeopleState, v: Viewer, team: C.TeamId, write: boolean) {
-  if (general(v, write ? "people:write" : "people:read")) return
-  if (!v.can("people:self") || !leads(own(s, v), team).length) fail("FORBIDDEN", "You do not lead this team")
+/** The current assignment of a concept: shown as current, even while Auth hasn't confirmed it. */
+export function current(s: PeopleState, personId: string, concept: Concept) {
+  return assignmentsOf(s, personId).find((a) => !a.endedOn && conceptOf(a) === concept) ?? null
 }
-export function log(p: Person, actor: string, text: string, now: Date) {
-  p.activity.unshift({ actor, text, at: now.toISOString() })
+/** Current and in effect: not a start still waiting for Auth. */
+export const confirmed = (a: Assignment) => !a.endedOn && !(a.change === "start" && a.status === "sent")
+export function confirmedOf(s: PeopleState, personId: string, concept: Concept) {
+  const a = current(s, personId, concept)
+  return a && confirmed(a) ? a : null
 }
-export function fee(p: Person, config: PeopleConfig, date: string) {
-  if (!p.member || p.member.status === "former") return null
-  const year = academicYear(date)
-  p.feeYears[year] ??= {
-    year,
-    status: "due",
-    amountCents: config.feeCents,
-    dueOn: dueDate(year),
-    upload: null,
-    rejection: null,
-    payment: null,
-    lastReminder: null,
-    rejections: [],
-    fileId: null,
-  }
-  const f = p.feeYears[year]
-  if (f.status === "due" || f.status === "unpaid") f.status = date > f.dueOn ? "unpaid" : "due"
-  p.member.fee = f.status
-  return f
-}
-export function row(
-  s: PeopleState,
-  p: Person,
-  v: Viewer,
-  config: PeopleConfig,
-  date: string,
-  scopedContacts = false
-): C.PersonRow {
-  fee(p, config, date)
-  const self = own(s, v)?.id === p.id
-  const contacts = self || general(v, "people:read") || scopedContacts
-  return C.personRowSchema.parse({
-    ...p,
-    profile: {
-      ...p.profile,
-      personalEmail: contacts ? p.profile.personalEmail : null,
-      phone: contacts ? p.profile.phone : null,
-    },
-    member: self || general(v, "people:members:read") ? p.member : null,
-    isMember: !!p.member && p.member.status !== "former",
-    account: self || general(v, "people:read") ? p.account : { status: "none" },
-  })
-}
-export function record(s: PeopleState, p: Person, v: Viewer, config: PeopleConfig, date: string): C.PersonRecord {
-  const self = own(s, v)?.id === p.id
-  const read = general(v, "people:read")
-  const pendingMessages = new Set(p.pendingGroupRemovals?.map((pending) => pending.message))
-  const discrepancies: C.Discrepancy[] = p.discrepancies.map((item) =>
-    pendingMessages.has(item.message) ? { ...item, kind: "admin-removal" } : item
+/** Teams the person leads, as far as People knows. Authorization reads Auth instead. */
+export function leadsOf(s: PeopleState, personId: string) {
+  return assignmentsOf(s, personId).flatMap((a) =>
+    a.kind === "team" && a.teamRole === "lead" && confirmed(a) ? [a.team as C.TeamId] : []
   )
-  return C.personRecordSchema.parse({
-    ...row(s, p, v, config, date),
-    notes: read ? p.notes : null,
-    discrepancies: read ? discrepancies : self ? discrepancies.filter((d) => pendingMessages.has(d.message)) : [],
-    activity: read
-      ? p.activity
-      : self
-        ? p.activity.filter((a) => /fee|receipt|payment|consent|census/i.test(a.text))
-        : [],
-    fees:
-      p.member && (self || general(v, "people:members:read"))
-        ? {
-            current: fee(p, config, date),
-            receipts: Object.values(s.receipts)
-              .filter((r) => r.person.id === p.id)
-              .sort(newestReceipts)
-              .map((r) => C.receiptSchema.parse(r)),
-          }
-        : null,
-  })
 }
-export function newPerson(s: PeopleState, input: C.CreatePersonInput, date: string): Person {
-  const sequence = (s.counters.person ?? 0) + 1
-  if (sequence > 9999) fail("PRECONDITION_FAILED", "The admin's four-digit person ID space is exhausted")
+/** Whether a change for the person waits for Auth: a new one could be applied before it. */
+export const waiting = (s: PeopleState, personId: string) =>
+  Object.values(s.commands).some((c) => c.personId === personId && c.status === "queued")
+
+export function log(u: UnitOfWork, personId: string, actor: string, text: string, now: Date) {
+  u.activity.push({ personId, actor, text, at: now.toISOString() })
+}
+/** Once a Capo Admin's appointment has ended, the admins who had them as reference have none. */
+export function clearCapoReferences(u: UnitOfWork, capoId: string, actor: string, now: Date) {
+  for (const a of Object.values(u.state.assignments)) {
+    if (a.kind !== "admin" || a.endedOn || a.capoOfReferenceId !== capoId) continue
+    a.capoOfReferenceId = null
+    log(u, a.personId, actor, `Their Capo Admin of reference, ${capoId}, ended`, now)
+  }
+}
+
+const blank = (value: string) => value.trim() || null
+/**
+ * Allocates the next `P-0000` ID, or null once the four digits are used up. The `person` counter only moves
+ * forward, so the ID of a record merged into another is never given again.
+ */
+export function nextPersonId(s: PeopleState) {
+  const sequence = Math.max(s.counters.person ?? 0, ...Object.keys(s.persons).map((id) => Number(id.slice(2)))) + 1
+  if (sequence > 9999) return null
   s.counters.person = sequence
+  return `P-${String(sequence).padStart(4, "0")}`
+}
+export function newPerson(s: PeopleState, input: C.PersonInput, actor: string, now: Date): Person {
+  const at = now.toISOString()
   const p: Person = {
-    id: `P-${String(sequence).padStart(4, "0")}`,
-    profile: {
-      ...input,
-      phone: input.phone || null,
-      telegramUsername: input.telegramUsername || null,
-      telegramId: null,
-      otherAssociations: [],
-      studentRepresentative: null,
-    },
-    member: null,
-    admin: input.admin
-      ? {
-          status: "active",
-          since: date,
-          endedOn: null,
-          endReason: null,
-          groups: [],
-          requested: [],
-          availableAsCapo: false,
-          capoOfReference: null,
-          capoScope: null,
-        }
-      : null,
-    teams: [],
-    census: [],
-    consents: { privacy: null, photo: null },
-    account: { status: "none" },
+    id: nextPersonId(s) ?? fail("PRECONDITION_FAILED", "The four-digit person ID space is exhausted"),
+    firstName: input.firstName,
+    lastName: input.lastName,
+    contactEmail: blank(input.contactEmail),
+    phone: blank(input.phone),
+    telegramUsername: blank(input.telegramUsername),
     notes: null,
-    discrepancies: [],
-    activity: [],
     accountSub: null,
-    azureId: null,
-    feeYears: {},
-    answers: {},
-    reminders: {},
-    invite: null,
+    linkedAt: null,
+    linkedBy: null,
+    linkMethod: null,
+    createdBy: actor,
+    createdAt: at,
+    updatedBy: actor,
+    updatedAt: at,
   }
   s.persons[p.id] = p
   return p
 }
-export function office(s: PeopleState, v: Viewer, config: PeopleConfig): Officer | null {
-  if (!general(v, "people:receipts:sign")) return null
-  const p = own(s, v)
-  if (!p) return null
-  return config.officers.president === p.id
-    ? "president"
-    : config.officers.vicePresident === p.id
-      ? "vicePresident"
-      : null
+export function touch(p: Person, actor: string, now: Date) {
+  p.updatedBy = actor
+  p.updatedAt = now.toISOString()
 }
-export function receiptEligible(
+
+export function newAssignment(
   s: PeopleState,
-  r: StoredReceipt,
-  v: Viewer,
-  config: PeopleConfig,
-  requireEsign = true
-) {
-  return (
-    r.status === "toSign" &&
-    office(s, v, config) === r.signer &&
-    config.officers[r.signer] === r.officerPersonId &&
-    (!requireEsign || v.can("esign:sign"))
-  )
-}
-export function findReceipt(s: PeopleState, id: string) {
-  return s.receipts[id] ?? fail("NOT_FOUND", "Receipt not found")
-}
-export function queue(
-  s: PeopleState,
-  p: Person,
-  id: string,
-  to: string,
-  subject: string,
-  text: string,
-  fileId: string | null = null,
-  receiptId: string | null = null
-) {
-  if (s.outbox[id]?.status === "failed") {
-    s.outbox[id].status = "pending"
-    s.outbox[id].attemptedAt = null
-    s.outbox[id].error = null
+  fields: Pick<Assignment, "personId" | "kind" | "since" | "assignedBy" | "status"> & Partial<Assignment>
+): Assignment {
+  const a: Assignment = {
+    id: randomUUID(),
+    team: null,
+    teamRole: null,
+    capoScope: null,
+    capoOfReferenceId: null,
+    fields: {},
+    endedOn: null,
+    endReason: null,
+    change: "start",
+    refusal: null,
+    commandId: null,
+    ...fields,
   }
-  s.outbox[id] ??= {
-    id,
-    personId: p.id,
-    to,
-    subject,
-    text,
-    fileId,
-    receiptId,
-    status: "pending",
-    attemptedAt: null,
-    error: null,
-  }
+  s.assignments[a.id] = a
+  return a
 }
-export async function filePayload(u: UnitOfWork, id: string) {
-  const file = await u.getFile(id)
-  if (!file) fail("NOT_FOUND", "File not found")
-  return {
-    fileName: file.fileName,
-    contentType: file.contentType,
-    base64: Buffer.from(file.content).toString("base64"),
-  }
+
+export function queueMail(s: PeopleState, personId: string, id: string, to: string, subject: string, text: string) {
+  if (s.mail[id]?.status === "failed") Object.assign(s.mail[id], { status: "pending", attemptedAt: null, error: null })
+  s.mail[id] ??= { id, personId, to, subject, text, status: "pending", attemptedAt: null, error: null }
 }
-export const csvCell = (v: string) => `"${(/^[=+\-@\t\r]/.test(v) ? `'${v}` : v).replaceAll('"', '""')}"`
+
 export function validateFields(team: C.TeamId, fields: C.TeamFields) {
   for (const [key, value] of Object.entries(fields)) {
     const spec = C.TEAMS[team].fields.find((f) => f.key === key)
@@ -249,6 +157,81 @@ export function validateFields(team: C.TeamId, fields: C.TeamFields) {
       fail("BAD_REQUEST", "Invalid team option")
   }
 }
-export function newFileId() {
-  return randomUUID()
+
+/** The person's open invite: not revoked, accepted or superseded. */
+export function openInvite(s: PeopleState, personId: string): Invite | null {
+  return (
+    Object.values(s.invites)
+      .filter((i) => i.personId === personId && !i.revokedAt && !i.acceptedAt)
+      .sort((a, b) => (a.sentAt < b.sentAt ? 1 : -1))[0] ?? null
+  )
+}
+
+function account(s: PeopleState, p: Person): C.Account {
+  if (p.accountSub)
+    return {
+      status: "linked",
+      sub: p.accountSub,
+      method: p.linkMethod ?? "manual",
+      linkedOn: p.linkedAt?.slice(0, 10) ?? null,
+      linkedBy: p.linkedBy,
+    }
+  const invite = openInvite(s, p.id)
+  return invite
+    ? {
+        status: "invite",
+        email: invite.email,
+        sentOn: invite.sentAt.slice(0, 10),
+        expiresOn: invite.expiresAt.slice(0, 10),
+        sentBy: invite.sentBy,
+      }
+    : { status: "none" }
+}
+
+export function assignmentView(s: PeopleState, a: Assignment): C.Assignment {
+  const capo = a.capoOfReferenceId ? s.persons[a.capoOfReferenceId] : null
+  return {
+    id: a.id,
+    kind: a.kind,
+    team: a.team,
+    teamRole: a.teamRole,
+    capoScope: a.capoScope,
+    capoOfReference: capo ? ref(capo) : null,
+    fields: a.fields,
+    since: a.since,
+    endedOn: a.endedOn,
+    endReason: a.endReason,
+    assignedBy: a.assignedBy,
+    change: a.change,
+    status: a.status,
+    refusal: a.refusal,
+  }
+}
+
+export function row(s: PeopleState, p: Person, v: Viewer, scopedContacts = false): C.PersonRow {
+  const self = !!p.accountSub && p.accountSub === v.sub
+  const read = general(v, "people:read")
+  const contacts = self || read || scopedContacts
+  return C.personRowSchema.parse({
+    id: p.id,
+    firstName: p.firstName,
+    lastName: p.lastName,
+    contactEmail: contacts ? p.contactEmail : null,
+    phone: contacts ? p.phone : null,
+    telegramUsername: p.telegramUsername,
+    account: self || read ? account(s, p) : { status: "none" },
+    assignments: assignmentsOf(s, p.id).map((a) => assignmentView(s, a)),
+  })
+}
+export function record(s: PeopleState, p: Person, v: Viewer, activity: Activity[]): C.PersonRecord {
+  const read = general(v, "people:read")
+  return C.personRecordSchema.parse({
+    ...row(s, p, v),
+    notes: read ? p.notes : null,
+    activity: read ? activity.map(({ actor, text, at }) => ({ actor, text, at })) : [],
+    createdBy: p.createdBy,
+    createdAt: p.createdAt,
+    updatedBy: p.updatedBy,
+    updatedAt: p.updatedAt,
+  })
 }

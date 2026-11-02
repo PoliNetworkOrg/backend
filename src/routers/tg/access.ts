@@ -21,7 +21,7 @@ export default createTRPCRouter({
    * (RFC v3 §6.3, §10.2). The bot uses it for actor and target checks. Permissions are empty when
    * the snapshot is stale or the user has not linked Telegram.
    */
-  resolve: policy({ service: { scope: SCOPE.tgRead }, telegram: { scope: SCOPE.tgRead } }, { tokenOnly: true })
+  resolve: policy({ service: { scope: SCOPE.tgRead }, telegram: { scope: SCOPE.tgRead } })
     .input(z.object({ telegramIds: z.array(telegramId).min(1).max(100) }))
     .query(async ({ input, ctx }) => {
       const ids = [...new Set(input.telegramIds)]

@@ -41,7 +41,7 @@ export default createTRPCRouter({
       return res[0] || null
     }),
 
-  addGuide: policy(dashboard("web:content:write"), { tokenOnly: true })
+  addGuide: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
