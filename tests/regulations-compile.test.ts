@@ -145,7 +145,12 @@ it.skipIf(!hasXelatex)(
       env: process.env,
       timeout: 90_000,
     })
-    const result = JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}")
+    const result = JSON.parse(
+      stdout
+        .trim()
+        .split("\n")
+        .findLast((line) => line.startsWith('{"checked"')) ?? "{}"
+    )
     expect(result.checked).toHaveLength(5)
   },
   95_000
