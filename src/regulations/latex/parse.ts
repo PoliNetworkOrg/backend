@@ -67,6 +67,7 @@ const INLINE_ALLOWED = new Set([
   "textquotedblright",
   "S",
   "voce",
+  "texttt",
 ])
 
 type Frame =
