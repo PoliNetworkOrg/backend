@@ -266,11 +266,47 @@ try {
   assert.equal(emails.length + posts.length, 2)
   checked.push("a failed Telegram post resumes on retry; nothing is sent twice and every send is recorded")
 
+  // ---- A draft started before that emanation would undo it: blocked until the new version is merged in ----
+  const stale = await service.createDraft(dir, {
+    documentKey: "sample",
+    title: "Vecchia",
+    from: { kind: "version", id: versionId },
+    kind: "modifica",
+  })
+  const staleView = await service.getDraft(dir, stale.id)
+  assert.match(
+    staleView.can.transitions[0].blockedBy ?? "",
+    /versione superata \(import.*\): unisci prima la versione in vigore v2026\.11\.09/
+  )
+  await rejects(
+    service.transition(dir, { draftId: stale.id, to: "in_approvazione" }),
+    "PRECONDITION_FAILED",
+    /superata/
+  )
+  const latestVersion = (await service.listVersions(seg, "sample"))[0]
+  await service.applyMerge(dir, {
+    targetDraftId: stale.id,
+    source: { kind: "version", id: latestVersion.id },
+    resolutions: {},
+  })
+  assert.ok((await text(stale.id))["parti/primo.tex"].includes("i tre quarti"))
+  assert.equal((await service.getDraft(dir, stale.id)).can.transitions[0].blockedBy, null)
+  await service.deleteDraft(dir, stale.id)
+  checked.push("a draft based on a superseded version can't go to approval until the version in force is merged in")
+
   // ---- A rettifica on a delega, the same day as another emanation ----
   await service.createDelega(seg, { userId: "delegato", documentKey: "sample" })
   assert.deepEqual(emails.at(-1), { to: "direttivo@example.org", kind: "delega:created", attachments: 0 })
   const newest = (await service.listVersions(seg, "sample"))[0]
   assert.equal(newest.tag, "sample-v2026.11.09")
+  const oldR = await service.createDraft(delegato, {
+    documentKey: "sample",
+    title: "Vecchia rettifica",
+    from: { kind: "version", id: versionId },
+    kind: "rettifica",
+  })
+  assert.equal((await service.getDraft(delegato, oldR.id)).can.emanate, false)
+  await rejects(emanation.start(delegato, oldR.id), "PRECONDITION_FAILED", /superata/)
   const r = await service.createDraft(delegato, {
     documentKey: "sample",
     title: "Refusi",

@@ -124,7 +124,8 @@ export function createEmanationService(deps: {
 }) {
   const { db, config } = deps
   const now = deps.now ?? (() => new Date())
-  const { access, loadDraft, loadDocument, currentFiles, rectifyRight, emanationOf } = deps.regulations.internal
+  const { access, loadDraft, loadDocument, currentFiles, rectifyRight, emanationOf, supersededReason } =
+    deps.regulations.internal
   const busy = new Set<string>()
 
   async function deliberaOf(draftId: string) {
@@ -169,6 +170,9 @@ export function createEmanationService(deps: {
     const { draft } = await access(viewer, draftId)
     if (!deps.github) fail("PRECONDITION_FAILED", "La GitHub App del repository legal non è configurata.")
     if (await emanationOf(draft.id)) fail("CONFLICT", "L'emanazione è già stata avviata.")
+    // Emanating a draft based on a superseded version would undo what was published since.
+    const superseded = await supersededReason(draft)
+    if (superseded) fail("PRECONDITION_FAILED", superseded)
     const document = await loadDocument(draft.documentKey)
 
     if (draft.kind === "modifica") {

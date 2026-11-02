@@ -166,6 +166,37 @@ export function createRegulationsService(deps: RegulationsDeps) {
   }
 
   /** The published version a draft's lineage starts from. */
+  /**
+   * Why the draft can't go forward because a newer version was published after it started (it would undo it), or
+   * null. A draft is current when the latest version is the one its lineage starts from, or was merged into it (or
+   * into a draft it descends from).
+   */
+  async function supersededReason(draft: DraftRow): Promise<string | null> {
+    const [latest] = await db
+      .select()
+      .from(versions)
+      .where(eq(versions.documentKey, draft.documentKey))
+      .orderBy(desc(versions.publishedAt))
+      .limit(1)
+    if (!latest || latest.draftId === draft.id) return null
+    let cursor: DraftRow | undefined = draft
+    for (let depth = 0; cursor && depth < 50; depth++) {
+      if (cursor.baseVersionId === latest.id) return null
+      const [merged] = await db
+        .select({ id: merges.id })
+        .from(merges)
+        .where(
+          and(eq(merges.targetDraftId, cursor.id), eq(merges.sourceKind, "version"), eq(merges.sourceId, latest.id))
+        )
+        .limit(1)
+      if (merged) return null
+      if (!cursor.baseDraftId) break
+      ;[cursor] = await db.select().from(drafts).where(eq(drafts.id, cursor.baseDraftId))
+    }
+    const root = await rootVersion(draft)
+    return `La bozza parte da una versione superata (${root.label}): unisci prima la versione in vigore ${latest.label}.`
+  }
+
   async function rootVersion(draft: DraftRow) {
     let cursor: DraftRow = draft
     for (let depth = 0; depth < 50; depth++) {
@@ -288,6 +319,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const editable = isEditable(draft) && !emanation
     const other = await inApproval(draft.documentKey, draft.id)
     const versionId = emanation?.versionId ?? null
+    // Only drafts still on their way: an emanated one is the latest version itself.
+    const superseded = draft.state === "emanata" || emanation ? null : await supersededReason(draft)
 
     const transitions: C.Capabilities["transitions"] = []
     for (const rule of config.transitions) {
@@ -297,6 +330,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
       if (rule.requires.includes("parses") && draft.parses === false)
         blockedBy = "Il testo non è valido: correggi gli errori prima."
       if (rule.to === "in_approvazione" && other) blockedBy = `C'è già una bozza in approvazione: «${other.title}».`
+      if (rule.effect === "freeze" && superseded) blockedBy = superseded
       if (emanation) blockedBy = "L'emanazione è in corso."
       transitions.push({
         to: rule.to,
@@ -311,6 +345,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const emanate =
       !!emanateRule &&
       !emanation &&
+      !superseded &&
       allowed(viewer, emanateRule.who, rectify) &&
       (draft.kind !== "rettifica" || draft.parses !== false)
 
@@ -651,6 +686,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
     if (rule.effect === "freeze") {
       const other = await inApproval(draft.documentKey, draft.id)
       if (other) fail("CONFLICT", `C'è già una bozza in approvazione per questo documento: «${other.title}».`)
+      const superseded = await supersededReason(draft)
+      if (superseded) fail("PRECONDITION_FAILED", superseded)
       let files: C.Files
       let parses: boolean
       if (deps.collab) ({ files, parses } = await deps.collab.freeze(draft.id))
@@ -1180,7 +1217,17 @@ export function createRegulationsService(deps: RegulationsDeps) {
     createDelega,
     revokeDelega,
     // For the procedure modules (diff, emanation).
-    internal: { access, loadDraft, loadDocument, currentFiles, rootVersion, rectifyRight, draftView, emanationOf },
+    internal: {
+      access,
+      loadDraft,
+      loadDocument,
+      currentFiles,
+      rootVersion,
+      rectifyRight,
+      draftView,
+      emanationOf,
+      supersededReason,
+    },
   }
 }
 
