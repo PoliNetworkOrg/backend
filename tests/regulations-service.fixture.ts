@@ -13,10 +13,12 @@ import { createYjsPersistence } from "@/regulations/collab/persistence"
 import { decodeFiles, encodeFiles } from "@/regulations/collab/ydoc"
 import type { Files } from "@/regulations/contract"
 import { REGULATION_PERMISSIONS as P } from "@/regulations/contract"
+import { createDiffService } from "@/regulations/diff/service"
+import { fakeSummarizer } from "@/regulations/diff/summarizer"
 import { createDirectory } from "@/regulations/directory"
 import { parseDocument } from "@/regulations/latex"
 import { localLegalSource } from "@/regulations/legal-source"
-import { createRegulationsService, type Viewer } from "@/regulations/service"
+import { createRegulationsService, type RegulationsHooks, type Viewer } from "@/regulations/service"
 
 const connection = {
   hostname: "127.0.0.1",
@@ -123,7 +125,9 @@ try {
     refresh: async () => {},
   }
   let clock = new Date("2026-11-10T10:00:00Z")
+  const hooks: RegulationsHooks = {}
   const service = createRegulationsService({
+    hooks,
     db,
     directory,
     collab,
@@ -131,6 +135,10 @@ try {
     legal: localLegalSource(legal),
     now: () => clock,
   })
+  const diff = createDiffService({ db, regulations: service, summarizer: fakeSummarizer(), now: () => clock })
+  hooks.sentToApproval = async (draftId, by) => {
+    await diff.generate(draftId, by)
+  }
   const seg = await as("segretario")
   const pres = await as("presidente")
   const dir = await as("direttivo")
@@ -281,6 +289,29 @@ try {
   )
   assert.equal((await service.getDraft(dir, b.id)).can.transitions[0].blockedBy?.includes("Bozza A"), true)
   checked.push("sending to approval freezes the text, and only one draft per document can be in approval")
+
+  await diff.settled(a.id)
+  const generated = await diff.get(editor, a.id)
+  assert.equal(generated.status, "ready")
+  assert.equal(generated.provider, "fake")
+  assert.deepEqual(
+    generated.articles.filter((x) => x.kind === "modified").map((x) => x.id),
+    ["art003", "art004"]
+  )
+  assert.ok(generated.categories.length > 0)
+  assert.equal(
+    Buffer.from((await diff.pdf(editor, a.id)).base64, "base64")
+      .subarray(0, 4)
+      .toString(),
+    "%PDF"
+  )
+  assert.equal((await service.getDraft(dir, a.id)).diffStatus, "ready")
+  await rejects(diff.regenerate(dir, a.id), "FORBIDDEN")
+  const second = await diff.regenerate(pres, a.id)
+  assert.equal(second.generation, 2)
+  await diff.settled(a.id)
+  assert.equal((await diff.get(pres, a.id)).status, "ready")
+  checked.push("the LLM diff and the differences PDF are generated on approval, and managers can regenerate them")
 
   await rejects(
     service.transition(dir, {

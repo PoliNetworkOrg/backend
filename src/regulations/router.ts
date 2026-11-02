@@ -3,15 +3,21 @@ import { z } from "zod"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
+import type { DiffService } from "./diff/service"
 import type { Directory } from "./directory"
-import type { RegulationsService, Viewer } from "./service"
+import { fail, type RegulationsService, type Viewer } from "./service"
 
 /**
  * `regulations.*`: every procedure is open to dashboard users (scope `backend:admin`), and the service checks the
  * rest: `regulations:read|write|manage|rectify` from the IdP, per-draft assignments, and deleghe. People with only
  * an assignment use the dashboard too, so nothing here needs a permission at the policy level.
  */
-export function createRegulationsRouter(service: RegulationsService, directory: Directory) {
+export function createRegulationsRouter(
+  service: RegulationsService,
+  directory: Directory,
+  extras: { diff?: DiffService | null } = {}
+) {
+  const diff = () => extras.diff ?? fail("PRECONDITION_FAILED", "Le differenze non sono configurate.")
   const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
     if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
     const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
@@ -161,6 +167,20 @@ export function createRegulationsRouter(service: RegulationsService, directory: 
         .input(C.applyMergeInputSchema)
         .output(z.object({ snapshotId: z.string() }))
         .mutation(({ ctx, input }) => service.applyMerge(ctx.viewer, input)),
+    }),
+    diff: createTRPCRouter({
+      get: user
+        .input(draftRef)
+        .output(C.diffSchema)
+        .query(({ ctx, input }) => diff().get(ctx.viewer, input.draftId)),
+      regenerate: user
+        .input(draftRef)
+        .output(C.diffSchema)
+        .mutation(({ ctx, input }) => diff().regenerate(ctx.viewer, input.draftId)),
+      pdf: user
+        .input(draftRef)
+        .output(C.binaryFileSchema)
+        .query(({ ctx, input }) => diff().pdf(ctx.viewer, input.draftId)),
     }),
     deleghe: createTRPCRouter({
       list: user.output(C.delegaSchema.array()).query(({ ctx }) => service.listDeleghe(ctx.viewer)),
