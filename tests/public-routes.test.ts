@@ -97,8 +97,15 @@ describe("public routes", () => {
     // Inside the cluster, other routes are untouched.
     expect(await (await app.request("/api/trpc/x")).text()).toBe("internal route")
     expect(events).toEqual([])
-    // Through the ingress, the declared route works.
+    // Through the ingress, the declared route works. Routing is on the pathname: a query never reaches another route.
     expect((await app.request("/public/webhooks/github", fromIngress)).status).toBe(202)
+    const viaQuery = delivery({ pull_request: { number: 2 } })
+    const res = await app.request("/public/webhooks/github?/../../api/trpc/regulations.me.get", {
+      ...viaQuery,
+      headers: { ...viaQuery.headers, [PUBLIC_INGRESS_HEADER]: "public" },
+    })
+    expect(res.status).toBe(202)
+    expect(await res.text()).not.toContain("internal route")
   })
 
   it("accepts a signed GitHub delivery once, and ignores a replay", async () => {
