@@ -61,6 +61,8 @@ export type EmanationNotifier = {
   telegram(payload: {
     chatId: number
     topicId: number | null
+    /** The notification's id: the same on every retry, so the bot can post once. */
+    idempotencyKey: string
     text: string
     regulation: {
       documentTitle: string
@@ -71,7 +73,7 @@ export type EmanationNotifier = {
       tag: string
       releaseUrl: string
     }
-    files: { filename: string; contentType: string; data: Uint8Array }[]
+    files: { filename: string; contentType: string; base64: string }[]
   }): Promise<{ messageIds: number[] }>
 }
 
@@ -556,9 +558,10 @@ export function createEmanationService(deps: {
         recipients: [`${telegram.chatId}${telegram.topicId ? `/${telegram.topicId}` : ""}`],
         draftId: draft.id,
       },
-      async () => {
+      async (notificationId) => {
         ;({ messageIds } = await deps.notifier.telegram({
           chatId: telegram.chatId,
+          idempotencyKey: notificationId,
           topicId: telegram.topicId,
           text,
           regulation: {
@@ -572,10 +575,22 @@ export function createEmanationService(deps: {
           },
           files: [
             ...(official
-              ? [{ filename: document.outputs.pdf, contentType: "application/pdf", data: official.content }]
+              ? [
+                  {
+                    filename: document.outputs.pdf,
+                    contentType: "application/pdf",
+                    base64: Buffer.from(official.content).toString("base64"),
+                  },
+                ]
               : []),
             ...(differences
-              ? [{ filename: `differenze-${tag}.pdf`, contentType: "application/pdf", data: differences.content }]
+              ? [
+                  {
+                    filename: `differenze-${tag}.pdf`,
+                    contentType: "application/pdf",
+                    base64: Buffer.from(differences.content).toString("base64"),
+                  },
+                ]
               : []),
           ],
         }))
@@ -718,14 +733,21 @@ export function createEmanationService(deps: {
   /** GitHub webhook: a PR merged, a check finished, a release published. */
   async function onWebhook(
     event: string,
-    payload: { pull_request?: { number: number }; release?: { tag_name: string } }
+    payload: {
+      pull_request?: { number: number }
+      check_suite?: { pull_requests?: { number: number }[] }
+      check_run?: { pull_requests?: { number: number }[] }
+      release?: { tag_name: string }
+    }
   ) {
     let rows: { draftId: string }[] = []
-    if (payload.pull_request && (event === "pull_request" || event === "check_suite"))
-      rows = await db
-        .select({ draftId: emanations.draftId })
-        .from(emanations)
-        .where(eq(emanations.prNumber, payload.pull_request.number))
+    const prs = [
+      payload.pull_request?.number,
+      ...(payload.check_suite?.pull_requests ?? []).map((p) => p.number),
+      ...(payload.check_run?.pull_requests ?? []).map((p) => p.number),
+    ].filter((n): n is number => typeof n === "number")
+    if (prs.length && ["pull_request", "check_suite", "check_run"].includes(event))
+      rows = await db.select({ draftId: emanations.draftId }).from(emanations).where(inArray(emanations.prNumber, prs))
     else if (event === "release" && payload.release)
       rows = await db
         .select({ draftId: emanations.draftId })

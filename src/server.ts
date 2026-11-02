@@ -12,9 +12,8 @@ import { agentRoutes } from "./esign/agent-routes"
 import { authenticateRequest, idp, startIdp, stopIdp } from "./idp"
 import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
+import { publicRoutes } from "./public"
 import { redis } from "./redis"
-import { regulationsEmanation } from "./regulations"
-import { githubWebhook } from "./regulations/emanation/webhook"
 import { appRouter } from "./routers"
 import { limitRequestBody, withRequestBodyLimit } from "./serve-options"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
@@ -25,6 +24,8 @@ export const WSS = new WebSocketServer({
 })
 registerTelegram(WSS)
 const app = new Hono()
+// The only routes reachable from outside the cluster (`/public/...`, see src/public): checked before everything else.
+app.use("*", publicRoutes.guard)
 
 const server = Bun.serve({
   port: env.PORT,
@@ -60,11 +61,6 @@ app.route("/esign/agent", agentRoutes(esign))
 
 // Access-changed events from the IdP (RFC v3 §5.6). Authenticated by the event's own signature.
 app.post("/internal/events", (c) => (idp?.events ? idp.events(c.req.raw) : c.body(null, 404)))
-
-// GitHub App webhook for the legal repository (regulations emanation). Authenticated by its HMAC signature.
-app.post("/github/webhook", (c) =>
-  githubWebhook(c.req.raw, env.REGULATIONS_GITHUB_WEBHOOK_SECRET, regulationsEmanation)
-)
 
 app.all(`${WS_PATH}/`, async (c) => {
   const req = await limitRequestBody(c.req.raw, wssEngine.opts.maxHttpBufferSize)

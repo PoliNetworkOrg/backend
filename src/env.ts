@@ -127,7 +127,10 @@ export const env = createEnv({
       .min(1)
       .optional()
       .transform((v) => v?.replace(/\\n/g, "\n")),
+    /** The App's webhook secret, for `POST /public/webhooks/github`. Without it the route answers 404. */
     REGULATIONS_GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
+    /** Seconds between reconciliations of emanations waiting on GitHub, for webhook deliveries that got lost. */
+    REGULATIONS_RECONCILE_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
     REGULATIONS_GITHUB_REPO: z
       .string()
       .regex(/^[\w.-]+\/[\w.-]+$/)
