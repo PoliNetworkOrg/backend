@@ -349,9 +349,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
         rectify,
         regenerateDiff:
           viewer.can(P.manage) &&
-          (diffStatus === "ready" || diffStatus === "failed") &&
+          (diffStatus === "ready" ||
+            diffStatus === "failed" ||
+            (diffStatus === "none" && draft.state === "approvata")) &&
           !draft.notifiedAt &&
-          !emanation?.steps.email?.state.startsWith("done"),
+          !emanation,
         delete:
           (viewer.can(P.write) || (draft.kind === "rettifica" && draft.createdBy.id === viewer.sub)) &&
           draft.state === "bozza" &&

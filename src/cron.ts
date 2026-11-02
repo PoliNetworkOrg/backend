@@ -24,6 +24,16 @@ export function cron() {
     }
   })
 
+  // Regulations: emanations waiting on GitHub (merge, release) resume even without the webhook.
+  new Cron("*/30 * * * * *", { protect: true }, async () => {
+    try {
+      const { regulationsEmanation } = await import("./regulations")
+      await regulationsEmanation?.tick()
+    } catch (err) {
+      logger.error(err, "[CRON] regulations emanation")
+    }
+  })
+
   logger.info("[CRON] scheduled")
   new Cron("0 * * * * *", async () => {
     try {
