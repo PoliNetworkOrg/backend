@@ -78,6 +78,7 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.faq", id: res.id, label: res.titleIt }, after: res })
       return res
     }),
 
@@ -101,6 +102,7 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.faqCategory", id: res.id, label: res.titleIt }, after: res })
       return res
     }),
 
@@ -118,6 +120,7 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, descriptionIt, descriptionEn, categoryId } = input
 
+      const [before] = await DB.select().from(FAQS).where(eq(FAQS.id, id)).limit(1)
       const [res] = await DB.update(FAQS)
         .set({
           titleIt,
@@ -130,6 +133,7 @@ export default createTRPCRouter({
         .where(eq(FAQS.id, id))
         .returning()
 
+      ctx.audit.set({ target: { type: "web.faq", id, label: res?.titleIt ?? before?.titleIt }, before, after: res })
       if (!res) return { error: "NOT_FOUND" }
       return res
     }),
@@ -146,6 +150,7 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, icon } = input
 
+      const [before] = await DB.select().from(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).limit(1)
       const [res] = await DB.update(FAQ_CATEGORIES)
         .set({
           titleIt,
@@ -156,6 +161,11 @@ export default createTRPCRouter({
         .where(eq(FAQ_CATEGORIES.id, id))
         .returning()
 
+      ctx.audit.set({
+        target: { type: "web.faqCategory", id, label: res?.titleIt ?? before?.titleIt },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return res
     }),
@@ -166,7 +176,7 @@ export default createTRPCRouter({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       return DB.transaction(async (tx) => {
         // Match selectFaq's lock order so a FAQ cannot become selected between this check and deletion.
@@ -178,6 +188,7 @@ export default createTRPCRouter({
           .limit(1)
         if (featured) return { error: "FEATURED_FAQ" }
         const deleted = await tx.delete(FAQS).where(eq(FAQS.id, id)).returning()
+        ctx.audit.set({ target: { type: "web.faq", id, label: deleted[0]?.titleIt }, before: deleted[0] })
 
         if (deleted.length === 0) return { error: "NOT_FOUND" }
         return { error: null }
@@ -190,7 +201,7 @@ export default createTRPCRouter({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       return DB.transaction(async (tx) => {
         await tx.execute(sql`LOCK TABLE ${FEATURED} IN SHARE ROW EXCLUSIVE MODE`)
@@ -202,6 +213,7 @@ export default createTRPCRouter({
           .limit(1)
         if (featured) return { error: "FEATURED_FAQ" }
         const deleted = await tx.delete(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).returning()
+        ctx.audit.set({ target: { type: "web.faqCategory", id, label: deleted[0]?.titleIt }, before: deleted[0] })
 
         if (deleted.length === 0) return { error: "NOT_FOUND" }
         return { error: null }

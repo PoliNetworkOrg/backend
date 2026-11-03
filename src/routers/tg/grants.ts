@@ -76,6 +76,11 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
+      ctx.audit.set({
+        target: { type: "tg.user", id: input.userId },
+        after: { validSince: input.since, validUntil: input.until },
+        reason: input.reason,
+      })
       if (actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
 
       try {
@@ -139,6 +144,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId } })
       if (actor.kind === "service") throw new TRPCError({ code: "FORBIDDEN" })
 
       try {
@@ -153,8 +159,9 @@ export default createTRPCRouter({
           .where(
             and(eq(s.grants.telegramUserId, input.userId), gt(s.grants.validUntil, now), isNull(s.grants.interruptedAt))
           )
-          .returning({ id: s.grants.id })
+          .returning()
 
+        ctx.audit.set({ after: interrupted })
         if (interrupted.length === 0)
           return {
             success: false,

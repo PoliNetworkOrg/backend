@@ -68,6 +68,7 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.project", id: res.id, label: res.title }, after: res })
       return res
     }),
 
@@ -88,6 +89,7 @@ export default createTRPCRouter({
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
 
+      const [before] = await DB.select().from(PROJECTS).where(eq(PROJECTS.id, input.id)).limit(1)
       const [res] = await DB.update(PROJECTS)
         .set({
           title,
@@ -101,6 +103,11 @@ export default createTRPCRouter({
         .where(eq(PROJECTS.id, input.id))
         .returning()
 
+      ctx.audit.set({
+        target: { type: "web.project", id: input.id, label: res?.title ?? before?.title },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return res
     }),
@@ -114,13 +121,21 @@ export default createTRPCRouter({
           .refine((projectIds) => new Set(projectIds).size === projectIds.length),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const order = () =>
+        DB.select({ id: PROJECTS.id, title: PROJECTS.title }).from(PROJECTS).orderBy(asc(PROJECTS.order))
+      const before = await order()
       await DB.transaction(async (tx) => {
         await Promise.all(
           input.projectIds.map((id, index) => tx.update(PROJECTS).set({ order: index }).where(eq(PROJECTS.id, id)))
         )
       })
 
+      ctx.audit.set({
+        target: { type: "web.projects", id: "order", label: "Projects order" },
+        before,
+        after: await order(),
+      })
       return { error: null }
     }),
 
@@ -130,9 +145,10 @@ export default createTRPCRouter({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       const deleted = await DB.delete(PROJECTS).where(eq(PROJECTS.id, id)).returning()
+      ctx.audit.set({ target: { type: "web.project", id, label: deleted[0]?.title }, before: deleted[0] })
 
       if (deleted.length === 0) return { error: "NOT_FOUND" }
       return { error: null }

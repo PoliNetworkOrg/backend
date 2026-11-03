@@ -52,6 +52,7 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "groups.label", id: result[0].id, label }, after: result[0] })
       return result
     }),
 
@@ -61,7 +62,7 @@ export default createTRPCRouter({
         label,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { label } = input
 
       const labelRow = await DB.select({ id: GROUP_LABELS.id })
@@ -83,6 +84,7 @@ export default createTRPCRouter({
       }
 
       const result = await DB.delete(GROUP_LABELS).where(eq(GROUP_LABELS.label, label)).returning()
+      ctx.audit.set({ target: { type: "groups.label", id: labelId, label }, before: result[0] })
       return result
     }),
 
@@ -102,6 +104,7 @@ export default createTRPCRouter({
       const { label, newLabel, description, color } = input
       const author = authorOf(ctx.actor)
 
+      const [before] = await DB.select().from(GROUP_LABELS).where(eq(GROUP_LABELS.label, label)).limit(1)
       const result = await DB.update(GROUP_LABELS)
         .set({
           label: newLabel,
@@ -114,6 +117,11 @@ export default createTRPCRouter({
         .where(eq(GROUP_LABELS.label, label))
         .returning()
 
+      ctx.audit.set({
+        target: { type: "groups.label", id: before?.id ?? label, label: newLabel ?? label },
+        before,
+        after: result[0],
+      })
       return result
     }),
 
@@ -125,8 +133,9 @@ export default createTRPCRouter({
         label,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { groupId, type, label } = input
+      ctx.audit.set({ target: { type: `${type}.group`, id: groupId }, after: { label } })
 
       await assertGroupExists(groupId, type)
       const labelIdResult = await DB.select({ id: GROUP_LABELS.id })
@@ -162,8 +171,9 @@ export default createTRPCRouter({
         label,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { groupId, type, label } = input
+      ctx.audit.set({ target: { type: `${type}.group`, id: groupId }, before: { label } })
 
       await assertGroupExists(groupId, type)
 
