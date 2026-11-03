@@ -401,7 +401,7 @@ describe("Pending assignments follow Auth's rules", () => {
 const tokenOf = (h: ReturnType<typeof harness>) =>
   Object.values(h.state().mail)
     .at(-1)
-    ?.text.match(/peopleInvite=([A-Za-z0-9_-]{43})/)?.[1] ?? ""
+    ?.text.match(/invite\?token=([A-Za-z0-9_-]{43})/)?.[1] ?? ""
 
 describe("Linking by invite", () => {
   it("links whichever account accepts, acting as each assigner, without People permissions or a matching email", async () => {
@@ -787,7 +787,7 @@ describe("People mail outbox", () => {
       id: mail.id,
       to: "luca@example.org",
       subject: mail.subject,
-      text: expect.stringContaining("https://admin.example.org/dashboard/account/me?peopleInvite="),
+      text: expect.stringContaining("https://admin.example.org/people/invite?token="),
     })
     expect(h.state().mail[mail.id]).toMatchObject({ status: "sent", error: null })
     await h.service.deliverPending()
