@@ -33,9 +33,7 @@ export default createTRPCRouter({
         isGranted: z.boolean(),
         grant: z.nullable(
           z.object({
-            /** Telegram ID of a legacy grantor; null for grants made through the IdP. */
-            grantedBy: z.number().nullable(),
-            grantedBySub: z.string().nullable(),
+            grantedBySub: z.string(),
             validSince: z.date(),
             validUntil: z.date(),
           })
@@ -46,15 +44,15 @@ export default createTRPCRouter({
       const grant = (await activeGrantByUser([input.userId])).get(input.userId)
       if (!grant) return { isGranted: false, grant: null }
 
-      const { grantedBy, grantedBySub, validSince, validUntil } = grant
-      return { isGranted: true, grant: { grantedBy, grantedBySub, validSince, validUntil } }
+      const { grantedBySub, validSince, validUntil } = grant
+      return { isGranted: true, grant: { grantedBySub, validSince, validUntil } }
     }),
 
   /**
    * Escalating write: dashboard users only, never the bot acting for someone (RFC v3 §8.1). The
    * grantor is the token's user.
    */
-  create: policy(dashboard("tg:grants:manage"), { tokenOnly: true })
+  create: policy(dashboard("tg:grants:manage"))
     .input(
       z.object({
         userId: z.number(),
@@ -86,7 +84,7 @@ export default createTRPCRouter({
         if ((await activeGrantByUser([input.userId])).has(input.userId))
           return { success: false, error: "ALREADY_EXISTING" }
 
-        await DB.insert(s.grantsV2).values({
+        await DB.insert(s.grants).values({
           telegramUserId: input.userId,
           validSince: input.since,
           validUntil: input.until,
@@ -99,7 +97,6 @@ export default createTRPCRouter({
           const author = await describeActor(actor)
           await WSS.logGrantCreate({
             userId: input.userId,
-            adminId: author.telegramId ? Number(author.telegramId) : null,
             actor: author,
             validSince: input.since,
             validUntil: input.until,
@@ -118,13 +115,10 @@ export default createTRPCRouter({
    * De-escalating write: the bot's 🛑 button acting for a Telegram user, or the dashboard. Who
    * interrupted is the token's actor.
    */
-  interrupt: policy(
-    {
-      telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
-      ...dashboard("tg:grants:manage"),
-    },
-    { tokenOnly: true }
-  )
+  interrupt: policy({
+    telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
+    ...dashboard("tg:grants:manage"),
+  })
     .input(
       z.object({
         userId: z.number(),
@@ -149,40 +143,19 @@ export default createTRPCRouter({
 
       try {
         const now = new Date()
-        // Ends every unexpired grant of the user, in both tables.
-        const [legacy, current] = await DB.transaction(async (tx) =>
-          Promise.all([
-            tx
-              .update(s.grants)
-              .set({ interruptedAt: now })
-              .where(
-                and(
-                  eq(s.grants.userId, input.userId),
-                  gt(s.grants.validUntil, now),
-                  isNull(s.grants.interruptedBy),
-                  isNull(s.grants.interruptedAt)
-                )
-              )
-              .returning({ id: s.grants.id }),
-            tx
-              .update(s.grantsV2)
-              .set({
-                interruptedAt: now,
-                interruptedBySub: actor.sub,
-                interruptedByTgId: actor.telegramId === null ? null : Number(actor.telegramId),
-              })
-              .where(
-                and(
-                  eq(s.grantsV2.telegramUserId, input.userId),
-                  gt(s.grantsV2.validUntil, now),
-                  isNull(s.grantsV2.interruptedAt)
-                )
-              )
-              .returning({ id: s.grantsV2.id }),
-          ])
-        )
+        // Ends every unexpired grant of the user.
+        const interrupted = await DB.update(s.grants)
+          .set({
+            interruptedAt: now,
+            interruptedBySub: actor.sub,
+            interruptedByTgId: actor.telegramId === null ? null : Number(actor.telegramId),
+          })
+          .where(
+            and(eq(s.grants.telegramUserId, input.userId), gt(s.grants.validUntil, now), isNull(s.grants.interruptedAt))
+          )
+          .returning({ id: s.grants.id })
 
-        if (legacy.length + current.length === 0)
+        if (interrupted.length === 0)
           return {
             success: false,
             error: "NOT_FOUND",
@@ -192,7 +165,6 @@ export default createTRPCRouter({
           const author = await describeActor(actor)
           await WSS.logGrantInterrupt({
             userId: input.userId,
-            adminId: author.telegramId ? Number(author.telegramId) : null,
             actor: author,
           })
         }

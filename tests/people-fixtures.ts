@@ -1,189 +1,102 @@
-import { randomUUID } from "node:crypto"
 import { vi } from "vitest"
-import { transferType } from "@/people/files"
-import { newPerson } from "@/people/model"
+import { log, newPerson } from "@/people/model"
 import { createPeopleService, type PeopleOptions } from "@/people/service"
-import {
-  type Account,
-  emptyState,
-  type PeopleConfig,
-  type PeopleState,
-  type StoredFile,
-  type Viewer,
-} from "@/people/types"
+import { type Account, type Activity, emptyState, type UnitOfWork, type Viewer } from "@/people/types"
 
-export const config: PeopleConfig = {
-  officers: { president: "P-0001", vicePresident: "P-0002" },
-  feeCents: 1000,
-  beneficiary: "PoliNetwork APS",
-  iban: "IT60X0542811101000000123456",
-  legalName: "PoliNetwork APS",
-  address: "Via di prova 1, Milano",
-  taxCode: "12345678901",
-  dashboardUrl: "https://admin.example.org",
-}
+type Merge = UnitOfWork["merges"][number]
+
+import { fakeAuth } from "./people-auth"
+
+export { BOUND, fakeAuth } from "./people-auth"
+
 export const profile = (firstName = "Mario", lastName = "Rossi") => ({
   firstName,
   lastName,
-  personalEmail: `${firstName.toLowerCase()}@example.org`,
+  contactEmail: `${firstName.toLowerCase()}@example.org`,
   phone: "+3902000000",
   telegramUsername: `${firstName.toLowerCase()}_test`,
-  course: "Ingegneria Informatica",
-  year: "2nd year" as const,
-  campus: "Leonardo" as const,
-  admin: true,
 })
-export const viewer = (sub: string, permissions: string[], telegramId: string | null = null): Viewer => ({
+export const viewer = (sub: string, permissions: string[], roles: string[] = []): Viewer => ({
   sub,
-  telegramId,
+  telegramId: null,
   can: (key) => permissions.includes(key),
+  holdsRole: (key) => roles.includes(key),
 })
 export const permissions = [
   "admin:access",
   "people:self",
   "people:read",
   "people:write",
-  "people:members:read",
-  "people:members:write",
-  "people:fees:write",
-  "people:receipts:sign",
   "people:appoint",
-  "esign:sign",
+  "people:link",
 ]
+/** HR with every People permission, and nothing else Auth knows of. */
 export const master = viewer("president", permissions)
-export const vice = viewer("vice", permissions)
 
 /** A rollback-capable serialized unit of work; production concurrency is tested separately against PostgreSQL. */
 export function harness(overrides: Partial<PeopleOptions> = {}) {
   let state = emptyState()
-  let files = new Map<string, StoredFile>()
+  let history: Activity[] = []
   let tail: Promise<unknown> = Promise.resolve()
   let clock = new Date("2026-10-18T10:00:00Z")
-  const requests = new Map<string, { id: string; status: string }>()
   const accounts: Account[] = [
-    { sub: "president", name: "Mario Rossi", email: "mario@example.org", emailVerified: true, telegramId: "101" },
-    { sub: "vice", name: "Anna Bianchi", email: "anna@example.org", emailVerified: true, telegramId: "102" },
-    { sub: "member", name: "Luca Verdi", email: "luca@example.org", emailVerified: true, telegramId: "103" },
+    { sub: "president", name: "Mario Rossi", email: "mario@example.org" },
+    { sub: "vice", name: "Anna Bianchi", email: "anna@example.org" },
+    { sub: "member", name: "Luca Verdi", email: "luca@example.org" },
   ]
   const store: PeopleOptions["store"] = {
     transaction(fn) {
       const run = tail.then(async () => {
-        const draft = structuredClone(state)
-        const nextFiles = structuredClone(files)
-        const nextRequests = structuredClone(requests)
-        const result = await fn({
-          state: draft,
-          getFile: async (id) => nextFiles.get(id) ?? null,
-          putFile: async (file) => {
-            nextFiles.set(file.id, file)
-          },
-          deleteFile: async (id) => {
-            nextFiles.delete(id)
-          },
-          async prepareRequest(receipt) {
-            const prior = receipt.requestId ? nextRequests.get(receipt.requestId) : null
-            if (!prior || prior.status !== "in_progress") {
-              receipt.requestId = randomUUID()
-              nextRequests.set(receipt.requestId, { id: receipt.requestId, status: "in_progress" })
-            }
-            return {
-              requestId: receipt.requestId as string,
-              title: `Receipt ${receipt.number} · ${receipt.person.name}`,
-            }
-          },
-          async invalidateRequest(receipt) {
-            const r = receipt.requestId ? nextRequests.get(receipt.requestId) : null
-            if (r) r.status = "cancelled"
-          },
+        const draft = { state: structuredClone(state), activity: [] as Activity[], merges: [] as Merge[] }
+        const result = await fn(draft)
+        state = draft.state
+        history = [...history, ...draft.activity].map((a) => {
+          const merge = draft.merges.find((m) => m.from === a.personId)
+          return merge ? { ...a, personId: merge.into } : a
         })
-        state = draft
-        files = nextFiles
-        requests.clear()
-        for (const [id, request] of nextRequests) requests.set(id, request)
         return result
       })
       tail = run.catch(() => {})
       return run
     },
+    async activity(personId) {
+      return history.filter((a) => a.personId === personId).reverse()
+    },
   }
+  const auth = fakeAuth()
   const sendMail = vi.fn<PeopleOptions["sendMail"]>().mockResolvedValue(undefined)
-  const provisionMember = vi.fn<PeopleOptions["provisionMember"]>().mockImplementation(async (p) => ({
-    id: `azure-${p.id}`,
-    email: `${p.profile.firstName.toLowerCase()}@polinetwork.org`,
-  }))
-  const setMemberNumber = vi.fn<PeopleOptions["setMemberNumber"]>().mockResolvedValue(undefined)
   const service = createPeopleService({
     store,
-    config,
+    dashboardUrl: "https://admin.example.org",
     now: () => clock,
     directory: async () => accounts,
-    telegramGroups: async () => [],
-    telegramUsers: async () => [],
-    provisionMember,
-    setMemberNumber,
+    peopleRoles: auth.auth,
     sendMail,
-    verifySigned: async () => {
-      throw new Error("No signing fixture")
-    },
-    inspectSigned: async () => {
-      throw new Error("No signing fixture")
-    },
-    completeSigned: async () => {
-      throw new Error("No signing fixture")
-    },
-    transferType,
     ...overrides,
   })
-  async function seed() {
-    await store.transaction(async ({ state: s }) => {
-      const people = [
-        newPerson(s, profile(), "2026-10-01"),
-        newPerson(s, profile("Anna", "Bianchi"), "2026-10-01"),
-        newPerson(s, profile("Luca", "Verdi"), "2026-10-01"),
-      ]
+  /** P-0001 Mario (president), P-0002 Anna (vice), P-0003 Luca (member), all linked. */
+  async function seed(linked = true) {
+    await store.transaction(async (u) => {
+      const people = [profile(), profile("Anna", "Bianchi"), profile("Luca", "Verdi")].map((p) =>
+        newPerson(u.state, p, "seed", clock)
+      )
       for (const [i, p] of people.entries()) {
-        p.accountSub = accounts[i].sub
-        p.profile.telegramId = accounts[i].telegramId
-        p.account = {
-          status: "linked",
-          email: accounts[i].email ?? "",
-          via: "IdP",
-          linkedOn: "2026-10-01",
-          how: "test",
-        }
+        if (linked) p.accountSub = accounts[i].sub
+        log(u, p.id, "seed", "Seeded", clock)
       }
     })
   }
   return {
     service,
     store,
+    auth,
     state: () => structuredClone(state),
-    files: () => structuredClone(files),
-    requests,
+    history: () => [...history],
     accounts,
     sendMail,
-    provisionMember,
-    setMemberNumber,
     seed,
     advance: (ms: number) => {
       clock = new Date(clock.getTime() + ms)
     },
-    setDate: (d: string) => {
-      clock = new Date(d)
-    },
   }
-}
-
-export async function admit(h: ReturnType<typeof harness>, id = "P-0003", number = "0003") {
-  await h.service.createMember(master, { personId: id, number, admittedOn: "2026-10-01", fee: "due" })
-}
-export async function issue(h: ReturnType<typeof harness>, id = "P-0003") {
-  await h.service.markFeePaid(master, {
-    personId: id,
-    amountCents: 1000,
-    paidOn: "2026-10-17",
-    method: "cash",
-    note: "At the event",
-  })
-  return Object.values(h.state().receipts).at(-1) as PeopleState["receipts"][string]
 }

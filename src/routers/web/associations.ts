@@ -75,7 +75,7 @@ export default createTRPCRouter({
       return associations.map(formatAssociation)
     }),
 
-  addAssociation: policy(dashboard("web:content:write"), { tokenOnly: true })
+  addAssociation: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
@@ -102,7 +102,7 @@ export default createTRPCRouter({
       return formatAssociation(res)
     }),
 
-  editAssociation: policy(dashboard("web:content:write"), { tokenOnly: true })
+  editAssociation: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
@@ -135,7 +135,7 @@ export default createTRPCRouter({
       return formatAssociation(res)
     }),
 
-  editAssociationLinks: policy(dashboard("web:content:write"), { tokenOnly: true })
+  editAssociationLinks: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number(),

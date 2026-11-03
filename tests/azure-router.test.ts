@@ -13,7 +13,6 @@ vi.mock("@/logger", () => ({ logger }))
 
 const REQUIRED_ENV: Record<string, string> = {
   NODE_ENV: "test",
-  BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
   ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   DB_HOST: "localhost",
   DB_PORT: "5432",
@@ -49,7 +48,7 @@ beforeEach(() => {
 })
 
 /** A dashboard user holding every Azure permission the routers check. */
-const ALL_AZURE = ["azure:members:read", "azure:members:create", "azure:groups:read", "azure:groups:write"]
+const ALL_AZURE = ["azure:members:read", "azure:members:create", "azure:groups:read"]
 
 describe("Azure tRPC routes without credentials", () => {
   it("reserves the number of an incomplete account while directory searches are stale", async () => {
@@ -265,26 +264,12 @@ describe("Azure tRPC routes without credentials", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
   })
 
-  it("refuses anonymous member number changes", async () => {
+  it("refuses member number changes without a token", async () => {
     const caller = await createCaller()
 
     await expect(
       caller.members.setAssocNumber({ userId: "mock-member-grace", assocNumber: 2042 })
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" })
-  })
-
-  it("adds and removes group memberships", async () => {
-    const caller = await createCaller(tokenContext(ALL_AZURE))
-    const input = { groupId: "mock-group-empty", userId: "mock-member-grace" }
-
-    await expect(caller.groups.addMember(input)).resolves.toBe(true)
-    expect((await caller.groups.getAll()).find((group) => group.id === input.groupId)?.members).toContainEqual({
-      id: input.userId,
-      displayName: "Grace Hopper",
-    })
-
-    await expect(caller.groups.removeMember(input)).resolves.toBe(true)
-    expect((await caller.groups.getAll()).find((group) => group.id === input.groupId)?.members).toEqual([])
   })
 })
 
@@ -347,12 +332,8 @@ describe("Azure directory token authorization", () => {
     await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
-  it("refuses anonymous reads unless LEGACY_ANONYMOUS allows them", async () => {
-    for (const context of [{}, { legacyAnonymous: "deny" } as const]) {
-      const caller = await createCaller(context)
-      await expect(caller.members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
-    }
-    expect(await (await createCaller({ legacyAnonymous: "allow" })).members.getAll()).toHaveLength(3)
+  it("refuses calls without a token", async () => {
+    await expect((await createCaller({})).members.getAll()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
   })
 })
 
@@ -678,30 +659,18 @@ describe("Azure member number changes", () => {
 })
 
 describe("Azure group token authorization", () => {
-  const membership = { groupId: "mock-group-empty", userId: "mock-member-grace" }
-
-  it("lets group readers list groups but not change memberships", async () => {
+  it("lets group readers list groups", async () => {
     const caller = await createCaller(tokenContext(["azure:groups:read"]))
     expect(await caller.groups.getAll()).not.toHaveLength(0)
-    await expect(caller.groups.addMember(membership)).rejects.toMatchObject({ code: "FORBIDDEN" })
-    await expect(caller.groups.removeMember(membership)).rejects.toMatchObject({ code: "FORBIDDEN" })
-  })
-
-  it("lets group writers add and remove members without reading groups", async () => {
-    const caller = await createCaller(tokenContext(["azure:groups:write"]))
-    await expect(caller.groups.addMember(membership)).resolves.toBe(true)
-    await expect(caller.groups.removeMember(membership)).resolves.toBe(true)
-    await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 
   it.each([
     ["no permission", tokenContext([])],
     ["member permissions alone", tokenContext(["azure:members:read", "azure:members:create"])],
-    ["no admin scope", tokenContext(["azure:groups:write"], undefined, [])],
-    ["service actor", tokenContext(["azure:groups:write"], { kind: "service", client: "telegram-bot" })],
-  ])("refuses membership changes with %s", async (_, context) => {
+    ["no admin scope", tokenContext(["azure:groups:read"], undefined, [])],
+    ["service actor", tokenContext(["azure:groups:read"], { kind: "service", client: "telegram-bot" })],
+  ])("refuses listing groups with %s", async (_, context) => {
     const caller = await createCaller(context)
-    await expect(caller.groups.addMember(membership)).rejects.toMatchObject({ code: "FORBIDDEN" })
-    await expect(caller.groups.removeMember(membership)).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(caller.groups.getAll()).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
 })

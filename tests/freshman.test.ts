@@ -11,7 +11,6 @@ import type { Context } from "@/trpc"
 vi.hoisted(() => {
   Object.assign(process.env, {
     NODE_ENV: "test",
-    BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
     ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     DB_HOST: "localhost",
     DB_USER: "postgres",
@@ -124,11 +123,17 @@ describe("Freshman authorization", () => {
     expect(db.transaction).not.toHaveBeenCalled()
   })
 
-  it("takes authorship from the token, ignoring a forged legacy author", async () => {
-    await freshman
-      .createCaller(context(editor, ["web:content:write"]))
-      .updateCard({ id: "featured-1", ...fields, modifiedBy: 999 })
-    expect(db.set).toHaveBeenCalledWith({ ...fields, modifiedBy: null, modifiedBySub: "editor" })
+  it("takes authorship from the token and clears a legacy modifier", async () => {
+    await freshman.createCaller(context(editor, ["web:content:write"])).updateCard({ id: "featured-1", ...fields })
+    expect(db.set).toHaveBeenCalledWith({ ...fields, legacyModifiedByTgId: null, modifiedBySub: "editor" })
+  })
+
+  it("rejects a client-supplied author", async () => {
+    const caller = freshman.createCaller(context(editor, ["web:content:write"]))
+    await expect(caller.updateCard({ id: "featured-1", ...fields, modifiedBy: 999 } as never)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+    expect(db.update).not.toHaveBeenCalled()
   })
 
   it("rejects crossing a website section before issuing any database write", async () => {

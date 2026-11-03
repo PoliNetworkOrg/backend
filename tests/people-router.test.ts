@@ -1,7 +1,7 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { Context } from "@/trpc"
-import { harness, permissions, profile } from "./people-fixtures"
+import { harness, master, permissions, profile } from "./people-fixtures"
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -33,7 +33,7 @@ function context(
   }
 }
 describe("People tRPC contract", () => {
-  it("refuses anonymous, service, Telegram and wrong-scope callers before reaching People", async () => {
+  it("refuses tokenless, service, Telegram and wrong-scope callers before reaching People", async () => {
     const h = harness()
     const r = makeRouter(h.service)
     await expect(r.createCaller({}).me.get()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
@@ -49,37 +49,64 @@ describe("People tRPC contract", () => {
       r.createCaller(context(permissions, undefined, ["backend:public:read"])).me.get()
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
-  it("validates profiles and returns only the register projection", async () => {
+  it("validates profiles before reaching People", async () => {
     const h = harness()
     await h.seed()
     const r = makeRouter(h.service)
     await expect(
       r.createCaller(context()).persons.create({ ...profile(), firstName: "X".repeat(81) })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" })
-    const rows = await r.createCaller(context(["admin:access", "people:members:read"])).members.list()
-    expect(Object.keys(rows[0]).sort()).toEqual(["account", "id", "member", "profile"])
-    expect(rows[0].profile.personalEmail).toBeNull()
+    expect(Object.keys(h.state().persons)).toHaveLength(3)
   })
-  it("mounts every procedure used by admin #100 with token-only policy", () => {
+  it("lets a signed-in account without People permissions open and accept an invite", async () => {
+    const h = harness()
+    await h.seed(false)
+    await h.service.sendInvite(master, { personId: "P-0003" })
+    const token = Object.values(h.state().mail)[0].text.match(/invite\?token=([A-Za-z0-9_-]{43})/)?.[1] ?? ""
+    const actor: Actor = { kind: "user", sub: "newcomer", client: "admin-dashboard", telegramId: null }
+    const caller = makeRouter(h.service).createCaller(context([], actor))
+    await expect(caller.me.get()).rejects.toMatchObject({ code: "FORBIDDEN" })
+    expect(await caller.me.invite({ token })).toMatchObject({ name: "Luca Verdi" })
+    await caller.me.acceptInvite({ token })
+    expect(h.state().persons["P-0003"].accountSub).toBe("newcomer")
+  })
+  it("mounts every People procedure with a dashboard policy", () => {
     const r = makeRouter(harness().service)
     const procedures = (r as unknown as { _def: { procedures: Record<string, { _def: { meta: unknown } }> } })._def
       .procedures
     const defs = Object.entries(procedures)
-    expect(defs.length).toBe(62)
-    for (const [, proc] of defs)
-      expect(proc._def.meta).toMatchObject({ policy: { user: { scope: "backend:admin" } }, tokenOnly: true })
-    for (const path of [
-      "persons.list",
-      "members.list",
-      "teams.candidates",
-      "census.importPreview",
-      "linking.resolve",
-      "capo.approve",
+    for (const [, proc] of defs) expect(proc._def.meta).toMatchObject({ policy: { user: { scope: "backend:admin" } } })
+    expect(Object.keys(procedures).sort()).toEqual([
+      "admins.assign",
+      "admins.end",
+      "admins.list",
+      "admins.setCapoOfReference",
+      "capo.get",
+      "capos.appoint",
+      "capos.end",
+      "capos.list",
+      "capos.setScope",
+      "linking.invites",
+      "linking.link",
+      "linking.recent",
+      "linking.revokeInvite",
+      "linking.searchAccounts",
+      "linking.sendInvite",
+      "linking.unlink",
+      "me.acceptInvite",
+      "me.get",
+      "me.invite",
       "me.roles",
-      "fees.review",
-      "receipts.prepareSignatures",
-      "receipts.sendSigned",
+      "persons.create",
+      "persons.get",
+      "persons.list",
+      "persons.setNote",
+      "persons.update",
+      "teams.addMember",
+      "teams.candidates",
+      "teams.endMembership",
+      "teams.list",
+      "teams.updateFields",
     ])
-      expect(procedures[path]).toBeDefined()
   })
 })

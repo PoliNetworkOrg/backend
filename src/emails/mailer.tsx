@@ -6,7 +6,6 @@ import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import MemberNumberChanged from "./templates/member-number-changed"
-import OtpEmail from "./templates/otp"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
@@ -45,11 +44,6 @@ async function devSendMail(
 }
 
 const sendEmail = env.NODE_ENV === "development" && env.USE_DEV_MAILER ? devSendMail : azureSendEmail
-
-export async function sendLoginOtpEmail(toAddress: string, otp: string, expiresInMinutes?: number) {
-  const subject = makeSubject("Your login code for PoliNetwork")
-  return sendEmail(toAddress, subject, <OtpEmail otp={otp} expiresInMinutes={expiresInMinutes} />)
-}
 
 export async function sendWelcomeEmail(
   toAddress: string,
@@ -127,27 +121,12 @@ export async function sendSignedDocumentEmail(
 }
 
 /** People retains the provider's error and records a stable Message-ID for delivery reconciliation. */
-export async function sendPeopleEmail(input: {
-  id: string
-  to: string
-  subject: string
-  text: string
-  attachment: { fileName: string; contentType: string; content: Uint8Array } | null
-}) {
+export async function sendPeopleEmail(input: { id: string; to: string; subject: string; text: string }) {
   const component = <div style={{ whiteSpace: "pre-wrap" }}>{input.text}</div>
-  const attachments = input.attachment
-    ? [
-        {
-          filename: input.attachment.fileName,
-          contentType: input.attachment.contentType,
-          content: input.attachment.content,
-        },
-      ]
-    : []
   if (env.NODE_ENV === "development" && env.USE_DEV_MAILER) {
-    await devSendMail(input.to, input.subject, component, attachments)
+    await devSendMail(input.to, input.subject, component)
   } else {
-    await azureSendEmail(input.to, input.subject, component, attachments, {
+    await azureSendEmail(input.to, input.subject, component, [], {
       throwOnError: true,
       messageId: `<people-${Buffer.from(input.id).toString("base64url")}@polinetwork.org>`,
     })

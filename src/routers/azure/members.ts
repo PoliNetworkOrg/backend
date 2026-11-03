@@ -18,8 +18,8 @@ const personName = z
   .max(64)
   .regex(/^[\p{L}\p{M}' -]+$/u, "Only letters, spaces, apostrophes and hyphens")
 
-function auditActor(actor: Actor | null) {
-  return actor?.kind === "user" ? { sub: actor.sub, client: actor.client } : { legacy: true }
+function auditActor(actor: Actor) {
+  return actor.kind === "user" ? { sub: actor.sub, client: actor.client } : { client: actor.client }
 }
 
 /** Entra's message when the sign-in name or an address already belongs to another object. */
@@ -39,7 +39,7 @@ export default createTRPCRouter({
    * Change the member number (`employeeId`) of an existing user, refusing a number another user holds, and
    * optionally email the new number. Token callers only: it can send mail to a caller-supplied address.
    */
-  setAssocNumber: policy(dashboard("azure:members:write"), { tokenOnly: true })
+  setAssocNumber: policy(dashboard("azure:members:write"))
     .input(
       z.object({
         userId: z.string().min(1),

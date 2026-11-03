@@ -22,7 +22,9 @@ try {
   const journal = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8")) as {
     entries: Array<{ tag: string }>
   }
-  const previous = { ...journal, entries: journal.entries.filter((entry) => entry.tag !== "0026_freshman_content") }
+  // The schema just before the freshman migration, which then runs with the rest.
+  const freshmanMigration = journal.entries.findIndex((entry) => entry.tag === "0026_freshman_content")
+  const previous = { ...journal, entries: journal.entries.slice(0, freshmanMigration) }
   await import("node:fs/promises").then(({ mkdir }) => mkdir(join(previousMigrations, "meta")))
   await writeFile(join(previousMigrations, "meta/_journal.json"), JSON.stringify(previous))
   for (const entry of previous.entries)
@@ -41,7 +43,6 @@ try {
     DB_USER: config.username,
     DB_PASS: config.password,
     DB_NAME: database,
-    BETTER_AUTH_SECRET: "freshman-test-secret-at-least-thirty-two-characters",
     ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   })
   const { DB } = await import("@/db") // Runs the new migration through the actual application entry point.
@@ -83,11 +84,13 @@ try {
     icon: card.icon,
     href: "https://example.org/new",
   }
-  await editor.updateCard({ id: card.id, ...fields, modifiedBy: 999 })
+  await editor.updateCard({ id: card.id, ...fields })
   assert.equal((await website.getContent()).resources[0].title, fields.title)
   assert.deepEqual(
-    (await connection`SELECT modified_by_id, modified_by_sub FROM web_freshman_cards WHERE id = ${card.id}`)[0],
-    { modified_by_id: null, modified_by_sub: "freshman-editor" }
+    (
+      await connection`SELECT legacy_modified_by_tg_id, modified_by_sub FROM web_freshman_cards WHERE id = ${card.id}`
+    )[0],
+    { legacy_modified_by_tg_id: null, modified_by_sub: "freshman-editor" }
   )
   for (const href of ["javascript:alert(1)", "//example.org", "/\\example.org"])
     await assert.rejects(editor.updateCard({ id: card.id, ...fields, href }), { code: "BAD_REQUEST" })

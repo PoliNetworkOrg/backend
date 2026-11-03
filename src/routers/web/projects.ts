@@ -66,7 +66,7 @@ export default createTRPCRouter({
       return await DB.select().from(PROJECTS).orderBy(asc(PROJECTS.order))
     }),
 
-  addProject: policy(dashboard("web:content:write"), { tokenOnly: true })
+  addProject: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
@@ -95,7 +95,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editProject: policy(dashboard("web:content:write"), { tokenOnly: true })
+  editProject: policy(dashboard("web:content:write"))
     .input(
       z
         .instanceof(FormData)
@@ -162,7 +162,7 @@ export default createTRPCRouter({
       return { error: null }
     }),
 
-  addProjectResource: policy(dashboard("web:content:write"), { tokenOnly: true })
+  addProjectResource: policy(dashboard("web:content:write"))
     .input(
       z.object({
         projectId: z.number().int(),
@@ -193,7 +193,7 @@ export default createTRPCRouter({
       return res
     }),
 
-  editProjectResource: policy(dashboard("web:content:write"), { tokenOnly: true })
+  editProjectResource: policy(dashboard("web:content:write"))
     .input(
       z.object({
         id: z.number().int(),

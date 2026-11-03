@@ -1,149 +1,149 @@
-import { createHash, randomUUID } from "node:crypto"
-import { and, eq, inArray, sql } from "drizzle-orm"
+import { desc, eq, sql } from "drizzle-orm"
+import type { PgTable } from "drizzle-orm/pg-core"
 import type { DB } from "@/db"
-import { documents, events, jobs, profiles, requests, signers } from "@/db/schema/esign/esign"
-import { files, identities, receiptRequests, receipts, records } from "@/db/schema/people"
-import { EsignError } from "@/esign/errors"
-import type { SignatureCommit } from "@/esign/store"
-import { emptyState, type PeopleState, type PeopleStore, type StoredReceipt, type UnitOfWork } from "./types"
+import { activity, assignments, counters, invites, mail, persons, roleCommands } from "@/db/schema/people"
+import { emptyState, type PeopleState, type PeopleStore, type UnitOfWork } from "./types"
 
-export type Database = typeof DB
-export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0]
-/** Lock order: People metadata, eSign request, eSign profile. Shared by void, preparation and completion. */
-export const lockPeople = (tx: Transaction) => tx.execute(sql`select pg_advisory_xact_lock(198074, 1)`)
+type Database = typeof DB
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0]
+/** Serializes People writes: the register is small, and syncing with Auth writes across records. */
+const lockPeople = (tx: Transaction) => tx.execute(sql`select pg_advisory_xact_lock(198074, 1)`)
 
-export async function loadState(tx: Transaction): Promise<PeopleState> {
+const iso = (value: Date | null) => value?.toISOString() ?? null
+const time = (value: string | null) => (value ? new Date(value) : null)
+/** Bun's driver returns `date` columns as a `Date` at UTC midnight, whatever the column's mode. */
+const day = (value: string | Date | null) => (value instanceof Date ? value.toISOString().slice(0, 10) : value)
+
+/** How each collection of the state maps to its table, in an order that satisfies the foreign keys. */
+const TABLES = [
+  {
+    kind: "persons",
+    table: persons,
+    id: persons.id,
+    load: (r: typeof persons.$inferSelect) => ({
+      ...r,
+      linkedAt: iso(r.linkedAt),
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+    }),
+    save: (p: PeopleState["persons"][string]) => ({
+      ...p,
+      linkedAt: time(p.linkedAt),
+      createdAt: new Date(p.createdAt),
+      updatedAt: new Date(p.updatedAt),
+    }),
+  },
+  {
+    kind: "commands",
+    table: roleCommands,
+    id: roleCommands.id,
+    load: (r: typeof roleCommands.$inferSelect) => ({
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      answeredAt: iso(r.answeredAt),
+    }),
+    save: (c: PeopleState["commands"][string]) => ({
+      ...c,
+      createdAt: new Date(c.createdAt),
+      answeredAt: time(c.answeredAt),
+    }),
+  },
+  {
+    kind: "assignments",
+    table: assignments,
+    id: assignments.id,
+    load: (r: typeof assignments.$inferSelect) => ({
+      ...r,
+      team: r.team as PeopleState["assignments"][string]["team"],
+      since: day(r.since) as string,
+      endedOn: day(r.endedOn),
+    }),
+    save: (a: PeopleState["assignments"][string]) => a,
+  },
+  {
+    kind: "invites",
+    table: invites,
+    id: invites.id,
+    load: (r: typeof invites.$inferSelect) => ({
+      ...r,
+      sentAt: r.sentAt.toISOString(),
+      expiresAt: r.expiresAt.toISOString(),
+      revokedAt: iso(r.revokedAt),
+      acceptedAt: iso(r.acceptedAt),
+    }),
+    save: (i: PeopleState["invites"][string]) => ({
+      ...i,
+      sentAt: new Date(i.sentAt),
+      expiresAt: new Date(i.expiresAt),
+      revokedAt: time(i.revokedAt),
+      acceptedAt: time(i.acceptedAt),
+    }),
+  },
+  {
+    kind: "mail",
+    table: mail,
+    id: mail.id,
+    load: (r: typeof mail.$inferSelect) => ({ ...r, attemptedAt: iso(r.attemptedAt) }),
+    save: (m: PeopleState["mail"][string]) => ({ ...m, attemptedAt: time(m.attemptedAt) }),
+  },
+] as const
+
+async function loadState(tx: Transaction): Promise<PeopleState> {
   const state = emptyState()
-  for (const row of await tx.select().from(records)) {
-    const separator = row.id.indexOf(":")
-    Object.assign(state[row.kind], { [row.id.slice(separator + 1)]: row.data })
+  for (const { kind, table, load } of TABLES) {
+    const rows = (await tx.select().from(table as PgTable)) as Parameters<typeof load>[0][]
+    for (const r of rows) Object.assign(state[kind], { [r.id]: (load as (r: unknown) => unknown)(r) })
   }
-  for (const row of await tx.select().from(receipts)) state.receipts[row.id] = row.data
+  for (const r of await tx.select().from(counters)) state.counters[r.key] = r.value
   return state
 }
 
-export async function saveState(tx: Transaction, state: PeopleState, before: PeopleState) {
-  for (const kind of Object.keys(state) as (keyof PeopleState)[]) {
-    if (kind === "receipts") continue
-    for (const [id, data] of Object.entries(state[kind])) {
-      if (JSON.stringify(data) === JSON.stringify(before[kind][id])) continue
-      await tx
-        .insert(records)
-        .values({ id: `${kind}:${id}`, kind, data })
-        .onConflictDoUpdate({ target: records.id, set: { data } })
-    }
-    for (const id of Object.keys(before[kind])) {
-      if (!(id in state[kind])) await tx.delete(records).where(eq(records.id, `${kind}:${id}`))
-    }
-  }
-  // Clear changed and removed unique values first so moving an identity between records (or merging them) is atomic.
-  const changed = Object.values(state.persons).filter((p) => JSON.stringify(p) !== JSON.stringify(before.persons[p.id]))
-  const removed = Object.keys(before.persons).filter((id) => !(id in state.persons))
-  if (changed.length || removed.length)
-    await tx.delete(identities).where(inArray(identities.personId, [...changed.map((p) => p.id), ...removed]))
-  for (const p of changed)
-    await tx.insert(identities).values({
-      personId: p.id,
-      accountSub: p.accountSub,
-      memberNumber: p.member?.number,
-      telegramId: p.profile.telegramId,
-    })
-  for (const receipt of Object.values(state.receipts)) {
-    if (JSON.stringify(receipt) === JSON.stringify(before.receipts[receipt.id])) continue
-    await tx
-      .insert(receipts)
-      .values({ id: receipt.id, number: receipt.number, requestId: receipt.requestId, data: receipt })
-      .onConflictDoUpdate({ target: receipts.id, set: { requestId: receipt.requestId, data: receipt } })
-  }
-}
+const ends = (value: unknown, previous: unknown) =>
+  !!(value as { endedOn?: string | null }).endedOn && !(previous as { endedOn?: string | null }).endedOn
 
-export function unitOfWork(tx: Transaction, state: PeopleState): UnitOfWork {
-  return {
-    state,
-    async getFile(id) {
-      const [file] = await tx.select().from(files).where(eq(files.id, id))
-      return file ? { ...file, expiresAt: file.expiresAt?.toISOString() ?? null } : null
-    },
-    async putFile(file) {
+/**
+ * Writes what the transaction changed. Rows are never deleted, except records merged into another (`merges`),
+ * once everything of theirs has moved.
+ */
+async function saveState(tx: Transaction, uow: UnitOfWork, before: PeopleState) {
+  const { state, merges } = uow
+  const merged = new Set(merges.map((m) => m.from))
+  // Free the merged records' accounts before another record takes them.
+  for (const { from } of merges) await tx.update(persons).set({ accountSub: null }).where(eq(persons.id, from))
+  for (const { kind, table, id, save } of TABLES) {
+    const changed = Object.entries(state[kind]).filter(
+      ([key, value]) => JSON.stringify(value) !== JSON.stringify(before[kind][key])
+    )
+    // Rows that end first, then other updates, then new rows: an assignment frees its concept before another
+    // takes it, whether it is new or moves over from a merged record.
+    const existing = changed
+      .filter(([key]) => key in before[kind])
+      .sort(([a, x], [b, y]) => Number(ends(y, before[kind][b])) - Number(ends(x, before[kind][a])))
+    for (const [key, value] of existing)
       await tx
-        .insert(files)
-        .values({ ...file, expiresAt: file.expiresAt ? new Date(file.expiresAt) : null })
-        .onConflictDoUpdate({ target: files.id, set: { expiresAt: file.expiresAt ? new Date(file.expiresAt) : null } })
-    },
-    async deleteFile(id) {
-      await tx.delete(files).where(eq(files.id, id))
-    },
-    async prepareRequest(receipt, sub, signerName) {
-      const title = `Receipt ${receipt.number} · ${receipt.person.name}`
-      if (receipt.requestId) {
-        const [existing] = await tx.select().from(requests).where(eq(requests.id, receipt.requestId))
-        const [mapping] = await tx
-          .select()
-          .from(receiptRequests)
-          .where(eq(receiptRequests.requestId, receipt.requestId))
-        if (
-          existing?.status === "in_progress" &&
-          mapping?.officerSub === sub &&
-          mapping.originalHash === receipt.sha256
-        )
-          return { requestId: receipt.requestId, title }
-        await this.invalidateRequest(receipt, sub)
-      }
-      const original = await this.getFile(receipt.originalFileId)
-      if (!original || createHash("sha256").update(original.content).digest("hex") !== receipt.sha256)
-        throw new EsignError("conflict", "The issued receipt changed")
-      const id = randomUUID()
-      await tx.insert(profiles).values({ sub, name: signerName }).onConflictDoNothing()
-      await tx
-        .insert(requests)
-        .values({ id, title, ordered: true, createdBySub: sub, drives: [], output: null, email: null })
-      await tx.insert(documents).values({
-        requestId: id,
-        version: 0,
-        fileName: original.fileName,
-        content: original.content,
-        sha256: receipt.sha256,
-        size: original.content.length,
-        pages: 1,
-        source: { kind: "upload" },
-        createdBySub: sub,
-      })
-      await tx.insert(signers).values({
-        requestId: id,
-        position: 0,
-        sub,
-        name: signerName,
-        role: receipt.signer === "president" ? "Presidente" : "Vicepresidente",
-        places: [{ kind: "signature", page: 0, x: 0.56, y: 0.69, width: 0.35, height: 0.09 }],
-      })
-      receipt.requestId = id
-      await tx
-        .insert(receipts)
-        .values({ id: receipt.id, number: receipt.number, requestId: id, data: receipt })
-        .onConflictDoUpdate({ target: receipts.id, set: { requestId: id, data: receipt } })
-      await tx
-        .insert(receiptRequests)
-        .values({ requestId: id, receiptId: receipt.id, officerSub: sub, originalHash: receipt.sha256 })
-      await tx
-        .insert(events)
-        .values({ requestId: id, actorSub: sub, type: "created", data: { peopleReceipt: receipt.id } })
-      return { requestId: id, title }
-    },
-    async invalidateRequest(receipt, actor) {
-      if (!receipt.requestId) return
-      const [request] = await tx.select().from(requests).where(eq(requests.id, receipt.requestId)).for("update")
-      if (request?.status === "in_progress") {
-        await tx
-          .update(requests)
-          .set({ status: "cancelled", cancelledAt: new Date() })
-          .where(eq(requests.id, request.id))
-        await tx
-          .update(jobs)
-          .set({ status: "cancelled", preparedPdf: null })
-          .where(and(eq(jobs.requestId, request.id), inArray(jobs.status, ["pending", "prepared"])))
-        await tx.insert(events).values({ requestId: request.id, actorSub: actor, type: "people_invalidated" })
-      }
-    },
+        .update(table)
+        .set((save as (v: unknown) => Record<string, unknown>)(value))
+        .where(eq(id, key))
+    const added = changed.filter(([key]) => !(key in before[kind])).map(([, v]) => (save as (v: unknown) => object)(v))
+    if (added.length) await tx.insert(table).values(added as never)
+    const removed = Object.keys(before[kind]).filter((key) => !(key in state[kind]))
+    if (removed.some((key) => kind !== "persons" || !merged.has(key)))
+      throw new Error(`People never deletes ${kind}: ${removed.join(", ")}`)
+  }
+  for (const [key, value] of Object.entries(state.counters))
+    if (before.counters[key] !== value)
+      await tx.insert(counters).values({ key, value }).onConflictDoUpdate({ target: counters.key, set: { value } })
+  // A record merged in this transaction may never have been saved: its new entries go straight to `into`.
+  const mergedInto = new Map(merges.map((m) => [m.from, m.into]))
+  const survivor = (personId: string): string =>
+    mergedInto.has(personId) ? survivor(mergedInto.get(personId) as string) : personId
+  if (uow.activity.length)
+    await tx
+      .insert(activity)
+      .values(uow.activity.map((entry) => ({ ...entry, personId: survivor(entry.personId), at: new Date(entry.at) })))
+  for (const { from, into } of merges) {
+    await tx.update(activity).set({ personId: into }).where(eq(activity.personId, from))
+    await tx.delete(persons).where(eq(persons.id, from))
   }
 }
 
@@ -154,74 +154,14 @@ export function createPeoplePgStore(db: Database): PeopleStore {
         await lockPeople(tx)
         const state = await loadState(tx)
         const before = structuredClone(state)
-        const result = await fn(unitOfWork(tx, state))
-        await saveState(tx, state, before)
+        const uow: UnitOfWork = { state, activity: [], merges: [] }
+        const result = await fn(uow)
+        await saveState(tx, uow, before)
         return result
       }),
+    async activity(personId) {
+      const rows = await db.select().from(activity).where(eq(activity.personId, personId)).orderBy(desc(activity.id))
+      return rows.map((r) => ({ personId: r.personId, actor: r.actor, text: r.text, at: r.at.toISOString() }))
+    },
   }
-}
-
-/** Called inside eSign's transaction before it locks the request. */
-export async function guardReceiptSignature(
-  tx: Transaction,
-  commit: SignatureCommit,
-  eligible: (receipt: StoredReceipt, sub: string, state: PeopleState, requireEsign: boolean) => boolean
-) {
-  const [mapping] = await tx.select().from(receiptRequests).where(eq(receiptRequests.requestId, commit.requestId))
-  if (!mapping) return
-  await lockPeople(tx)
-  const state = await loadState(tx)
-  const receipt = state.receipts[mapping.receiptId]
-  if (
-    !receipt ||
-    receipt.requestId !== commit.requestId ||
-    receipt.status !== "toSign" ||
-    receipt.sha256 !== mapping.originalHash ||
-    mapping.officerSub !== commit.identity.sub ||
-    commit.baseVersion !== 0 ||
-    !eligible(receipt, commit.identity.sub, state, !commit.receiptManual)
-  )
-    throw new EsignError("forbidden", "This receipt is no longer assigned to you")
-}
-
-/** Signature, retained PDF, activity and a unique delivery intent commit together. */
-export async function completeReceiptSignature(tx: Transaction, commit: SignatureCommit) {
-  if (!commit.complete) return
-  const [mapping] = await tx.select().from(receiptRequests).where(eq(receiptRequests.requestId, commit.requestId))
-  if (!mapping) return
-  const state = await loadState(tx)
-  const before = structuredClone(state)
-  const receipt = state.receipts[mapping.receiptId]
-  const fileId = `signed:${receipt.id}`
-  await unitOfWork(tx, state).putFile({
-    id: fileId,
-    fileName: commit.receiptEnvelope?.fileName ?? commit.document.fileName,
-    contentType: commit.receiptEnvelope ? "application/pkcs7-mime" : "application/pdf",
-    content: commit.receiptEnvelope?.content ?? commit.document.content,
-    expiresAt: null,
-  })
-  receipt.signedFileId = fileId
-  receipt.status = "signed"
-  receipt.signedBy =
-    typeof commit.event.data?.name === "string" ? commit.event.data.name : commit.identity.certificateSubject
-  receipt.signedOn = new Date().toISOString()
-  state.persons[receipt.person.id].activity.unshift({
-    actor: commit.identity.sub,
-    text: `Signed receipt ${receipt.number}`,
-    at: receipt.signedOn,
-  })
-  const id = `receipt:${receipt.id}`
-  state.outbox[id] ??= {
-    id,
-    personId: receipt.person.id,
-    receiptId: receipt.id,
-    to: receipt.recipient,
-    subject: `Ricevuta ${receipt.number} · PoliNetwork`,
-    text: `Quota associativa ${receipt.year}. In allegato la ricevuta firmata.`,
-    fileId,
-    status: "pending",
-    attemptedAt: null,
-    error: null,
-  }
-  await saveState(tx, state, before)
 }

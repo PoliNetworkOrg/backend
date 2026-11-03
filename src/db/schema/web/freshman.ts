@@ -3,7 +3,6 @@ import { bigint, check, integer, text } from "drizzle-orm/pg-core"
 import { authorSubColumns, hasCreator, timeColumns } from "@/db/columns"
 import { freshmanIcons, freshmanSlots } from "@/routers/web/freshman/constants"
 import { createTable } from "../create-table"
-import { permissions } from "../tg/permissions"
 import { faqs } from "./faqs"
 
 export const freshmanCards = createTable.web(
@@ -14,8 +13,8 @@ export const freshmanCards = createTable.web(
     description: text("description").notNull(),
     icon: text("icon", { enum: freshmanIcons }).notNull(),
     href: text("href").notNull(),
-    createdBy: bigint("created_by_id", { mode: "number" }).references(() => permissions.userId),
-    modifiedBy: bigint("modified_by_id", { mode: "number" }).references(() => permissions.userId),
+    legacyCreatedByTgId: bigint("legacy_created_by_tg_id", { mode: "number" }),
+    legacyModifiedByTgId: bigint("legacy_modified_by_tg_id", { mode: "number" }),
     ...authorSubColumns,
     ...timeColumns,
   },
@@ -46,8 +45,8 @@ export const freshmanFaqs = createTable.web(
       .notNull()
       .unique()
       .references(() => faqs.id, { onDelete: "restrict" }),
-    createdBy: bigint("created_by_id", { mode: "number" }).references(() => permissions.userId),
-    modifiedBy: bigint("modified_by_id", { mode: "number" }).references(() => permissions.userId),
+    legacyCreatedByTgId: bigint("legacy_created_by_tg_id", { mode: "number" }),
+    legacyModifiedByTgId: bigint("legacy_modified_by_tg_id", { mode: "number" }),
     ...authorSubColumns,
     ...timeColumns,
   },

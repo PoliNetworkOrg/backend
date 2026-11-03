@@ -1,7 +1,6 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
-import { env } from "@/env"
 import { esign } from "@/esign"
 import { MAX_PDF_BYTES } from "@/esign/drive/types"
 import { EsignError, type EsignErrorCode } from "@/esign/errors"
@@ -16,9 +15,6 @@ const SIGN = "esign:sign"
 const MANAGE = "esign:requests:manage"
 /** Who may use each drive. */
 const MANAGE_DRIVES = "esign:drives:manage"
-
-/** The dashboard's agent-mode user, on the anonymous path (`LEGACY_ANONYMOUS=allow`) in development only. */
-const DEV_SUB = "agent-preview-user"
 
 const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {
   not_found: "NOT_FOUND",
@@ -39,11 +35,9 @@ const TRPC_CODE: Record<EsignErrorCode, TRPCError["code"]> = {
   agent_outdated: "PRECONDITION_FAILED",
 }
 
-function callerOf(ctx: { actor: Actor | null; can: (permission: string) => boolean }): Caller {
-  if (ctx.actor?.kind === "user")
+function callerOf(ctx: { actor: Actor; can: (permission: string) => boolean }): Caller {
+  if (ctx.actor.kind === "user")
     return { sub: ctx.actor.sub, canManage: ctx.can(MANAGE), canManageDrives: ctx.can(MANAGE_DRIVES) }
-  if (ctx.actor === null && env.NODE_ENV === "development")
-    return { sub: DEV_SUB, canManage: true, canManageDrives: true }
   throw new TRPCError({ code: "FORBIDDEN", message: "Only dashboard users can sign" })
 }
 

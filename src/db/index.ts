@@ -1,5 +1,4 @@
 import { db } from "./db"
-import { schema as authSchema } from "./schema/auth"
 import { schema as commonSchema } from "./schema/common"
 import { schema as esignSchema } from "./schema/esign"
 import { schema as tgSchema } from "./schema/tg"
@@ -9,7 +8,6 @@ import { schema as webSchema } from "./schema/web"
 
 export const DB = db
 export const SCHEMA = {
-  AUTH: authSchema,
   COMMON: commonSchema,
   ESIGN: esignSchema,
   TG: tgSchema,

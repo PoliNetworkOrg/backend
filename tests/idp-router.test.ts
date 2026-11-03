@@ -6,7 +6,6 @@ import type { Context } from "@/trpc"
 
 const REQUIRED_ENV: Record<string, string> = {
   NODE_ENV: "test",
-  BETTER_AUTH_SECRET: "test-secret-with-at-least-thirty-two-characters",
   ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   DB_HOST: "localhost",
   DB_PORT: "5432",
@@ -29,8 +28,7 @@ const db = vi.hoisted(() => ({
 
 // The real schema, without a connection: importing "@/db" would run migrations.
 vi.mock("@/db", async () => {
-  const [auth, common, tg, wa, web, views] = await Promise.all([
-    import("@/db/schema/auth"),
+  const [common, tg, wa, web, views] = await Promise.all([
     import("@/db/schema/common"),
     import("@/db/schema/tg"),
     import("@/db/schema/wa"),
@@ -72,7 +70,7 @@ vi.mock("@/db", async () => {
   const transaction = async <T>(fn: (tx: unknown) => Promise<T>) => fn({ select, insert, delete: remove })
   return {
     DB: { select, insert, delete: remove, transaction },
-    SCHEMA: { AUTH: auth.schema, COMMON: common.schema, TG: tg.schema, WA: wa.schema, WEB: web.schema },
+    SCHEMA: { COMMON: common.schema, TG: tg.schema, WA: wa.schema, WEB: web.schema },
     VIEWS: { GROUPS: views.views },
   }
 })
@@ -84,7 +82,7 @@ beforeAll(async () => {
   ;({ appRouter } = await import("@/routers"))
 })
 
-type ProcedureDef = { _def: { meta?: { policy?: unknown; tokenOnly?: boolean } } }
+type ProcedureDef = { _def: { meta?: { policy?: unknown } } }
 
 function procedures(): Array<[string, ProcedureDef]> {
   return Object.entries(
@@ -105,11 +103,9 @@ describe("app router", () => {
     const policyOf = (path: string) => procedures().find(([name]) => name === path)?.[1]._def.meta
     expect(policyOf("tg.auditLog.record")).toMatchObject({
       policy: { service: { scope: "backend:tg:audit" } },
-      tokenOnly: true,
     })
     expect(policyOf("tg.users.getCreationHistory")).toMatchObject({
       policy: { user: { scope: "backend:admin", permission: "tg:users:read" } },
-      tokenOnly: true,
     })
     expect(policyOf("tg.grants.create")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:grants:manage" },
@@ -126,13 +122,16 @@ describe("app router", () => {
     })
     expect(policyOf("azure.members.setAssocNumber")).toMatchObject({
       policy: { user: { scope: "backend:admin", permission: "azure:members:write" } },
-      tokenOnly: true,
     })
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
     })
-    for (const path of ["azure.groups.addMember", "azure.groups.removeMember"])
-      expect(policyOf(path)?.policy).toEqual({ user: { scope: "backend:admin", permission: "azure:groups:write" } })
+    // Group membership is read-only: no procedure may add or remove members of an arbitrary group.
+    expect(
+      procedures()
+        .filter(([name]) => name.startsWith("azure.groups."))
+        .map(([name]) => name)
+    ).toEqual(["azure.groups.getAll"])
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })
@@ -146,37 +145,18 @@ describe("app router", () => {
       expect(policyOf(path)?.policy).toEqual(policyOf("web.projects.editProject")?.policy)
   })
 
-  it("refuses anonymous callers on every write that records its actor, whatever LEGACY_ANONYMOUS says", () => {
-    const tokenOnly = new Set(
-      procedures()
-        .filter(([, procedure]) => procedure._def.meta?.tokenOnly)
-        .map(([path]) => path)
-    )
-    for (const path of [
-      "tg.grants.create",
-      "tg.grants.interrupt",
-      "tg.groups.leaveChat",
-      "groups.labels.create",
-      "groups.labels.modify",
-      "web.associations.addAssociation",
-      "web.associations.editAssociation",
-      "web.associations.editAssociationLinks",
-      "web.faqs.addFaqs",
-      "web.faqs.addFaqsCategory",
-      "web.faqs.editFaqs",
-      "web.faqs.editFaqsCategory",
-      "web.projects.addProject",
-      "web.projects.editProject",
-      "web.projects.addProjectResource",
-      "web.projects.editProjectResource",
-      "web.guides_matricole.addGuide",
-    ])
-      expect(tokenOnly).toContain(path)
+  it("refuses every procedure to a caller without a token", async () => {
+    const caller = appRouter.createCaller({}) as unknown as Record<string, unknown>
+    for (const [path] of procedures()) {
+      const procedure = path.split(".").reduce((node, key) => (node as Record<string, unknown>)[key], caller as unknown)
+      await expect((procedure as (input?: unknown) => Promise<unknown>)(), path).rejects.toMatchObject({
+        code: "UNAUTHORIZED",
+      })
+    }
   })
 
   it("no longer has the procedures RFC v3 Phase 5 removes", () => {
     const paths = procedures().map(([path]) => path)
-    // azure.members.setAssocNumber is back as a token-only `dashboard` procedure, asserted above.
     const removed = paths.filter((path) =>
       /^(auth|test)\.|^tg\.(permissions|link|groupLabels)\.|^tg\.auditLog\.create$/.test(path)
     )
@@ -206,15 +186,14 @@ describe("app router", () => {
           label: "students",
           description: undefined,
           color: "#3b82f6",
-          createdBy: null,
           createdBySub: "usr_admin",
         },
       },
     ])
   })
 
-  it("refuses anonymous label writes even while LEGACY_ANONYMOUS allows anonymous reads", async () => {
-    const caller = appRouter.createCaller({ legacyAnonymous: "allow" })
+  it("refuses label writes without a token", async () => {
+    const caller = appRouter.createCaller({})
     await expect(caller.groups.labels.create({ label: "students", color: "#3b82f6" })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     })
@@ -238,7 +217,6 @@ describe("groups.search", () => {
     dashboard: () =>
       appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access })
         .groups.search,
-    anonymous: () => appRouter.createCaller({ legacyAnonymous: "allow" }).groups.search,
   }
   /** Whether the last query filtered out hidden groups. */
   const hidesHidden = () => {
@@ -263,15 +241,14 @@ describe("groups.search", () => {
     expect(hidesHidden()).toBe(true)
   })
 
-  it("still gives hidden groups to the dashboard and to anonymous callers while allowed", async () => {
-    for (const caller of [callers.dashboard(), callers.anonymous()]) {
-      await caller.getAll()
-      expect(hidesHidden()).toBe(false)
-      await caller.search({ showHidden: true })
-      expect(hidesHidden()).toBe(false)
-      await caller.search({})
-      expect(hidesHidden()).toBe(true)
-    }
+  it("still gives hidden groups to the dashboard", async () => {
+    const caller = callers.dashboard()
+    await caller.getAll()
+    expect(hidesHidden()).toBe(false)
+    await caller.search({ showHidden: true })
+    expect(hidesHidden()).toBe(false)
+    await caller.search({})
+    expect(hidesHidden()).toBe(true)
   })
 
   it("refuses service tokens without backend:public:read", async () => {
@@ -298,7 +275,7 @@ describe("tg.access.resolve and me.access", () => {
 
   it("resolves Telegram users to their subject, permissions and active grant", async () => {
     const validUntil = new Date(Date.now() + 3_600_000)
-    db.rows = { tg_grants: [{ userId: 456, validUntil }], tg_grants_v2: [] }
+    db.rows = { tg_grants: [{ telegramUserId: 456, validUntil }] }
     const caller = appRouter.createCaller({
       auth: { kind: "token", actor: bot, scopes: new Set(["backend:tg:read"]) },
       access: access(true),
@@ -330,7 +307,7 @@ describe("tg.access.resolve and me.access", () => {
     })
   })
 
-  it("refuses anonymous callers on the new procedures", async () => {
+  it("refuses the new procedures without a token", async () => {
     const caller = appRouter.createCaller({})
     await expect(caller.tg.access.resolve({ telegramIds: ["123"] })).rejects.toMatchObject({ code: "UNAUTHORIZED" })
     await expect(caller.me.access()).rejects.toMatchObject({ code: "UNAUTHORIZED" })
@@ -430,5 +407,82 @@ describe("tg.auditLog.record", () => {
 
   it("needs an actor unless the action was automatic or made in Telegram's UI", async () => {
     await expect(record(access(true, []), { actorTelegramId: null })).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+})
+
+describe("web.projects resources", () => {
+  const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_editor", telegramId: null }
+  const access: NonNullable<Context["access"]> = {
+    has: () => true,
+    current: () => null,
+    subjectBySub: () => undefined,
+    subjectByTelegramId: () => undefined,
+    status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+  }
+  const editor = () =>
+    appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access }).web
+      .projects
+  const website = () =>
+    appRouter.createCaller({
+      auth: {
+        kind: "token",
+        actor: { kind: "service", client: "website" },
+        scopes: new Set(["backend:public:read"]),
+      },
+    }).web.projects
+
+  beforeEach(() => {
+    db.rows = {}
+    db.inserted = []
+  })
+
+  it("attributes new resources to an IdP user without a Telegram account", async () => {
+    db.rows = { web_projects: [{ id: 1 }] }
+    await editor().addProjectResource({ projectId: 1, kind: "source", url: "https://github.com/PoliNetworkOrg/web" })
+    expect(db.inserted).toEqual([
+      {
+        table: "web_project_resources",
+        values: {
+          projectId: 1,
+          kind: "source",
+          url: "https://github.com/PoliNetworkOrg/web",
+          order: 0,
+          createdBySub: "usr_editor",
+        },
+      },
+    ])
+  })
+
+  it("exposes a project's platform resources to the website token", async () => {
+    const project = {
+      id: 1,
+      title: "App",
+      descriptionIt: "IT",
+      descriptionEn: "EN",
+      logo: null,
+      link: null,
+      category: "general",
+    }
+    const resource = { id: 2, kind: "android", url: "https://play.google.com/store/apps/details?id=test" }
+    db.rows = { web_projects: [project], web_project_resources: [resource] }
+    await expect(website().getProject({ id: 1 })).resolves.toEqual({ ...project, resources: [resource] })
+  })
+
+  it("returns null for a missing project and refuses resources for it", async () => {
+    await expect(website().getProject({ id: 999 })).resolves.toBeNull()
+    await expect(
+      editor().addProjectResource({ projectId: 999, kind: "web", url: "https://example.com" })
+    ).resolves.toEqual({ error: "NOT_FOUND" })
+    expect(db.inserted).toEqual([])
+  })
+
+  it("rejects unsafe resource URLs and website-token writes", async () => {
+    await expect(
+      editor().addProjectResource({ projectId: 1, kind: "web", url: "javascript:alert(1)" })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await expect(
+      website().addProjectResource({ projectId: 1, kind: "web", url: "https://example.com" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    expect(db.inserted).toEqual([])
   })
 })
