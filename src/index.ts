@@ -13,5 +13,31 @@ export type {
   TeamId as PeopleTeamId,
   TeamSummary as PeopleTeamSummary,
 } from "./people/contract"
+export type {
+  ArticleChange as RegulationsArticleChange,
+  Assignment as RegulationsAssignment,
+  BinaryFile as RegulationsBinaryFile,
+  Capabilities as RegulationsCapabilities,
+  CollabTicket as RegulationsCollabTicket,
+  CommentThread as RegulationsCommentThread,
+  CompileStatus as RegulationsCompileStatus,
+  Deadline as RegulationsDeadline,
+  Delega as RegulationsDelega,
+  Delibera as RegulationsDelibera,
+  Diff as RegulationsDiff,
+  DocumentInfo as RegulationsDocument,
+  Draft as RegulationsDraft,
+  DraftSummary as RegulationsDraftSummary,
+  Emanation as RegulationsEmanation,
+  Me as RegulationsMe,
+  MergeConflict as RegulationsMergeConflict,
+  MergePreview as RegulationsMergePreview,
+  Procedure as RegulationsProcedure,
+  Snapshot as RegulationsSnapshot,
+  Structure as RegulationsStructure,
+  StructureNode as RegulationsStructureNode,
+  ValidationIssue as RegulationsValidationIssue,
+  VersionSummary as RegulationsVersion,
+} from "./regulations/contract"
 export type { AppRouter } from "./routers"
 export type { TelegramSocket } from "./websocket/telegram"
