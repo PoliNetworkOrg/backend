@@ -135,6 +135,14 @@ describe("app router", () => {
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })
+    expect(policyOf("web.projects.getProject")?.policy).toEqual(policyOf("web.projects.getAllProjects")?.policy)
+    for (const path of [
+      "web.projects.addProjectResource",
+      "web.projects.editProjectResource",
+      "web.projects.reorderProjectResources",
+      "web.projects.deleteProjectResource",
+    ])
+      expect(policyOf(path)?.policy).toEqual(policyOf("web.projects.editProject")?.policy)
   })
 
   it("refuses every procedure to a caller without a token", async () => {
@@ -399,5 +407,82 @@ describe("tg.auditLog.record", () => {
 
   it("needs an actor unless the action was automatic or made in Telegram's UI", async () => {
     await expect(record(access(true, []), { actorTelegramId: null })).rejects.toMatchObject({ code: "BAD_REQUEST" })
+  })
+})
+
+describe("web.projects resources", () => {
+  const admin: Actor = { kind: "user", client: "admin-dashboard", sub: "usr_editor", telegramId: null }
+  const access: NonNullable<Context["access"]> = {
+    has: () => true,
+    current: () => null,
+    subjectBySub: () => undefined,
+    subjectByTelegramId: () => undefined,
+    status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+  }
+  const editor = () =>
+    appRouter.createCaller({ auth: { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) }, access }).web
+      .projects
+  const website = () =>
+    appRouter.createCaller({
+      auth: {
+        kind: "token",
+        actor: { kind: "service", client: "website" },
+        scopes: new Set(["backend:public:read"]),
+      },
+    }).web.projects
+
+  beforeEach(() => {
+    db.rows = {}
+    db.inserted = []
+  })
+
+  it("attributes new resources to an IdP user without a Telegram account", async () => {
+    db.rows = { web_projects: [{ id: 1 }] }
+    await editor().addProjectResource({ projectId: 1, kind: "source", url: "https://github.com/PoliNetworkOrg/web" })
+    expect(db.inserted).toEqual([
+      {
+        table: "web_project_resources",
+        values: {
+          projectId: 1,
+          kind: "source",
+          url: "https://github.com/PoliNetworkOrg/web",
+          order: 0,
+          createdBySub: "usr_editor",
+        },
+      },
+    ])
+  })
+
+  it("exposes a project's platform resources to the website token", async () => {
+    const project = {
+      id: 1,
+      title: "App",
+      descriptionIt: "IT",
+      descriptionEn: "EN",
+      logo: null,
+      link: null,
+      category: "general",
+    }
+    const resource = { id: 2, kind: "android", url: "https://play.google.com/store/apps/details?id=test" }
+    db.rows = { web_projects: [project], web_project_resources: [resource] }
+    await expect(website().getProject({ id: 1 })).resolves.toEqual({ ...project, resources: [resource] })
+  })
+
+  it("returns null for a missing project and refuses resources for it", async () => {
+    await expect(website().getProject({ id: 999 })).resolves.toBeNull()
+    await expect(
+      editor().addProjectResource({ projectId: 999, kind: "web", url: "https://example.com" })
+    ).resolves.toEqual({ error: "NOT_FOUND" })
+    expect(db.inserted).toEqual([])
+  })
+
+  it("rejects unsafe resource URLs and website-token writes", async () => {
+    await expect(
+      editor().addProjectResource({ projectId: 1, kind: "web", url: "javascript:alert(1)" })
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await expect(
+      website().addProjectResource({ projectId: 1, kind: "web", url: "https://example.com" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    expect(db.inserted).toEqual([])
   })
 })
