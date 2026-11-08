@@ -86,6 +86,31 @@ describe("auditEvent", () => {
     })
   })
 
+  it("cuts target ids, labels and reasons the caller chose", () => {
+    const event = auditEvent({
+      path: "esign.signers.resetIdentity",
+      auth,
+      rawInput: {},
+      note: {
+        target: { type: "esign.signer", id: "s".repeat(5000), label: "l".repeat(5000) },
+        reason: "r".repeat(5000),
+      },
+      result: ok(),
+    })
+    for (const value of [event?.targetId, event?.targetLabel, event?.reason]) expect(value?.length).toBeLessThan(2100)
+  })
+
+  it("names a person only by a valid People id", () => {
+    const event = auditEvent({
+      path: "people.persons.setNote",
+      auth,
+      rawInput: { id: "ada@example.org", note: "" },
+      note: {},
+      result: { ok: false, error: new TRPCError({ code: "BAD_REQUEST", message: "Invalid input" }) },
+    })
+    expect(event).toMatchObject({ targetType: "people.person", targetId: null, input: null })
+  })
+
   it("lists the issues of an invalid input rather than their JSON", () => {
     const invalid = z.object({ id: z.number(), title: z.string() }).safeParse({ id: "x" })
     const event = auditEvent({

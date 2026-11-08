@@ -101,8 +101,8 @@ export const esignRouter = createTRPCRouter({
     }),
     /** Forgets the CIE bound to a person, e.g. after they renewed their card. */
     resetIdentity: user.input(z.object({ sub: z.string().min(1) })).mutation(({ ctx, input }) => {
-      ctx.audit.set({ target: { type: "esign.signer", id: input.sub } })
       requireManage(callerOf(ctx))
+      ctx.audit.set({ target: { type: "esign.signer", id: input.sub } })
       return run(() => esign.resetIdentity(input.sub))
     }),
   }),

@@ -2,7 +2,7 @@ import type { AccessSnapshotClient, Actor } from "@polinetwork/auth-kit"
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
 import { ZodError, z } from "zod/v4"
-import { auditEvent, auditRecorder, noAudit, UNAUDITED } from "./audit"
+import { auditEvent, auditRecorder, isDenied, noAudit, UNAUDITED } from "./audit"
 import { env } from "./env"
 import type { RequestAuth } from "./idp/auth"
 import { logger } from "./logger"
@@ -76,14 +76,16 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
  * fail the call, whose change has already happened.
  */
 const auditMiddleware = t.middleware(async ({ ctx, path, type, getRawInput, next }) => {
-  if (type !== "mutation" || UNAUDITED.has(path)) return next({ ctx: { audit: noAudit } })
+  // Calls without a valid token are not recorded, so their bodies are never read for the log.
+  if (type !== "mutation" || UNAUDITED.has(path) || ctx.auth?.kind !== "token") return next({ ctx: { audit: noAudit } })
 
   const { recorder, note, skipped } = auditRecorder()
   const result = await next({ ctx: { audit: recorder } })
   if (skipped()) return result
 
   try {
-    const rawInput = await getRawInput().catch(() => undefined)
+    // A denied call's body may never have been read, and the event keeps none of it.
+    const rawInput = isDenied(result) ? undefined : await getRawInput().catch(() => undefined)
     const event = auditEvent({ path, auth: ctx.auth, requestId: ctx.requestId, rawInput, note, result })
     if (event) {
       // Imported here so that loading the router does not open the database.

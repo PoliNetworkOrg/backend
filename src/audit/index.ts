@@ -9,6 +9,7 @@ import {
   type TAuditOutcome,
 } from "@/db/schema/common/audit-events"
 import type { RequestAuth } from "@/idp/auth"
+import { personIdSchema } from "@/people/contract"
 
 export type AuditEvent = typeof auditEvents.$inferInsert
 
@@ -140,6 +141,12 @@ const DENIED_CODES = new Set<TRPCError["code"]>(["UNAUTHORIZED", "FORBIDDEN"])
 
 type Result = { ok: true; data: unknown } | { ok: false; error: TRPCError }
 
+/** Whether the caller lacked the scope or the permission. */
+export const isDenied = (result: Result) => !result.ok && DENIED_CODES.has(result.error.code)
+
+/** Target ids, labels and reasons can come from the caller, so they are cut like strings in copies. */
+const cut = (value: string | null) => (value === null ? null : (copyOf(value, 0) as string))
+
 const MAX_ERROR = 500
 
 /**
@@ -168,12 +175,12 @@ function outcomeOf(result: Result): { outcome: TAuditOutcome; error: string | nu
   return error === null ? { outcome: AUDIT_OUTCOME.SUCCESS, error: null } : { outcome: AUDIT_OUTCOME.FAILURE, error }
 }
 
-/** The first of `keys` that `value` holds as a string or a number. */
-function idIn(value: unknown, keys: string[]): string | null {
+/** The first of `keys` that `value` holds as a valid People id: raw inputs are not validated yet. */
+function personIdIn(value: unknown, keys: string[]): string | null {
   if (value === null || typeof value !== "object") return null
   for (const key of keys) {
-    const id = (value as Record<string, unknown>)[key]
-    if (typeof id === "string" || typeof id === "number") return String(id)
+    const id = personIdSchema.safeParse((value as Record<string, unknown>)[key])
+    if (id.success) return id.data
   }
   return null
 }
@@ -194,6 +201,7 @@ export function auditEvent(options: {
   const actor = actorOf(auth)
   if (!actor) return null
   const { outcome, error } = outcomeOf(result)
+  const targetId = note.target?.id == null ? null : String(note.target.id)
 
   const event: AuditEvent = {
     action: note.action ?? path,
@@ -203,9 +211,9 @@ export function auditEvent(options: {
     actorTgId: actor.tgId ?? null,
     actorClient: actor.client ?? null,
     targetType: note.target?.type ?? null,
-    targetId: note.target?.id == null ? null : String(note.target.id),
-    targetLabel: note.target?.label ?? null,
-    reason: note.reason ?? null,
+    targetId: cut(targetId),
+    targetLabel: cut(note.target?.label ?? null),
+    reason: cut(note.reason ?? null),
     outcome,
     error,
     // A refused call changed nothing, and its input is whatever the caller chose to send.
@@ -216,7 +224,8 @@ export function auditEvent(options: {
 
   const minimal = MINIMAL_AREAS.find((area) => path.startsWith(area.prefix))
   if (!minimal) return event
-  const id = idIn(options.rawInput, ["personId", "id"]) ?? (result.ok ? idIn(result.data, ["personId", "id"]) : null)
+  const id =
+    personIdIn(options.rawInput, ["personId", "id"]) ?? (result.ok ? personIdIn(result.data, ["personId", "id"]) : null)
   return {
     ...event,
     targetType: minimal.targetType,

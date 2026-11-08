@@ -433,7 +433,7 @@ describe("audit log", () => {
     audited.length = 0
   })
 
-  it("filters by every area of the router", async () => {
+  it("offers every area of the router as a filter", async () => {
     const { AUDIT_AREAS } = await import("@/routers/audit")
     const areas = new Set(procedures().map(([path]) => path.split(".")[0]))
     areas.delete("audit")
@@ -481,9 +481,55 @@ describe("audit log", () => {
         targetType: "tg.user",
         targetId: "456",
         reason: "exam week",
-        after: { validSince: since.toISOString(), validUntil: until.toISOString() },
+        // Nothing was saved, so there is no state after.
+        after: null,
       }),
     ])
+  })
+
+  it("does not read the body of a call it will not record", async () => {
+    const { fetchRequestHandler } = await import("@trpc/server/adapters/fetch")
+    const send = async (auth: Context["auth"]) => {
+      let read = false
+      // No buffering, so `pull` runs only when someone reads the body.
+      const body = new ReadableStream(
+        {
+          pull(controller) {
+            read = true
+            controller.enqueue(new TextEncoder().encode(JSON.stringify({ json: { id: 3 } })))
+            controller.close()
+          },
+        },
+        { highWaterMark: 0 }
+      )
+      const res = await fetchRequestHandler({
+        endpoint: "/trpc",
+        router: appRouter,
+        req: new Request("http://backend/trpc/web.faqs.deleteFaqs", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+          duplex: "half",
+        } as RequestInit),
+        createContext: () => ({
+          auth,
+          access: {
+            has: () => false,
+            current: () => null,
+            subjectBySub: () => undefined,
+            subjectByTelegramId: () => undefined,
+            status: () => ({ lastSyncAt: 1, fresh: true, generation: 1, subjects: 1 }),
+          },
+        }),
+      })
+      return { status: res.status, read }
+    }
+    expect(await send(undefined)).toEqual({ status: 401, read: false })
+    expect(await send({ kind: "token", actor: admin, scopes: new Set(["backend:admin"]) })).toEqual({
+      status: 403,
+      read: false,
+    })
+    expect(audited).toEqual([expect.objectContaining({ outcome: "denied", input: null })])
   })
 
   it("does not record calls refused before the caller is known, nor queries", async () => {

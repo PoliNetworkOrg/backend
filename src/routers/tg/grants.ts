@@ -76,11 +76,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
-      ctx.audit.set({
-        target: { type: "tg.user", id: input.userId },
-        after: { validSince: input.since, validUntil: input.until },
-        reason: input.reason,
-      })
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId }, reason: input.reason })
       if (actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
 
       try {
@@ -97,6 +93,7 @@ export default createTRPCRouter({
           grantedBySub: actor.sub,
           grantedViaClient: actor.client,
         })
+        ctx.audit.set({ after: { validSince: input.since, validUntil: input.until } })
 
         if (input.sendTgLog) {
           const author = await describeActor(actor)

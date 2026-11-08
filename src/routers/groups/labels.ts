@@ -121,6 +121,8 @@ export default createTRPCRouter({
         .where(eq(GROUP_LABELS.label, label))
         .returning()
 
+      // An unknown label changed nothing.
+      if (result.length === 0) ctx.audit.skip()
       ctx.audit.set({
         target: { type: "groups.label", id: result[0]?.id ?? before?.id ?? null, label: newLabel ?? label },
         before,
@@ -139,7 +141,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { groupId, type, label } = input
-      ctx.audit.set({ target: { type: `${type}.group`, id: groupId }, after: { label } })
+      ctx.audit.set({ target: { type: `${type}.group`, id: groupId } })
 
       await assertGroupExists(groupId, type)
       const labelIdResult = await DB.select({ id: GROUP_LABELS.id })
@@ -149,22 +151,12 @@ export default createTRPCRouter({
       if (!labelIdResult.length) throw new Error("Label not found")
       const labelId = labelIdResult[0].id
 
-      if (type === "tg") {
-        const result = await DB.insert(TG_RELATIONS)
-          .values({
-            groupId,
-            labelId,
-          })
-          .returning()
-        return result
-      }
-
-      return DB.insert(WA_RELATIONS)
-        .values({
-          groupId,
-          labelId,
-        })
-        .returning()
+      const result =
+        type === "tg"
+          ? await DB.insert(TG_RELATIONS).values({ groupId, labelId }).returning()
+          : await DB.insert(WA_RELATIONS).values({ groupId, labelId }).returning()
+      ctx.audit.set({ after: { label } })
+      return result
     }),
 
   untagGroup: policy(dashboard("groups:labels:write"))
@@ -177,7 +169,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { groupId, type, label } = input
-      ctx.audit.set({ target: { type: `${type}.group`, id: groupId }, before: { label } })
+      ctx.audit.set({ target: { type: `${type}.group`, id: groupId } })
 
       await assertGroupExists(groupId, type)
 
@@ -188,12 +180,17 @@ export default createTRPCRouter({
       if (!labelIdResult.length) throw new Error("Label not found")
       const labelId = labelIdResult[0].id
 
-      return type === "tg"
-        ? DB.delete(TG_RELATIONS)
-            .where(and(eq(TG_RELATIONS.groupId, groupId), eq(TG_RELATIONS.labelId, labelId)))
-            .returning()
-        : DB.delete(WA_RELATIONS)
-            .where(and(eq(WA_RELATIONS.groupId, groupId), eq(WA_RELATIONS.labelId, labelId)))
-            .returning()
+      const result =
+        type === "tg"
+          ? await DB.delete(TG_RELATIONS)
+              .where(and(eq(TG_RELATIONS.groupId, groupId), eq(TG_RELATIONS.labelId, labelId)))
+              .returning()
+          : await DB.delete(WA_RELATIONS)
+              .where(and(eq(WA_RELATIONS.groupId, groupId), eq(WA_RELATIONS.labelId, labelId)))
+              .returning()
+      // The group may not have had the label: then nothing changed.
+      if (result.length === 0) ctx.audit.skip()
+      else ctx.audit.set({ before: { label } })
+      return result
     }),
 })

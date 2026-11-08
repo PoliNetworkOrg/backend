@@ -70,6 +70,8 @@ export default createTRPCRouter({
       const { id, ...values } = input
       const [before] = await DB.select().from(GROUPS).where(eq(GROUPS.id, id)).limit(1)
       const [updated] = await DB.update(GROUPS).set(values).where(eq(GROUPS.id, id)).returning()
+      // An unknown group changed nothing.
+      if (!updated) ctx.audit.skip()
       ctx.audit.set({
         target: { type: "wa.group", id, label: updated?.title ?? before?.title },
         before,
