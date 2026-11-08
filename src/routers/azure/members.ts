@@ -1,5 +1,6 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { azureDirectory } from "@/azure/directory"
 import { IncompleteMemberError, safeErrorDetail } from "@/azure/errors"
 import { MAIL_DOMAIN, mailboxLocalPart, mailboxSchema } from "@/azure/mailbox"
@@ -40,6 +41,7 @@ export default createTRPCRouter({
    * optionally email the new number. Token callers only: it can send mail to a caller-supplied address.
    */
   setAssocNumber: policy(dashboard("azure:members:write"))
+    .meta(audit.full({ fields: ["userId", "assocNumber"] }))
     .input(
       z.object({
         userId: z.string().min(1),
@@ -121,6 +123,7 @@ export default createTRPCRouter({
    * caller-supplied group or existing user. The address is `firstname.lastname` unless a custom one is chosen.
    */
   create: policy(dashboard("azure:members:create"))
+    .meta(audit.full({ fields: ["assocNumber", "mailbox"] }))
     .input(
       z.object({
         firstName: personName,
@@ -187,7 +190,7 @@ export default createTRPCRouter({
         logger.info({ by, memberId: member.id, assocNumber: input.assocNumber }, "[AZURE] member created")
         ctx.audit.set({
           target: { type: "azure.member", id: member.id, label: name },
-          after: { id: member.id, email: member.mail, assocNumber: input.assocNumber },
+          after: { id: member.id, assocNumber: input.assocNumber },
         })
 
         let mailOk = false

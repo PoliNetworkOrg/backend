@@ -1,5 +1,6 @@
 import { count, eq, sql } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { botReadOrDashboard, dashboard, SCOPE } from "@/idp/policies"
 import { logger } from "@/logger"
@@ -138,6 +139,7 @@ export default createTRPCRouter({
     }),
 
   add: policy({ service: { scope: SCOPE.tgIngest } })
+    .meta(audit.none("The bot's ingestion of the users it sees, not changes made by someone"))
     .input(z.object({ users: z.array(TgUserSchema) }))
     .output(
       z.union([

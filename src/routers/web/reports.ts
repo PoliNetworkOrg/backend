@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA, VIEWS } from "@/db"
 import { dashboard, SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
@@ -29,6 +30,7 @@ function reportsTarget(ids: number[]) {
 
 export const reports = createTRPCRouter({
   create: policy({ service: { scope: SCOPE.publicRead } })
+    .meta(audit.full())
     .input(
       z.discriminatedUnion("reportType", [
         z.object({
@@ -84,6 +86,7 @@ export const reports = createTRPCRouter({
     }),
 
   resolve: policy(dashboard("web:reports:manage"))
+    .meta(audit.full())
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
     .mutation(async ({ input, ctx }) => {
       const before = await DB.select().from(REPORTS).where(inArray(REPORTS.id, input.ids))
@@ -96,6 +99,7 @@ export const reports = createTRPCRouter({
     }),
 
   dismiss: policy(dashboard("web:reports:manage"))
+    .meta(audit.full())
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
     .mutation(async ({ input, ctx }) => {
       const before = await DB.select().from(REPORTS).where(inArray(REPORTS.id, input.ids))

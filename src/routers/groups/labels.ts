@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { authorOf } from "@/idp/author"
 import { dashboard } from "@/idp/policies"
@@ -32,6 +33,7 @@ export default createTRPCRouter({
   }),
 
   create: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         label,
@@ -57,6 +59,7 @@ export default createTRPCRouter({
     }),
 
   delete: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         label,
@@ -93,6 +96,7 @@ export default createTRPCRouter({
     }),
 
   modify: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         label,
@@ -132,6 +136,7 @@ export default createTRPCRouter({
     }),
 
   tagGroup: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         groupId: z.number(),
@@ -160,6 +165,7 @@ export default createTRPCRouter({
     }),
 
   untagGroup: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         groupId: z.number(),

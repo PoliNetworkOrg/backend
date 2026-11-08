@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { and, eq, gt, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { describeActor } from "@/idp/actor-info"
 import { ACT_AS_SCOPE } from "@/idp/auth"
@@ -53,6 +54,7 @@ export default createTRPCRouter({
    * grantor is the token's user.
    */
   create: policy(dashboard("tg:grants:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         userId: z.number(),
@@ -121,6 +123,7 @@ export default createTRPCRouter({
     telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
     ...dashboard("tg:grants:manage"),
   })
+    .meta(audit.full())
     .input(
       z.object({
         userId: z.number(),

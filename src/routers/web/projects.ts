@@ -1,5 +1,6 @@
 import { asc, eq } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { projectsCategories } from "@/db/schema/web/projects"
@@ -43,6 +44,7 @@ export default createTRPCRouter({
     }),
 
   addProject: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -73,6 +75,7 @@ export default createTRPCRouter({
     }),
 
   editProject: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -113,6 +116,7 @@ export default createTRPCRouter({
     }),
 
   reorderProjects: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         projectIds: z
@@ -138,6 +142,7 @@ export default createTRPCRouter({
     }),
 
   deleteProject: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),

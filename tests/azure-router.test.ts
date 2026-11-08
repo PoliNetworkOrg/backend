@@ -133,7 +133,7 @@ describe("Azure tRPC routes without credentials", () => {
       targetType: "azure.member",
       targetId: result.id,
       targetLabel: "Katherine Johnson",
-      after: { id: result.id, email: "katherine.johnson@polinetwork.org", assocNumber: 2043 },
+      after: { id: result.id, assocNumber: 2043 },
     })
   })
 

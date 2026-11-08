@@ -64,6 +64,7 @@ vi.mock("@/db", () => ({
 
 vi.mock("@/trpc", () => {
   const publicProcedure = {
+    meta: () => publicProcedure,
     input: (schema: { parse: (input: unknown) => unknown }) => ({
       mutation: (handler: (args: { input: unknown; ctx: unknown }) => unknown) => ({
         execute: (input: unknown) =>

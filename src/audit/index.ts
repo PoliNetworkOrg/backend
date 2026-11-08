@@ -9,15 +9,10 @@ import {
   type TAuditOutcome,
 } from "@/db/schema/common/audit-events"
 import type { RequestAuth } from "@/idp/auth"
-import { personIdSchema } from "@/people/contract"
+import type { AuditOption, AuditTarget } from "./option"
 
 export type AuditEvent = typeof auditEvents.$inferInsert
-
-/**
- * What a change was made to; `label` is a readable name, kept as it was at the time. `id` is null when the call acts
- * on several records, which are then named in the input.
- */
-export type AuditTarget = { type: string; id: string | number | null; label?: string | null }
+export { type AuditOption, type AuditTarget, type AuditTargetOf, audit } from "./option"
 
 export type AuditActor = { kind: TAuditActorKind; sub?: string | null; tgId?: number | null; client?: string | null }
 
@@ -37,19 +32,8 @@ export type AuditRecorder = {
   skip: () => void
 }
 
-/**
- * Mutations that are not changes made by someone: the bot's high-volume ingestion and per-visit syncs. Moderation the
- * bot reports is kept in `tg_audit_log`, under its own retention rules, and not copied here.
- */
-export const UNAUDITED = new Set(["tg.messages.add", "tg.users.add", "tg.auditLog.record", "esign.profile.sync"])
-
-/**
- * Areas that keep their own history, readable with their own permissions: their events name the actor, the action,
- * the target and the outcome, without the input or the state before and after.
- *
- * Temporary: a per-procedure `audit` option in the procedure meta replaces this list.
- */
-const MINIMAL_AREAS = [{ prefix: "people.", targetType: "people.person" }]
+/** For a mutation without an option, which the router test keeps from shipping: the option that stores the least. */
+export const UNDECLARED: AuditOption = { capture: "minimal" }
 
 /** Handed to queries, which change nothing. */
 export const noAudit: AuditRecorder = { set: () => {}, skip: () => {} }
@@ -175,14 +159,10 @@ function outcomeOf(result: Result): { outcome: TAuditOutcome; error: string | nu
   return error === null ? { outcome: AUDIT_OUTCOME.SUCCESS, error: null } : { outcome: AUDIT_OUTCOME.FAILURE, error }
 }
 
-/** The first of `keys` that `value` holds as a valid People id: raw inputs are not validated yet. */
-function personIdIn(value: unknown, keys: string[]): string | null {
-  if (value === null || typeof value !== "object") return null
-  for (const key of keys) {
-    const id = personIdSchema.safeParse((value as Record<string, unknown>)[key])
-    if (id.success) return id.data
-  }
-  return null
+/** Only `fields` of a copied input, when it is an object. */
+function onlyFields(copy: AuditJson, fields: readonly string[] | undefined): AuditJson {
+  if (!fields || copy === null || typeof copy !== "object" || Array.isArray(copy)) return copy
+  return Object.fromEntries(fields.flatMap((field) => (field in copy ? [[field, copy[field] ?? null]] : [])))
 }
 
 /**
@@ -191,49 +171,49 @@ function personIdIn(value: unknown, keys: string[]): string | null {
  */
 export function auditEvent(options: {
   path: string
+  option?: AuditOption
   auth: RequestAuth | undefined
   requestId?: string | null
   rawInput: unknown
   note: AuditNote
   result: Result
 }): AuditEvent | null {
-  const { path, auth, note, result } = options
-  const actor = actorOf(auth)
+  const { path, note, result } = options
+  const option = options.option ?? UNDECLARED
+  if (option.capture === "none") return null
+  const actor = actorOf(options.auth)
   if (!actor) return null
   const { outcome, error } = outcomeOf(result)
-  const targetId = note.target?.id == null ? null : String(note.target.id)
 
+  // What the handler names wins over the option's target, which only sees the raw input and the result.
+  const target =
+    note.target ?? option.target?.({ input: options.rawInput, data: result.ok ? result.data : undefined }) ?? undefined
+  const targetId = target?.id == null ? null : String(target.id)
   const event: AuditEvent = {
-    action: note.action ?? path,
+    action: note.action ?? option.action ?? path,
     requestId: options.requestId ?? null,
     actorKind: actor.kind,
     actorSub: actor.sub ?? null,
     actorTgId: actor.tgId ?? null,
     actorClient: actor.client ?? null,
-    targetType: note.target?.type ?? null,
+    targetType: target?.type ?? null,
     targetId: cut(targetId),
-    targetLabel: cut(note.target?.label ?? null),
-    reason: cut(note.reason ?? null),
+    targetLabel: cut(target?.label ?? null),
+    reason: null,
     outcome,
     error,
-    // A refused call changed nothing, and its input is whatever the caller chose to send.
-    input: outcome === AUDIT_OUTCOME.DENIED ? null : auditJson(options.rawInput),
-    before: note.before === undefined ? null : auditJson(note.before),
-    after: note.after === undefined ? null : auditJson(note.after),
-  }
-
-  const minimal = MINIMAL_AREAS.find((area) => path.startsWith(area.prefix))
-  if (!minimal) return event
-  const id =
-    personIdIn(options.rawInput, ["personId", "id"]) ?? (result.ok ? personIdIn(result.data, ["personId", "id"]) : null)
-  return {
-    ...event,
-    targetType: minimal.targetType,
-    targetId: id,
-    targetLabel: null,
-    reason: null,
     input: null,
     before: null,
     after: null,
+  }
+  if (option.capture === "minimal") return event
+
+  return {
+    ...event,
+    reason: cut(note.reason ?? null),
+    // A refused call changed nothing, and its input is whatever the caller chose to send.
+    input: outcome === AUDIT_OUTCOME.DENIED ? null : onlyFields(auditJson(options.rawInput), option.fields),
+    before: note.before === undefined ? null : auditJson(note.before),
+    after: note.after === undefined ? null : auditJson(note.after),
   }
 }
