@@ -165,42 +165,52 @@ export default createTRPCRouter({
     )
     .output(z.array(z.number()))
     .mutation(async ({ input, ctx }) => {
-      const replaced = []
-      for (const group of input) {
-        replaced.push(
-          ...(await DB.delete(GROUPS)
-            .where(and(eq(GROUPS.link, group.link), ne(GROUPS.telegramId, group.telegramId)))
-            .returning())
-        )
-      }
-      const before = await DB.select()
-        .from(GROUPS)
-        .where(
-          inArray(
-            GROUPS.telegramId,
-            input.map((group) => group.telegramId)
+      // One transaction, so the recorded state before is the one the upsert replaced.
+      const { replaced, before, rows } = await DB.transaction(async (tx) => {
+        const replaced = []
+        for (const group of input) {
+          replaced.push(
+            ...(await tx
+              .delete(GROUPS)
+              .where(and(eq(GROUPS.link, group.link), ne(GROUPS.telegramId, group.telegramId)))
+              .returning())
           )
-        )
+        }
+        const before = await tx
+          .select()
+          .from(GROUPS)
+          .where(
+            inArray(
+              GROUPS.telegramId,
+              input.map((group) => group.telegramId)
+            )
+          )
 
-      const rows = await DB.insert(GROUPS)
-        .values(input)
-        .onConflictDoUpdate({
-          target: GROUPS.telegramId,
-          set: {
-            // this means: use the new value
-            title: sql.raw(`excluded.${GROUPS.title.name}`),
-            tag: sql.raw(`excluded.${GROUPS.tag.name}`),
-            link: sql.raw(`excluded.${GROUPS.link.name}`),
-          },
-        })
-        .returning()
+        const rows = await tx
+          .insert(GROUPS)
+          .values(input)
+          .onConflictDoUpdate({
+            target: GROUPS.telegramId,
+            set: {
+              // this means: use the new value
+              title: sql.raw(`excluded.${GROUPS.title.name}`),
+              tag: sql.raw(`excluded.${GROUPS.tag.name}`),
+              link: sql.raw(`excluded.${GROUPS.link.name}`),
+            },
+          })
+          .returning()
+        return { replaced, before, rows }
+      })
       // The bot syncs groups often; only what it changes is recorded.
       const known = new Map(before.map((group) => [group.telegramId, group]))
       const changed = rows.filter((row) => {
         const old = known.get(row.telegramId)
         return !old || old.title !== row.title || old.tag !== row.tag || old.link !== row.link
       })
-      if (replaced.length === 0 && changed.length === 0) ctx.audit.skip()
+      if (replaced.length === 0 && changed.length === 0) {
+        ctx.audit.skip()
+        return rows.map((r) => r.telegramId)
+      }
       ctx.audit.set({
         target:
           input.length === 1

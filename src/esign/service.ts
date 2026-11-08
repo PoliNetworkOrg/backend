@@ -889,13 +889,10 @@ export function createEsignService(options: ServiceOptions) {
         roles: [...new Set(r.roles.map((k) => k.trim()).filter(Boolean))].sort(),
         permissions: [...new Set(r.permissions.map((k) => k.trim()).filter(Boolean))].sort(),
       })
-      await store.setDriveAccess({
-        driveId,
-        request: clean(rule.request),
-        sign: clean(rule.sign),
-        updatedBySub: caller.sub,
-      })
+      const saved = { request: clean(rule.request), sign: clean(rule.sign) }
+      await store.setDriveAccess({ driveId, ...saved, updatedBySub: caller.sub })
       logger.info({ driveId, by: caller.sub }, "[ESIGN] drive access changed")
+      return saved
     },
 
     /**

@@ -128,9 +128,11 @@ export const esignRouter = createTRPCRouter({
         ctx.audit.set({
           target: { type: "esign.drive", id: input.driveId, label: drive?.label },
           before: drive && { request: drive.request, sign: drive.sign },
-          after: { request: input.request, sign: input.sign },
         })
-        return run(() => esign.setDriveAccess(caller, input.driveId, { request: input.request, sign: input.sign }))
+        const saved = await run(() =>
+          esign.setDriveAccess(caller, input.driveId, { request: input.request, sign: input.sign })
+        )
+        ctx.audit.set({ after: saved })
       }),
   }),
 

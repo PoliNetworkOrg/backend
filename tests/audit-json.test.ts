@@ -1,6 +1,7 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { TRPCError } from "@trpc/server"
 import { describe, expect, it } from "vitest"
+import { z } from "zod/v4"
 import { auditEvent, auditJson } from "@/audit"
 
 describe("auditJson", () => {
@@ -83,6 +84,19 @@ describe("auditEvent", () => {
       outcome: "denied",
       input: null,
     })
+  })
+
+  it("lists the issues of an invalid input rather than their JSON", () => {
+    const invalid = z.object({ id: z.number(), title: z.string() }).safeParse({ id: "x" })
+    const event = auditEvent({
+      path: "web.faqs.editFaqs",
+      auth,
+      rawInput: { id: "x" },
+      note: {},
+      result: { ok: false, error: new TRPCError({ code: "BAD_REQUEST", cause: invalid.error }) },
+    })
+    expect(event?.outcome).toBe("failure")
+    expect(event?.error).toMatch(/^id: .+; title: .+$/)
   })
 
   it("names several targets by their number, without an id", () => {

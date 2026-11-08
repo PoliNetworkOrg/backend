@@ -1,4 +1,5 @@
 import type { TRPCError } from "@trpc/server"
+import { ZodError } from "zod/v4"
 import {
   AUDIT_ACTOR_KIND,
   AUDIT_OUTCOME,
@@ -52,6 +53,7 @@ const MINIMAL_AREAS = [{ prefix: "people.", targetType: "people.person" }]
 /** Handed to queries, which change nothing. */
 export const noAudit: AuditRecorder = { set: () => {}, skip: () => {} }
 
+/** A fresh recorder for one mutation, with the note it collects and whether the handler skipped the event. */
 export function auditRecorder() {
   const note: AuditNote = {}
   let skipped = false
@@ -112,6 +114,7 @@ export function auditJson(value: unknown): AuditJson {
   return size > MAX_JSON ? `(${size} characters, too large to keep)` : copy
 }
 
+/** The caller from the verified token; null without one, so such calls are not recorded. */
 function actorOf(auth: RequestAuth | undefined): AuditActor | null {
   if (auth?.kind !== "token") return null
   const { actor } = auth
@@ -141,14 +144,20 @@ const MAX_ERROR = 500
 
 /**
  * The root cause's message, on one line: a database error then reads "violates foreign key constraint …" rather than
- * the failed query with its parameters.
+ * the failed query with its parameters, and an invalid input lists its issues rather than their JSON.
  */
 function errorMessage(error: Error) {
   let cause = error
   while (cause.cause instanceof Error) cause = cause.cause
+  if (cause instanceof ZodError)
+    return cause.issues
+      .map((issue) => (issue.path.length ? `${issue.path.join(".")}: ${issue.message}` : issue.message))
+      .join("; ")
+      .slice(0, MAX_ERROR)
   return (cause.message.split("\n")[0] ?? "").slice(0, MAX_ERROR)
 }
 
+/** Success, failure or denial, from a thrown error or an error the handler returned. */
 function outcomeOf(result: Result): { outcome: TAuditOutcome; error: string | null } {
   if (!result.ok)
     return {

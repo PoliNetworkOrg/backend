@@ -7,6 +7,7 @@ import { decryptUser } from "@/utils/users"
 const DIRECTORY_TTL_MS = 5 * 60_000
 let directory: { at: number; names: Map<string, string> } | null = null
 
+/** The IdP directory's names by subject, cached for `DIRECTORY_TTL_MS`; empty without a directory. */
 async function directoryNames(): Promise<Map<string, string>> {
   if (!idp?.directory) return new Map()
   if (directory && Date.now() - directory.at < DIRECTORY_TTL_MS) return directory.names
@@ -15,8 +16,10 @@ async function directoryNames(): Promise<Map<string, string>> {
     directory = { at: Date.now(), names: new Map(people.map((person) => [person.sub, person.name])) }
   } catch (error) {
     logger.warn({ err: error }, "[AUDIT] cannot read the IdP directory")
+    // Keeps the last names and waits a full TTL before asking again, rather than on every read.
+    directory = { at: Date.now(), names: directory?.names ?? new Map() }
   }
-  return directory?.names ?? new Map()
+  return directory.names
 }
 
 /** Display names of IdP subjects: from the IdP's directory, else from the profiles Signatures keeps. */

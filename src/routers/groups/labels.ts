@@ -69,7 +69,11 @@ export default createTRPCRouter({
         .from(GROUP_LABELS)
         .where(eq(GROUP_LABELS.label, label))
         .limit(1)
-      if (!labelRow.length) return []
+      if (!labelRow.length) {
+        // Nothing to delete, so nothing changed.
+        ctx.audit.skip()
+        return []
+      }
       const labelId = labelRow[0].id
 
       const [[tgCount], [waCount]] = await Promise.all([
@@ -118,7 +122,7 @@ export default createTRPCRouter({
         .returning()
 
       ctx.audit.set({
-        target: { type: "groups.label", id: before?.id ?? label, label: newLabel ?? label },
+        target: { type: "groups.label", id: result[0]?.id ?? before?.id ?? null, label: newLabel ?? label },
         before,
         after: result[0],
       })

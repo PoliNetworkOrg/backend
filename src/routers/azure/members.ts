@@ -50,7 +50,7 @@ export default createTRPCRouter({
     .output(z.object({ error: z.nullable(z.string()), notificationSent: z.nullable(z.boolean()) }))
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
-      ctx.audit.set({ target: { type: "azure.member", id: input.userId }, after: { assocNumber: input.assocNumber } })
+      ctx.audit.set({ target: { type: "azure.member", id: input.userId } })
       try {
         const changed = await serializeMemberWrite(async () => {
           const member = await currentMember(input.userId)
@@ -71,6 +71,7 @@ export default createTRPCRouter({
             return { error: "Microsoft 365 refused the change, see the backend logs." }
           }
           rememberNumber(member, input.assocNumber)
+          ctx.audit.set({ after: { assocNumber: input.assocNumber } })
           return { error: null, member }
         })
         if (changed.error !== null) return { error: changed.error, notificationSent: null }
@@ -208,6 +209,11 @@ export default createTRPCRouter({
         }
       } catch (error) {
         if (error instanceof IncompleteMemberError) {
+          // The account exists, only partly set up: name it like a created member.
+          ctx.audit.set({
+            target: { type: "azure.member", id: error.member.id, label: name },
+            after: { id: error.member.id, assocNumber: input.assocNumber },
+          })
           logger.error(
             { error: safeErrorDetail(error.cause), by, memberId: error.member.id },
             "[AZURE] member setup incomplete"

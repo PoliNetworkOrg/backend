@@ -122,20 +122,18 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const order = () =>
-        DB.select({ id: PROJECTS.id, title: PROJECTS.title }).from(PROJECTS).orderBy(asc(PROJECTS.order))
-      const before = await order()
-      await DB.transaction(async (tx) => {
+      // Both orders are read in the reorder's transaction, so they are the ones it changed.
+      const { before, after } = await DB.transaction(async (tx) => {
+        const order = () =>
+          tx.select({ id: PROJECTS.id, title: PROJECTS.title }).from(PROJECTS).orderBy(asc(PROJECTS.order))
+        const before = await order()
         await Promise.all(
           input.projectIds.map((id, index) => tx.update(PROJECTS).set({ order: index }).where(eq(PROJECTS.id, id)))
         )
+        return { before, after: await order() }
       })
 
-      ctx.audit.set({
-        target: { type: "web.projects", id: "order", label: "Projects order" },
-        before,
-        after: await order(),
-      })
+      ctx.audit.set({ target: { type: "web.projects", id: "order", label: "Projects order" }, before, after })
       return { error: null }
     }),
 
