@@ -232,6 +232,13 @@
       "when": 1793377749431,
       "tag": "0032_people_linking",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794131956902,
+      "tag": "0033_audit_events",
+      "breakpoints": true
     }
   ]
 }

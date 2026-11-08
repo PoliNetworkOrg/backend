@@ -71,6 +71,7 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.guide", id: res.id, label: res.version }, after: res })
       return res
     }),
 
@@ -80,9 +81,10 @@ export default createTRPCRouter({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       const deleted = await DB.delete(GUIDES_MATRICOLE).where(eq(GUIDES_MATRICOLE.id, id)).returning()
+      ctx.audit.set({ target: { type: "web.guide", id, label: deleted[0]?.version }, before: deleted[0] })
 
       if (deleted.length === 0) return { error: "NOT_FOUND" }
 

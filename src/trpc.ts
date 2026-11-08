@@ -2,6 +2,7 @@ import type { AccessSnapshotClient, Actor } from "@polinetwork/auth-kit"
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
 import { ZodError, z } from "zod/v4"
+import { auditEvent, auditRecorder, isDenied, noAudit, UNAUDITED } from "./audit"
 import { env } from "./env"
 import type { RequestAuth } from "./idp/auth"
 import { logger } from "./logger"
@@ -11,6 +12,8 @@ export type Context = {
   auth?: RequestAuth
   /** Permission source for token callers; null denies every permission. */
   access?: Pick<AccessSnapshotClient, "has" | "current" | "subjectBySub" | "subjectByTelegramId" | "status"> | null
+  /** Set by the HTTP adapter, one per request: the audit events of a batched request share it. */
+  requestId?: string
 }
 
 /**
@@ -66,6 +69,35 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
   return result
 })
 
+/**
+ * Records every mutation in `common_audit_events` (see `src/audit`): who called it, with what input, and whether it
+ * succeeded, failed or was denied. It runs before the policy so that denied calls are kept too, without their input.
+ * Handlers add the target and the state before and after through `ctx.audit`. A failed write is logged and does not
+ * fail the call, whose change has already happened.
+ */
+const auditMiddleware = t.middleware(async ({ ctx, path, type, getRawInput, next }) => {
+  // Calls without a valid token are not recorded, so their bodies are never read for the log.
+  if (type !== "mutation" || UNAUDITED.has(path) || ctx.auth?.kind !== "token") return next({ ctx: { audit: noAudit } })
+
+  const { recorder, note, skipped } = auditRecorder()
+  const result = await next({ ctx: { audit: recorder } })
+  if (skipped()) return result
+
+  try {
+    // A denied call's body may never have been read, and the event keeps none of it.
+    const rawInput = isDenied(result) ? undefined : await getRawInput().catch(() => undefined)
+    const event = auditEvent({ path, auth: ctx.auth, requestId: ctx.requestId, rawInput, note, result })
+    if (event) {
+      // Imported here so that loading the router does not open the database.
+      const { writeAuditEvent } = await import("./audit/store")
+      await writeAuditEvent(event)
+    }
+  } catch (error) {
+    logger.error({ err: error, procedure: path }, "[AUDIT] cannot record the event")
+  }
+  return result
+})
+
 /** What handlers see: the token's enforced actor. */
 type ActorContext = { actor: Actor; can: (permission: string) => boolean }
 
@@ -106,7 +138,7 @@ const enforcePolicy = t.middleware(async ({ ctx, meta, path, next }) => {
   return next({ ctx: enforced })
 })
 
-const baseProcedure = t.procedure.use(timingMiddleware)
+const baseProcedure = t.procedure.use(timingMiddleware).use(auditMiddleware)
 
 /** A procedure with its RFC v3 §8 policy. Every procedure must be built from this. */
 export const policy = (rules: Policy) => baseProcedure.meta({ policy: rules }).use(enforcePolicy)

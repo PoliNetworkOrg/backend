@@ -57,6 +57,30 @@ The bot's socket.io client authenticates with its service token in `auth.token` 
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
 
+## Audit log
+
+`common_audit_events` records who used which permission to change what through the backend. The tRPC audit middleware
+(`src/audit`) writes one event per mutation: the action (the procedure path), the caller from the token, the target,
+the outcome (`success`, `failure` when an error is thrown or returned, `denied` when the policy refuses the caller), the
+request id shared by the calls of one HTTP request, and when. Handlers add the target and the state before and after
+with `ctx.audit.set(...)`, or `ctx.audit.skip()` when a call changed nothing. Inputs and states are stored without
+secrets (`password`, `token`, `ticket`, `code`, `*Key`, `*Secret` fields) or file contents, and are cut when too large.
+Denied calls keep no input. Calls without a valid token are not recorded.
+
+Areas with their own history keep the details there, readable with their own permissions:
+
+- People: events name the actor, the action, the person and the outcome, without the input or the states; what changed
+  is in the person's activity history.
+- Telegram moderation: kept in `tg_audit_log` under its own retention rules and not copied here, like the bot's
+  ingestion (`tg.messages.add`, `tg.users.add`).
+
+Events are deleted 24 months after they were written (`AUDIT_EVENTS_RETENTION_MONTHS`). Dashboard users with the IdP
+permission `audit:read` read the log with `audit.list`, newest first, paged by `cursor` and filtered by area, outcome,
+target, actor, date or text.
+
+Changes made outside the backend's tRPC procedures are not in the log: directly in Telegram or WhatsApp, the cron jobs,
+the e-signing agent endpoints (each request keeps its own history) and roles and permissions in the IdP.
+
 ## People
 
 The `people` router is the admin dashboard's register of Group Admins, Capo Admins and team members. Each person

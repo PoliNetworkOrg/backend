@@ -50,10 +50,12 @@ export default createTRPCRouter({
     .output(z.object({ error: z.nullable(z.string()), notificationSent: z.nullable(z.boolean()) }))
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
+      ctx.audit.set({ target: { type: "azure.member", id: input.userId } })
       try {
         const changed = await serializeMemberWrite(async () => {
           const member = await currentMember(input.userId)
           if (!member) return { error: "This member no longer exists in the directory." }
+          ctx.audit.set({ before: { assocNumber: member.employeeId } })
           if (member.employeeId === input.assocNumber.toString())
             return { error: `The member already has number ${input.assocNumber}.` }
 
@@ -69,6 +71,7 @@ export default createTRPCRouter({
             return { error: "Microsoft 365 refused the change, see the backend logs." }
           }
           rememberNumber(member, input.assocNumber)
+          ctx.audit.set({ after: { assocNumber: input.assocNumber } })
           return { error: null, member }
         })
         if (changed.error !== null) return { error: changed.error, notificationSent: null }
@@ -140,6 +143,9 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
+      const name = `${input.firstName} ${input.lastName}`
+      // The member's directory id once it is created, like the other member changes.
+      ctx.audit.set({ target: { type: "azure.member", id: null, label: name } })
       const localPart = mailboxLocalPart(input.firstName, input.lastName, input.mailbox)
       if (localPart === null) return { error: "This name cannot form a standard address: choose a custom one." }
       const mail = `${localPart}@${MAIL_DOMAIN}`
@@ -179,6 +185,10 @@ export default createTRPCRouter({
         if (created.error !== null) return { error: created.error }
         const { member } = created
         logger.info({ by, memberId: member.id, assocNumber: input.assocNumber }, "[AZURE] member created")
+        ctx.audit.set({
+          target: { type: "azure.member", id: member.id, label: name },
+          after: { id: member.id, email: member.mail, assocNumber: input.assocNumber },
+        })
 
         let mailOk = false
         try {
@@ -199,6 +209,11 @@ export default createTRPCRouter({
         }
       } catch (error) {
         if (error instanceof IncompleteMemberError) {
+          // The account exists, only partly set up: name it like a created member.
+          ctx.audit.set({
+            target: { type: "azure.member", id: error.member.id, label: name },
+            after: { id: error.member.id, assocNumber: input.assocNumber },
+          })
           logger.error(
             { error: safeErrorDetail(error.cause), by, memberId: error.member.id },
             "[AZURE] member setup incomplete"

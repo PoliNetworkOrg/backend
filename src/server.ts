@@ -46,6 +46,7 @@ app.use(
         actor: c.req.header(ACTOR_HEADER),
       }),
       access: idp?.snapshot ?? null,
+      requestId: crypto.randomUUID(),
     }),
   })
 )

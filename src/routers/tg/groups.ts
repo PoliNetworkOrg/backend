@@ -1,4 +1,4 @@
-import { and, eq, exists, ilike, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
+import { and, eq, exists, ilike, inArray, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { DB, SCHEMA } from "@/db"
 import { describeActor } from "@/idp/actor-info"
@@ -164,23 +164,62 @@ export default createTRPCRouter({
       )
     )
     .output(z.array(z.number()))
-    .mutation(async ({ input }) => {
-      for (const group of input) {
-        await DB.delete(GROUPS).where(and(eq(GROUPS.link, group.link), ne(GROUPS.telegramId, group.telegramId)))
-      }
+    .mutation(async ({ input, ctx }) => {
+      // One transaction, so the recorded state before is the one the upsert replaced.
+      const { replaced, before, rows } = await DB.transaction(async (tx) => {
+        const replaced = []
+        for (const group of input) {
+          replaced.push(
+            ...(await tx
+              .delete(GROUPS)
+              .where(and(eq(GROUPS.link, group.link), ne(GROUPS.telegramId, group.telegramId)))
+              .returning())
+          )
+        }
+        const before = await tx
+          .select()
+          .from(GROUPS)
+          .where(
+            inArray(
+              GROUPS.telegramId,
+              input.map((group) => group.telegramId)
+            )
+          )
 
-      const rows = await DB.insert(GROUPS)
-        .values(input)
-        .onConflictDoUpdate({
-          target: GROUPS.telegramId,
-          set: {
-            // this means: use the new value
-            title: sql.raw(`excluded.${GROUPS.title.name}`),
-            tag: sql.raw(`excluded.${GROUPS.tag.name}`),
-            link: sql.raw(`excluded.${GROUPS.link.name}`),
-          },
-        })
-        .returning()
+        const rows = await tx
+          .insert(GROUPS)
+          .values(input)
+          .onConflictDoUpdate({
+            target: GROUPS.telegramId,
+            set: {
+              // this means: use the new value
+              title: sql.raw(`excluded.${GROUPS.title.name}`),
+              tag: sql.raw(`excluded.${GROUPS.tag.name}`),
+              link: sql.raw(`excluded.${GROUPS.link.name}`),
+            },
+          })
+          .returning()
+        return { replaced, before, rows }
+      })
+      // The bot syncs groups often; only what it changes is recorded.
+      const known = new Map(before.map((group) => [group.telegramId, group]))
+      const changed = rows.filter((row) => {
+        const old = known.get(row.telegramId)
+        return !old || old.title !== row.title || old.tag !== row.tag || old.link !== row.link
+      })
+      if (replaced.length === 0 && changed.length === 0) {
+        ctx.audit.skip()
+        return rows.map((r) => r.telegramId)
+      }
+      ctx.audit.set({
+        target:
+          input.length === 1
+            ? { type: "tg.group", id: input[0].telegramId, label: input[0].title }
+            : // Several groups are named by their number, with the ids in the input.
+              { type: "tg.group", id: null, label: `${input.length} groups` },
+        before: [...replaced, ...changed.flatMap((row) => known.get(row.telegramId) ?? [])],
+        after: changed,
+      })
       return rows.map((r) => r.telegramId)
     }),
 
@@ -191,8 +230,9 @@ export default createTRPCRouter({
       })
     )
     .output(z.boolean())
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const rows = await DB.delete(GROUPS).where(eq(GROUPS.telegramId, input.telegramId)).returning()
+      ctx.audit.set({ target: { type: "tg.group", id: input.telegramId, label: rows[0]?.title }, before: rows[0] })
       return rows.length === 1
     }),
 
@@ -203,11 +243,20 @@ export default createTRPCRouter({
         hide: z.boolean(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      const [before] = await DB.select({ hide: GROUPS.hide })
+        .from(GROUPS)
+        .where(eq(GROUPS.telegramId, input.telegramId))
+        .limit(1)
       const rows = await DB.update(GROUPS)
         .set({ hide: input.hide })
         .where(eq(GROUPS.telegramId, input.telegramId))
         .returning()
+      ctx.audit.set({
+        target: { type: "tg.group", id: input.telegramId, label: rows[0]?.title },
+        before,
+        after: rows[0] && { hide: rows[0].hide },
+      })
 
       return rows.length === 1
     }),
@@ -221,6 +270,8 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const performer = await describeActor(ctx.actor)
+      const [group] = await DB.select().from(GROUPS).where(eq(GROUPS.telegramId, input.chatId)).limit(1)
+      ctx.audit.set({ target: { type: "tg.group", id: input.chatId, label: group?.title }, before: group })
       const left = await WSS.leaveChat({
         chatId: input.chatId,
         performer,
