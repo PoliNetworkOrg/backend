@@ -59,20 +59,27 @@ The IdP notifies `POST /internal/events` when access changes; the backend also p
 
 ## Audit log
 
-Every mutation is recorded in `common_audit_events` by the tRPC audit middleware (`src/audit`): the action (the procedure
-path), the caller from the token (or `legacy` with the Telegram ID the legacy caller sent), the input, the outcome
-(`success`, `failure` when an error is thrown or returned, `denied` when the policy refuses a token caller) and when.
-Handlers add the target and the state before and after with `ctx.audit.set(...)`, or `ctx.audit.skip()` when a call
-changed nothing. Inputs and states are stored without secrets (`password`, `token`, `ticket`, `code`, `*key` fields) or
-file contents. Calls refused before the caller is known (no token on a closed legacy path, an invalid token) and the
-bot's ingestion (`tg.messages.add`, `tg.users.add`) are not recorded.
+`common_audit_events` records who used which permission to change what through the backend. The tRPC audit middleware
+(`src/audit`) writes one event per mutation: the action (the procedure path), the caller from the token, the target,
+the outcome (`success`, `failure` when an error is thrown or returned, `denied` when the policy refuses the caller), the
+request id shared by the calls of one HTTP request, and when. Handlers add the target and the state before and after
+with `ctx.audit.set(...)`, or `ctx.audit.skip()` when a call changed nothing. Inputs and states are stored without
+secrets (`password`, `token`, `ticket`, `code`, `*Key`, `*Secret` fields) or file contents, and are cut when too large.
+Denied calls keep no input. Calls without a valid token are not recorded.
 
-Telegram moderation the bot reports through `tg.auditLog` is recorded as `tg.moderation.<type>`, done by the moderator;
-the migration copies the existing `tg_audit_log`. Dashboard users with the IdP permission `audit:read` read the log with
-`audit.list`, newest first, paged by `cursor` and filtered by area, outcome, target or text.
+Areas with their own history keep the details there, readable with their own permissions:
 
-Changes made outside the backend are not in the log: directly in Telegram or WhatsApp unless the bot reports them, the
-cron jobs, the e-signing agent endpoints (each request keeps its own history) and roles and permissions in the IdP.
+- People: events name the actor, the action, the person and the outcome, without the input or the states; what changed
+  is in the person's activity history.
+- Telegram moderation: kept in `tg_audit_log` under its own retention rules and not copied here, like the bot's
+  ingestion (`tg.messages.add`, `tg.users.add`).
+
+Events are deleted 24 months after they were written (`AUDIT_EVENTS_RETENTION_MONTHS`). Dashboard users with the IdP
+permission `audit:read` read the log with `audit.list`, newest first, paged by `cursor` and filtered by area, outcome,
+target, actor, date or text.
+
+Changes made outside the backend's tRPC procedures are not in the log: directly in Telegram or WhatsApp, the cron jobs,
+the e-signing agent endpoints (each request keeps its own history) and roles and permissions in the IdP.
 
 ## People
 

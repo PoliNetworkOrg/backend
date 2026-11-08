@@ -12,6 +12,8 @@ export type Context = {
   auth?: RequestAuth
   /** Permission source for token callers; null denies every permission. */
   access?: Pick<AccessSnapshotClient, "has" | "current" | "subjectBySub" | "subjectByTelegramId" | "status"> | null
+  /** Set by the HTTP adapter, one per request: the audit events of a batched request share it. */
+  requestId?: string
 }
 
 /**
@@ -69,9 +71,9 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 
 /**
  * Records every mutation in `common_audit_events` (see `src/audit`): who called it, with what input, and whether it
- * succeeded, failed or was denied. It runs before the policy so that denied calls are kept too. Handlers add the
- * target and the state before and after through `ctx.audit`. A failed write is logged and does not fail the call,
- * whose change has already happened.
+ * succeeded, failed or was denied. It runs before the policy so that denied calls are kept too, without their input.
+ * Handlers add the target and the state before and after through `ctx.audit`. A failed write is logged and does not
+ * fail the call, whose change has already happened.
  */
 const auditMiddleware = t.middleware(async ({ ctx, path, type, getRawInput, next }) => {
   if (type !== "mutation" || UNAUDITED.has(path)) return next({ ctx: { audit: noAudit } })
@@ -82,7 +84,7 @@ const auditMiddleware = t.middleware(async ({ ctx, path, type, getRawInput, next
 
   try {
     const rawInput = await getRawInput().catch(() => undefined)
-    const event = auditEvent({ path, auth: ctx.auth, rawInput, note, result })
+    const event = auditEvent({ path, auth: ctx.auth, requestId: ctx.requestId, rawInput, note, result })
     if (event) {
       // Imported here so that loading the router does not open the database.
       const { writeAuditEvent } = await import("./audit/store")

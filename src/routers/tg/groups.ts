@@ -205,11 +205,8 @@ export default createTRPCRouter({
         target:
           input.length === 1
             ? { type: "tg.group", id: input[0].telegramId, label: input[0].title }
-            : {
-                type: "tg.group",
-                id: input.map((group) => group.telegramId).join(","),
-                label: `${input.length} groups`,
-              },
+            : // Several groups are named by their number, with the ids in the input.
+              { type: "tg.group", id: null, label: `${input.length} groups` },
         before: [...replaced, ...changed.flatMap((row) => known.get(row.telegramId) ?? [])],
         after: changed,
       })

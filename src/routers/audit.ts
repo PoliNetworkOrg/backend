@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, lt, or, type SQL } from "drizzle-orm"
+import { and, desc, eq, gte, ilike, lt, or, type SQL } from "drizzle-orm"
 import { z } from "zod"
 import { telegramNames, userNames } from "@/audit/names"
 import { DB, SCHEMA } from "@/db"
@@ -8,15 +8,15 @@ import { createTRPCRouter, policy } from "@/trpc"
 
 const EVENTS = SCHEMA.COMMON.auditEvents
 
-/** The first segment of an action: where in the ecosystem the change was made. */
-export const AUDIT_AREAS = ["web", "tg", "wa", "groups", "azure", "esign", "auth"] as const
+/** The first segment of an action: where in the ecosystem the change was made. A test keeps it in step with the routers. */
+export const AUDIT_AREAS = ["azure", "esign", "groups", "me", "people", "tg", "wa", "web"] as const
 
 const escapeLike = (value: string) => value.replace(/[\\%_]/g, (char) => `\\${char}`)
 
 export const auditRouter = createTRPCRouter({
   /**
    * Every change made through the backend, newest first: who made it, on what, the state before and after, and the
-   * outcome. Pages with `cursor`, the `nextCursor` of the previous page.
+   * outcome. Pages with `cursor`, the `nextCursor` of the previous page; `from` is inclusive, `to` exclusive.
    */
   list: policy(dashboard("audit:read"))
     .input(
@@ -28,6 +28,15 @@ export const auditRouter = createTRPCRouter({
         /** Matched against the action, the target, the reason and the error. */
         search: z.string().trim().max(100).optional(),
         target: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
+        /** Who made the changes: an IdP subject, or a Telegram user. */
+        actor: z
+          .union([
+            z.object({ sub: z.string().min(1) }),
+            z.object({ telegramId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }),
+          ])
+          .optional(),
+        from: z.date().optional(),
+        to: z.date().optional(),
       })
     )
     .query(async ({ input }) => {
@@ -36,6 +45,12 @@ export const auditRouter = createTRPCRouter({
       if (input.area) conditions.push(ilike(EVENTS.action, `${input.area}.%`))
       if (input.outcome) conditions.push(eq(EVENTS.outcome, input.outcome))
       if (input.target) conditions.push(eq(EVENTS.targetType, input.target.type), eq(EVENTS.targetId, input.target.id))
+      if (input.actor)
+        conditions.push(
+          "sub" in input.actor ? eq(EVENTS.actorSub, input.actor.sub) : eq(EVENTS.actorTgId, input.actor.telegramId)
+        )
+      if (input.from) conditions.push(gte(EVENTS.createdAt, input.from))
+      if (input.to) conditions.push(lt(EVENTS.createdAt, input.to))
       if (input.search) {
         const pattern = `%${escapeLike(input.search)}%`
         const matches = or(

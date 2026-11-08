@@ -143,7 +143,8 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const by = auditActor(ctx.actor)
       const name = `${input.firstName} ${input.lastName}`
-      ctx.audit.set({ target: { type: "azure.member", id: input.assocNumber, label: name } })
+      // The member's directory id once it is created, like the other member changes.
+      ctx.audit.set({ target: { type: "azure.member", id: null, label: name } })
       const localPart = mailboxLocalPart(input.firstName, input.lastName, input.mailbox)
       if (localPart === null) return { error: "This name cannot form a standard address: choose a custom one." }
       const mail = `${localPart}@${MAIL_DOMAIN}`

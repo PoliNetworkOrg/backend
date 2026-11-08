@@ -386,28 +386,11 @@ describe("tg.auditLog.record", () => {
     expect(audited).toEqual([])
   })
 
-  it("adds the action to the audit log as done by the moderator, through the bot", async () => {
+  it("keeps moderation out of the backend audit log, which has no moderation retention", async () => {
     await record(access(true, ["usr_10"]), { reason: "spam" })
-    expect(audited).toEqual([
-      expect.objectContaining({
-        action: "tg.moderation.ban",
-        actorKind: "telegram",
-        actorTgId: 10,
-        actorSub: "usr_10",
-        actorClient: "telegram-bot",
-        targetType: "tg.user",
-        targetId: "777",
-        reason: "spam",
-        outcome: "success",
-        after: { groupId: -100, until: null, basis: "idp_permission", review: null },
-      }),
-    ])
-    expect(audited[0]?.input).toMatchObject({ idempotencyKey: "(hidden)", targetId: 777 })
-  })
-
-  it("leaves automatic actions to the bot", async () => {
-    await record(access(true, []), { basis: "automatic", actorTelegramId: null })
-    expect(audited[0]).toMatchObject({ actorKind: "service", actorTgId: null, actorClient: "telegram-bot" })
+    await record(access(true, []), { basis: "automatic", actorTelegramId: null, idempotencyKey: "key-2" })
+    expect(db.inserted).toHaveLength(2)
+    expect(audited).toEqual([])
   })
 
   it("deletes the records of the measures a revocation lifts", async () => {
@@ -450,6 +433,13 @@ describe("audit log", () => {
     audited.length = 0
   })
 
+  it("filters by every area of the router", async () => {
+    const { AUDIT_AREAS } = await import("@/routers/audit")
+    const areas = new Set(procedures().map(([path]) => path.split(".")[0]))
+    areas.delete("audit")
+    expect([...AUDIT_AREAS].sort()).toEqual([...areas].sort())
+  })
+
   it("is readable only with audit:read", () => {
     const meta = procedures().find(([name]) => name === "audit.list")?.[1]._def.meta
     expect(meta?.policy).toEqual({ user: { scope: "backend:admin", permission: "audit:read" } })
@@ -459,7 +449,7 @@ describe("audit log", () => {
     await expect(appRouter.createCaller({}).audit.list({})).rejects.toMatchObject({ code: "UNAUTHORIZED" })
   })
 
-  it("records a denied mutation with the caller and the input", async () => {
+  it("records a denied mutation with the caller, without its input", async () => {
     await expect(caller([]).web.faqs.deleteFaqs({ id: 3 })).rejects.toMatchObject({ code: "FORBIDDEN" })
     expect(audited).toEqual([
       expect.objectContaining({
@@ -470,7 +460,7 @@ describe("audit log", () => {
         actorClient: "admin-dashboard",
         outcome: "denied",
         error: "Missing permission",
-        input: { id: 3 },
+        input: null,
         targetType: null,
       }),
     ])

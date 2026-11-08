@@ -1,5 +1,5 @@
 {
-  "id": "5528cb2f-2677-44b0-9bdb-46e65a78f0c6",
+  "id": "c566cb6d-c956-4ec6-b9e2-238b1b334db7",
   "prevId": "e5e83f23-209c-4eb1-a909-bf427b65e42d",
   "version": "7",
   "dialect": "postgresql",
@@ -30,6 +30,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "actor_kind": {
           "name": "actor_kind",
@@ -174,6 +180,36 @@
             },
             {
               "expression": "target_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "common_audit_events_request_id_idx": {
+          "name": "common_audit_events_request_id_idx",
+          "columns": [
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "common_audit_events_created_at_idx": {
+          "name": "common_audit_events_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

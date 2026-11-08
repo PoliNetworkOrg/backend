@@ -11,17 +11,18 @@ import type { RequestAuth } from "@/idp/auth"
 
 export type AuditEvent = typeof auditEvents.$inferInsert
 
-/** What a change was made to; `label` is a readable name, kept as it was at the time. */
-export type AuditTarget = { type: string; id: string | number; label?: string | null }
+/**
+ * What a change was made to; `label` is a readable name, kept as it was at the time. `id` is null when the call acts
+ * on several records, which are then named in the input.
+ */
+export type AuditTarget = { type: string; id: string | number | null; label?: string | null }
 
 export type AuditActor = { kind: TAuditActorKind; sub?: string | null; tgId?: number | null; client?: string | null }
 
 /** What only the handler knows about its change. Each call adds to or replaces the previous fields. */
 export type AuditNote = {
-  /** Replaces the procedure path, e.g. `tg.moderation.ban` for moderation the bot reports. */
+  /** Replaces the procedure path. */
   action?: string
-  /** Replaces the caller, for changes the caller reports on someone else's behalf. */
-  actor?: AuditActor
   target?: AuditTarget
   before?: unknown
   after?: unknown
@@ -34,8 +35,19 @@ export type AuditRecorder = {
   skip: () => void
 }
 
-/** Mutations that are not changes made by someone: the bot's high-volume ingestion and per-visit syncs. */
-export const UNAUDITED = new Set(["tg.messages.add", "tg.users.add", "esign.profile.sync"])
+/**
+ * Mutations that are not changes made by someone: the bot's high-volume ingestion and per-visit syncs. Moderation the
+ * bot reports is kept in `tg_audit_log`, under its own retention rules, and not copied here.
+ */
+export const UNAUDITED = new Set(["tg.messages.add", "tg.users.add", "tg.auditLog.record", "esign.profile.sync"])
+
+/**
+ * Areas that keep their own history, readable with their own permissions: their events name the actor, the action,
+ * the target and the outcome, without the input or the state before and after.
+ *
+ * Temporary: a per-procedure `audit` option in the procedure meta replaces this list.
+ */
+const MINIMAL_AREAS = [{ prefix: "people.", targetType: "people.person" }]
 
 /** Handed to queries, which change nothing. */
 export const noAudit: AuditRecorder = { set: () => {}, skip: () => {} }
@@ -52,16 +64,15 @@ export function auditRecorder() {
   return { recorder, note, skipped: () => skipped }
 }
 
-const SECRET_KEY = /pass(word)?|secret|token|ticket|otp|code|key$/i
+/** Field names that hold secrets: whole names, or the last word of a camelCase name (`idempotencyKey`). */
+const SECRET_KEY = /^(pass(word)?|passwd|secret|token|ticket|otp|code|key)$|(Pass(word)?|Secret|Token|Ticket|Otp|Key)$/
 const MAX_STRING = 2000
 const MAX_ITEMS = 100
 const MAX_DEPTH = 8
+/** A copy longer than this, as JSON, is replaced by a note of its size. */
+const MAX_JSON = 64 * 1024
 
-/**
- * A JSON copy of an input or a row, safe to keep: secrets are replaced, files and bytes are described instead of copied,
- * and long strings and arrays are cut.
- */
-export function auditJson(value: unknown, depth = 0): AuditJson {
+function copyOf(value: unknown, depth: number): AuditJson {
   if (value === null || value === undefined) return null
   if (typeof value === "string")
     return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}… (${value.length} characters)` : value
@@ -73,58 +84,44 @@ export function auditJson(value: unknown, depth = 0): AuditJson {
   if (value instanceof Blob) return { file: null, type: value.type, size: value.size }
   if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return `(${value.byteLength} bytes)`
   if (depth >= MAX_DEPTH) return "(nested too deep)"
-  if (value instanceof FormData) return auditJson(Object.fromEntries(value.entries()), depth)
-  if (value instanceof Map) return auditJson(Object.fromEntries(value), depth)
-  if (value instanceof Set) return auditJson([...value], depth)
+  if (value instanceof FormData) return copyOf(Object.fromEntries(value.entries()), depth)
+  if (value instanceof Map) return copyOf(Object.fromEntries(value), depth)
+  if (value instanceof Set) return copyOf([...value], depth)
   if (Array.isArray(value)) {
-    const items = value.slice(0, MAX_ITEMS).map((item) => auditJson(item, depth + 1))
+    const items = value.slice(0, MAX_ITEMS).map((item) => copyOf(item, depth + 1))
     return value.length > MAX_ITEMS ? [...items, `(${value.length - MAX_ITEMS} more)`] : items
   }
   if (typeof value === "object") {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined && typeof item !== "function")
     const copy: { [key: string]: AuditJson } = {}
-    for (const [key, item] of Object.entries(value)) {
-      if (item === undefined || typeof item === "function") continue
-      copy[key] = SECRET_KEY.test(key) ? "(hidden)" : auditJson(item, depth + 1)
-    }
+    for (const [key, item] of entries.slice(0, MAX_ITEMS))
+      copy[key] = SECRET_KEY.test(key) ? "(hidden)" : copyOf(item, depth + 1)
+    if (entries.length > MAX_ITEMS) copy["(more)"] = `${entries.length - MAX_ITEMS} more fields`
     return copy
   }
   return null
 }
 
-/** Input fields in which legacy callers name themselves. */
-const LEGACY_ACTOR_FIELDS = [
-  "createdBy",
-  "modifiedBy",
-  "updatedBy",
-  "adderId",
-  "removerId",
-  "interruptedById",
-  "performerId",
-  "adminId",
-]
-
-function legacyTelegramId(input: AuditJson): number | null {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return null
-  for (const field of LEGACY_ACTOR_FIELDS) {
-    const id = Number(input[field])
-    if (input[field] !== undefined && input[field] !== null && Number.isSafeInteger(id)) return id
-  }
-  return null
+/**
+ * A JSON copy of an input or a row, safe to keep: secrets are replaced, files and bytes are described instead of copied,
+ * and long strings, arrays, objects and copies are cut.
+ */
+export function auditJson(value: unknown): AuditJson {
+  const copy = copyOf(value, 0)
+  const size = JSON.stringify(copy)?.length ?? 0
+  return size > MAX_JSON ? `(${size} characters, too large to keep)` : copy
 }
 
-function actorOf(auth: RequestAuth | undefined, input: AuditJson): AuditActor | null {
-  if (auth?.kind === "token") {
-    const { actor } = auth
-    if (actor.kind === "service") return { kind: AUDIT_ACTOR_KIND.SERVICE, client: actor.client }
-    return {
-      kind: actor.kind,
-      sub: actor.sub,
-      tgId: actor.telegramId === null ? null : Number(actor.telegramId),
-      client: actor.client,
-    }
+function actorOf(auth: RequestAuth | undefined): AuditActor | null {
+  if (auth?.kind !== "token") return null
+  const { actor } = auth
+  if (actor.kind === "service") return { kind: AUDIT_ACTOR_KIND.SERVICE, client: actor.client }
+  return {
+    kind: actor.kind,
+    sub: actor.sub,
+    tgId: actor.telegramId === null ? null : Number(actor.telegramId),
+    client: actor.client,
   }
-  if (auth?.kind === "rejected") return null
-  return { kind: AUDIT_ACTOR_KIND.LEGACY, tgId: legacyTelegramId(input) }
 }
 
 /** An error a handler returned instead of throwing, e.g. `{ error: "NOT_FOUND" }`, `{ success: false }` or `false`. */
@@ -159,43 +156,66 @@ function outcomeOf(result: Result): { outcome: TAuditOutcome; error: string | nu
       error: errorMessage(result.error),
     }
   const error = returnedError(result.data)
-  if (error === null) return { outcome: AUDIT_OUTCOME.SUCCESS, error: null }
-  return { outcome: error.startsWith("UNAUTHORIZED") ? AUDIT_OUTCOME.DENIED : AUDIT_OUTCOME.FAILURE, error }
+  return error === null ? { outcome: AUDIT_OUTCOME.SUCCESS, error: null } : { outcome: AUDIT_OUTCOME.FAILURE, error }
+}
+
+/** The first of `keys` that `value` holds as a string or a number. */
+function idIn(value: unknown, keys: string[]): string | null {
+  if (value === null || typeof value !== "object") return null
+  for (const key of keys) {
+    const id = (value as Record<string, unknown>)[key]
+    if (typeof id === "string" || typeof id === "number") return String(id)
+  }
+  return null
 }
 
 /**
  * The event for one mutation, or null when there is nothing worth keeping: calls refused before an actor was known
- * (no token on a closed legacy path, an invalid token) would let anyone fill the log.
+ * (no token, an invalid token) would let anyone fill the log.
  */
 export function auditEvent(options: {
   path: string
   auth: RequestAuth | undefined
+  requestId?: string | null
   rawInput: unknown
   note: AuditNote
   result: Result
 }): AuditEvent | null {
   const { path, auth, note, result } = options
-  const input = auditJson(options.rawInput)
-  const caller = actorOf(auth, input)
-  if (!caller) return null
+  const actor = actorOf(auth)
+  if (!actor) return null
   const { outcome, error } = outcomeOf(result)
-  if (outcome === AUDIT_OUTCOME.DENIED && auth?.kind !== "token" && !result.ok) return null
 
-  const actor = note.actor ?? caller
-  return {
+  const event: AuditEvent = {
     action: note.action ?? path,
+    requestId: options.requestId ?? null,
     actorKind: actor.kind,
     actorSub: actor.sub ?? null,
     actorTgId: actor.tgId ?? null,
     actorClient: actor.client ?? null,
     targetType: note.target?.type ?? null,
-    targetId: note.target === undefined ? null : String(note.target.id),
+    targetId: note.target?.id == null ? null : String(note.target.id),
     targetLabel: note.target?.label ?? null,
     reason: note.reason ?? null,
     outcome,
     error,
-    input,
+    // A refused call changed nothing, and its input is whatever the caller chose to send.
+    input: outcome === AUDIT_OUTCOME.DENIED ? null : auditJson(options.rawInput),
     before: note.before === undefined ? null : auditJson(note.before),
     after: note.after === undefined ? null : auditJson(note.after),
+  }
+
+  const minimal = MINIMAL_AREAS.find((area) => path.startsWith(area.prefix))
+  if (!minimal) return event
+  const id = idIn(options.rawInput, ["personId", "id"]) ?? (result.ok ? idIn(result.data, ["personId", "id"]) : null)
+  return {
+    ...event,
+    targetType: minimal.targetType,
+    targetId: id,
+    targetLabel: null,
+    reason: null,
+    input: null,
+    before: null,
+    after: null,
   }
 }

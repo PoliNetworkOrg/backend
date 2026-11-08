@@ -279,12 +279,12 @@ export const esignRouter = createTRPCRouter({
       )
       .mutation(({ ctx, input }) => {
         const ids = input.items.map((item) => item.requestId)
+        // Several requests are named by their number, with the ids in the input.
         ctx.audit.set({
-          target: {
-            type: "esign.request",
-            id: ids.join(","),
-            label: ids.length === 1 ? null : `${ids.length} requests`,
-          },
+          target:
+            ids.length === 1
+              ? { type: "esign.request", id: ids[0] ?? null }
+              : { type: "esign.request", id: null, label: `${ids.length} requests` },
         })
         return run(() => esign.createJobs(callerOf(ctx), input.items))
       }),

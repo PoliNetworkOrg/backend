@@ -20,8 +20,11 @@ async function assertGroupExists(groupId: number, type: "tg" | "wa") {
   if (!groups.length) throw new Error("Group not found")
 }
 
+/** One report by its id; several by their number, with the ids in the input. */
 function reportsTarget(ids: number[]) {
-  return { type: "web.report", id: ids.join(","), label: ids.length === 1 ? null : `${ids.length} reports` }
+  return ids.length === 1
+    ? { type: "web.report", id: ids[0] ?? null }
+    : { type: "web.report", id: null, label: `${ids.length} reports` }
 }
 
 export const reports = createTRPCRouter({

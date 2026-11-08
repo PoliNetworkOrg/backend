@@ -1,13 +1,12 @@
 import { sql } from "drizzle-orm"
-import { bigint, index, jsonb, text, timestamp, varchar } from "drizzle-orm/pg-core"
+import { bigint, index, jsonb, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core"
 import { createTable } from "../create-table"
 
-/** Who made a change: the kinds of RFC v3 actors, and `legacy` for anonymous legacy callers. */
+/** Who made a change: the kinds of RFC v3 actors. */
 export const AUDIT_ACTOR_KIND = {
   USER: "user",
   TELEGRAM: "telegram",
   SERVICE: "service",
-  LEGACY: "legacy",
 } as const
 export type TAuditActorKind = (typeof AUDIT_ACTOR_KIND)[keyof typeof AUDIT_ACTOR_KIND]
 
@@ -24,15 +23,17 @@ export type TAuditOutcome = (typeof AUDIT_OUTCOME)[keyof typeof AUDIT_OUTCOME]
 export type AuditJson = null | boolean | number | string | AuditJson[] | { [key: string]: AuditJson }
 
 /**
- * Every change made through the backend, whoever made it: one row per mutation, written by the tRPC audit middleware
- * (`src/audit`). Telegram moderation, recorded by the bot through `tg.auditLog`, is copied here too.
+ * Who used which permission to change what through the backend: one row per mutation, written by the tRPC audit
+ * middleware (`src/audit`). Areas with their own history (People, Telegram moderation) keep the details there.
  */
 export const auditEvents = createTable.common(
   "audit_events",
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
-    /** The procedure path, e.g. `web.faqs.editFaqs`, or `tg.moderation.<type>` for Telegram moderation. */
+    /** The procedure path, e.g. `web.faqs.editFaqs`. */
     action: text("action").notNull(),
+    /** Shared by the events of one HTTP request, to match them with what the request asked of other systems. */
+    requestId: uuid("request_id"),
     actorKind: varchar("actor_kind", { length: 16 }).$type<TAuditActorKind>().notNull(),
     actorSub: text("actor_sub"),
     actorTgId: bigint("actor_tg_id", { mode: "number" }),
@@ -55,5 +56,8 @@ export const auditEvents = createTable.common(
     index("common_audit_events_actor_sub_idx").on(t.actorSub),
     index("common_audit_events_actor_tg_id_idx").on(t.actorTgId),
     index("common_audit_events_target_idx").on(t.targetType, t.targetId),
+    index("common_audit_events_request_id_idx").on(t.requestId),
+    // The retention cron deletes by age.
+    index("common_audit_events_created_at_idx").on(t.createdAt),
   ]
 )
