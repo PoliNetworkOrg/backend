@@ -62,7 +62,7 @@ describe("People tRPC contract", () => {
     const h = harness()
     await h.seed(false)
     await h.service.sendInvite(master, { personId: "P-0003" })
-    const token = Object.values(h.state().mail)[0].text.match(/peopleInvite=([A-Za-z0-9_-]{43})/)?.[1] ?? ""
+    const token = Object.values(h.state().mail)[0].text.match(/invite\?token=([A-Za-z0-9_-]{43})/)?.[1] ?? ""
     const actor: Actor = { kind: "user", sub: "newcomer", client: "admin-dashboard", telegramId: null }
     const caller = makeRouter(h.service).createCaller(context([], actor))
     await expect(caller.me.get()).rejects.toMatchObject({ code: "FORBIDDEN" })

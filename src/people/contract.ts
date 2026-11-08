@@ -240,7 +240,7 @@ export const TEAMS = {
     ],
   },
   design: {
-    name: "Design & Social",
+    name: "Design & Marketing",
     fields: [
       {
         key: "tools",
