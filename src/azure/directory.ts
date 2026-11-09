@@ -2,11 +2,15 @@ import { logger } from "@/logger"
 import { azureCredentials } from "./config"
 import { getAllGroups } from "./functions/groups"
 import {
+  addToSoci,
   createMember,
+  deleteUser,
   findByMail,
   findByMemberNumber,
   getMember,
   getMembers,
+  getSociMembers,
+  removeFromSoci,
   setMemberNumber,
 } from "./functions/members"
 import { createMockAzureDirectory } from "./mock-directory"
@@ -20,6 +24,10 @@ const graphAzureDirectory: AzureDirectory = {
   setMemberNumber,
   createMember,
   getAllGroups,
+  getSociMembers,
+  addToSoci,
+  removeFromSoci,
+  deleteUser,
 }
 
 export const azureDirectory: AzureDirectory = azureCredentials ? graphAzureDirectory : createMockAzureDirectory()

@@ -4,6 +4,7 @@ import { esignRouter } from "./esign"
 import { groupsRouter } from "./groups"
 import { meRouter } from "./me"
 import { peopleRouter } from "./people"
+import { sociRouter } from "./soci"
 import { tgRouter } from "./tg"
 import { waRouter } from "./wa"
 import { webRouter } from "./web"
@@ -19,6 +20,7 @@ export const appRouter = createTRPCRouter({
   groups: groupsRouter,
   me: meRouter,
   people: peopleRouter,
+  soci: sociRouter,
   tg: tgRouter,
   wa: waRouter,
   web: webRouter,
