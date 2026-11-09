@@ -58,7 +58,7 @@ export const residenceSchema = z.object({
 export type Residence = z.infer<typeof residenceSchema>
 
 /** The bookkeeping data the association keeps. Nullable fields may be missing for a socio registered afterwards. */
-const detailsShape = {
+const bookkeepingFields = {
   firstName: z.string(),
   lastName: z.string(),
   /** The name the person goes by, shown with the legal name. */
@@ -108,7 +108,7 @@ export const activitySchema = z.object({ actor: z.string(), text: z.string(), at
 export type SocioActivity = z.infer<typeof activitySchema>
 
 export const socioRecordSchema = socioRowSchema.extend({
-  ...detailsShape,
+  ...bookkeepingFields,
   endNote: z.string().nullable(),
   accountDeletedOn: z.string().nullable(),
   /** The account's current member number in Microsoft 365; `null` when it has none, or couldn't be read. */

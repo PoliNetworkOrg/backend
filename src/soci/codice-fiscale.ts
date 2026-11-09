@@ -36,7 +36,7 @@ export function checkCharacter(first15: string) {
 
 /** The code with every omocodia letter turned back into its digit. */
 function withDigits(code: string) {
-  const chars = [...code]
+  const chars = code.split("")
   for (const i of NUMERIC) {
     const digit = OMOCODIA.indexOf(chars[i])
     if (digit >= 0) chars[i] = String(digit)
