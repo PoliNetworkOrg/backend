@@ -88,6 +88,28 @@ The backend checks every role change with the same rules as Auth (`src/people/ru
 role's permissions. A concept with no role bound in Auth, or with more than one, can't be assigned. Writes are
 serialized by one transaction lock. Grant `idp:people:roles` to the backend's OAuth client to let it change roles.
 
+## Soci
+
+The `soci` router is the Libro Soci: one record per admission in `soci_members`, keyed on the Microsoft 365 account
+(`entra_object_id`) and the member number, with the bookkeeping data the association must keep and an append-only
+history in `soci_activity`. Records are never deleted, and a re-admission is a new record with a new number.
+Microsoft 365 stays the source of truth for who is a socio now: a PoliNetwork account in the Soci group. The design is
+the admin repository's `docs/people/soci.md`.
+
+- **Numbers are never reused.** `soci_numbers` keeps every number a record has held. A number is free only if no record
+  has ever held it and no Microsoft 365 user has it as `employeeId`.
+- **One active record per codice fiscale.** Codes are validated (format, omocodia, check character) and checked
+  against the birth date.
+- **Admitting** (`members.admit`) runs the Microsoft 365 workflow (account, `employeeId`, licences, Soci group, welcome
+  email to a typed address that isn't stored), then writes the record. A record that can't be written deletes the
+  account.
+- **Registering** (`members.register`) writes a record for an account already in Soci, with its current number; personal
+  fields are optional. `members.unregistered` lists the Soci group's accounts without a record.
+- `members.list` reports mismatches: an active record whose account isn't in Soci, or an ended one whose account is.
+
+Every procedure needs `admin:access` and `soci:read` (list, get, unregistered) or `soci:write` (admit, register,
+update, setNumber). Writes share the in-process Microsoft 365 lock with `azure.members.*`.
+
 ## E-signing with the CIE
 
 The `esign` router and `/esign/agent/*` endpoints let dashboard users sign PDFs with the Italian identity card

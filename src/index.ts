@@ -14,4 +14,19 @@ export type {
   TeamSummary as PeopleTeamSummary,
 } from "./people/contract"
 export type { AppRouter } from "./routers"
+export type {
+  AdmitInput as SociAdmitInput,
+  AdmitResult as SociAdmitResult,
+  RegisterInput as SociRegisterInput,
+  Residence as SociResidence,
+  SetNumberInput as SociSetNumberInput,
+  SetNumberResult as SociSetNumberResult,
+  SociList,
+  SocioActivity,
+  SocioDetails,
+  SocioRecord,
+  SocioRow,
+  Unregistered as SociUnregistered,
+  UpdateInput as SociUpdateInput,
+} from "./soci/contract"
 export type { TelegramSocket } from "./websocket/telegram"
