@@ -108,7 +108,9 @@ the admin repository's `docs/people/soci.md`.
 - `members.list` reports mismatches: an active record whose account isn't in Soci, or an ended one whose account is.
 
 Every procedure needs `admin:access` and `soci:read` (list, get, unregistered) or `soci:write` (admit, register,
-update, setNumber). Writes share the in-process Microsoft 365 lock with `azure.members.*`.
+update, setNumber). Microsoft 365 writes run one at a time behind an in-process lock (`src/azure/member-writes.ts`),
+which also remembers numbers Entra's searches don't show yet. `azure.members` is read-only: admitting a socio and
+changing a member number go through `soci.members.*`.
 
 ## E-signing with the CIE
 

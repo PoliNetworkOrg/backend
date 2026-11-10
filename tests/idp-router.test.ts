@@ -117,12 +117,12 @@ describe("app router", () => {
     expect(policyOf("azure.members.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:members:read" },
     })
-    expect(policyOf("azure.members.create")?.policy).toEqual({
-      user: { scope: "backend:admin", permission: "azure:members:create" },
-    })
-    expect(policyOf("azure.members.setAssocNumber")).toMatchObject({
-      policy: { user: { scope: "backend:admin", permission: "azure:members:write" } },
-    })
+    // Directory writes go through soci.members.*, which keeps the Libro Soci in step.
+    expect(
+      procedures()
+        .filter(([name]) => name.startsWith("azure.members."))
+        .map(([name]) => name)
+    ).toEqual(["azure.members.getAll"])
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
     })

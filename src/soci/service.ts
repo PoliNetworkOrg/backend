@@ -13,7 +13,7 @@ type Logger = {
 export type SociOptions = {
   store: SociStore
   directory: Pick<AzureDirectory, "createMember" | "deleteUser" | "findByMail" | "getSociMembers" | "setMemberNumber">
-  /** The Entra-side lock and pending-number cache shared with Microsoft 365 › Members (`member-writes.ts`). */
+  /** The Entra-side lock and pending-number cache (`src/azure/member-writes.ts`). */
   writes: {
     serialize: <T>(task: () => Promise<T>) => Promise<T>
     numberHolder: (number: number) => Promise<MemberSummary | null>
