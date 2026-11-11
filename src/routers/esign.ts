@@ -2,6 +2,7 @@ import type { Actor } from "@polinetwork/auth-kit"
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import type { AuditRecorder } from "@/audit"
+import { audit } from "@/audit/option"
 import { esign } from "@/esign"
 import { MAX_PDF_BYTES } from "@/esign/drive/types"
 import { EsignError, type EsignErrorCode } from "@/esign/errors"
@@ -90,6 +91,7 @@ export const esignRouter = createTRPCRouter({
   profile: createTRPCRouter({
     /** The BFF passes the signed-in user's name and email from the ID token. */
     sync: user
+      .meta(audit.none("Copies the signed-in user's name and email on each visit, not a change made by someone"))
       .input(z.object({ name: z.string().min(1).max(200), email: z.email().nullable() }))
       .mutation(({ ctx, input }) => run(() => esign.syncProfile(callerOf(ctx), input))),
   }),
@@ -100,11 +102,14 @@ export const esignRouter = createTRPCRouter({
       return run(() => esign.listProfiles())
     }),
     /** Forgets the CIE bound to a person, e.g. after they renewed their card. */
-    resetIdentity: user.input(z.object({ sub: z.string().min(1) })).mutation(({ ctx, input }) => {
-      requireManage(callerOf(ctx))
-      ctx.audit.set({ target: { type: "esign.signer", id: input.sub } })
-      return run(() => esign.resetIdentity(input.sub))
-    }),
+    resetIdentity: user
+      .meta(audit.full())
+      .input(z.object({ sub: z.string().min(1) }))
+      .mutation(({ ctx, input }) => {
+        requireManage(callerOf(ctx))
+        ctx.audit.set({ target: { type: "esign.signer", id: input.sub } })
+        return run(() => esign.resetIdentity(input.sub))
+      }),
   }),
 
   drive: createTRPCRouter({
@@ -121,6 +126,7 @@ export const esignRouter = createTRPCRouter({
       .input(z.object({ driveId: z.string().min(1), sign: driveRule }))
       .query(({ ctx, input }) => run(() => esign.driveAccessImpact(callerOf(ctx), input.driveId, input.sign))),
     setAccess: user
+      .meta(audit.full())
       .input(z.object({ driveId: z.string().min(1), request: driveRule, sign: driveRule }))
       .mutation(async ({ ctx, input }) => {
         const caller = callerOf(ctx)
@@ -138,6 +144,7 @@ export const esignRouter = createTRPCRouter({
 
   documents: createTRPCRouter({
     upload: user
+      .meta(audit.full())
       .input(
         z
           .instanceof(FormData)
@@ -157,6 +164,7 @@ export const esignRouter = createTRPCRouter({
         return { document, pdf: publicPdf(pdf) }
       }),
     fromDrive: user
+      .meta(audit.full())
       .input(z.object({ driveId: z.string().min(1), itemId: z.string().min(1) }))
       .mutation(async ({ ctx, input }) => {
         const caller = callerOf(ctx)
@@ -182,6 +190,7 @@ export const esignRouter = createTRPCRouter({
 
   requests: createTRPCRouter({
     create: user
+      .meta(audit.full({ fields: ["title", "documentId", "ordered", "signers", "output"] }))
       .input(
         z.object({
           title: z.string().trim().min(1).max(200),
@@ -213,7 +222,22 @@ export const esignRouter = createTRPCRouter({
       .mutation(async ({ ctx, input }) => {
         ctx.audit.set({ target: { type: "esign.document", id: input.documentId, label: input.title } })
         const request = await run(() => esign.createRequest(callerOf(ctx), input))
-        ctx.audit.set({ target: { type: "esign.request", id: request.id, label: request.title }, after: request })
+        // Who signs, in which order: not their fiscal codes, certificates or the email recipients.
+        ctx.audit.set({
+          target: { type: "esign.request", id: request.id, label: request.title },
+          after: {
+            id: request.id,
+            title: request.title,
+            status: request.status,
+            ordered: request.ordered,
+            drives: request.drives,
+            signers: request.signers.map((signer) => ({
+              sub: signer.sub,
+              role: signer.role,
+              position: signer.position,
+            })),
+          },
+        })
         return request
       }),
     list: user
@@ -222,15 +246,22 @@ export const esignRouter = createTRPCRouter({
     get: user
       .input(z.object({ id: z.uuid() }))
       .query(({ ctx, input }) => run(() => esign.getRequest(callerOf(ctx), input.id))),
-    cancel: user.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
-      await auditRequest(ctx, input.id)
-      return run(() => esign.cancelRequest(callerOf(ctx), input.id))
-    }),
-    delete: user.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
-      await auditRequest(ctx, input.id)
-      return run(() => esign.deleteRequest(callerOf(ctx), input.id))
-    }),
+    cancel: user
+      .meta(audit.full())
+      .input(z.object({ id: z.uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        await auditRequest(ctx, input.id)
+        return run(() => esign.cancelRequest(callerOf(ctx), input.id))
+      }),
+    delete: user
+      .meta(audit.full())
+      .input(z.object({ id: z.uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        await auditRequest(ctx, input.id)
+        return run(() => esign.deleteRequest(callerOf(ctx), input.id))
+      }),
     decline: user
+      .meta(audit.full({ fields: ["id"] }))
       .input(z.object({ id: z.uuid(), reason: z.string().max(500).nullable() }))
       .mutation(async ({ ctx, input }) => {
         await auditRequest(ctx, input.id)
@@ -242,6 +273,7 @@ export const esignRouter = createTRPCRouter({
      * once no deployed dashboard calls it, this and the service's `uploadSigned` can be removed.
      */
     uploadSigned: user
+      .meta(audit.full())
       .input(
         z
           .instanceof(FormData)
@@ -259,10 +291,13 @@ export const esignRouter = createTRPCRouter({
           esign.uploadSigned(callerOf(ctx), input.requestId, new Uint8Array(await input.file.arrayBuffer()))
         )
       }),
-    retryDelivery: user.input(z.object({ id: z.uuid() })).mutation(async ({ ctx, input }) => {
-      await auditRequest(ctx, input.id)
-      return run(() => esign.retryDelivery(callerOf(ctx), input.id))
-    }),
+    retryDelivery: user
+      .meta(audit.full())
+      .input(z.object({ id: z.uuid() }))
+      .mutation(async ({ ctx, input }) => {
+        await auditRequest(ctx, input.id)
+        return run(() => esign.retryDelivery(callerOf(ctx), input.id))
+      }),
   }),
 
   jobs: createTRPCRouter({
@@ -271,6 +306,7 @@ export const esignRouter = createTRPCRouter({
      * ticket, so one PIN signs them all. `places` moves the caller's boxes before signing, one per place, in order.
      */
     create: user
+      .meta(audit.full())
       .input(
         z.object({
           items: z
@@ -293,10 +329,13 @@ export const esignRouter = createTRPCRouter({
     statuses: user
       .input(z.object({ jobIds: z.array(z.uuid()).min(1).max(10) }))
       .query(({ ctx, input }) => run(() => esign.jobStatuses(callerOf(ctx), input.jobIds))),
-    cancel: user.input(z.object({ jobIds: z.array(z.uuid()).min(1).max(10) })).mutation(({ ctx, input }) =>
-      run(async () => {
-        for (const jobId of input.jobIds) await esign.cancelJob(callerOf(ctx), jobId)
-      })
-    ),
+    cancel: user
+      .meta(audit.full())
+      .input(z.object({ jobIds: z.array(z.uuid()).min(1).max(10) }))
+      .mutation(({ ctx, input }) =>
+        run(async () => {
+          for (const jobId of input.jobIds) await esign.cancelJob(callerOf(ctx), jobId)
+        })
+      ),
   }),
 })

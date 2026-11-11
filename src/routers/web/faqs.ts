@@ -1,5 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
@@ -55,6 +56,7 @@ export default createTRPCRouter({
     }),
 
   addFaqs: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         titleIt: z.string(),
@@ -83,6 +85,7 @@ export default createTRPCRouter({
     }),
 
   addFaqsCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         titleIt: z.string(),
@@ -107,6 +110,7 @@ export default createTRPCRouter({
     }),
 
   editFaqs: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -139,6 +143,7 @@ export default createTRPCRouter({
     }),
 
   editFaqsCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -171,6 +176,7 @@ export default createTRPCRouter({
     }),
 
   deleteFaqs: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -196,6 +202,7 @@ export default createTRPCRouter({
     }),
 
   deleteFaqsCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),

@@ -2,7 +2,8 @@ import type { AccessSnapshotClient, Actor } from "@polinetwork/auth-kit"
 import { initTRPC, TRPCError } from "@trpc/server"
 import superjson from "superjson"
 import { ZodError, z } from "zod/v4"
-import { auditEvent, auditRecorder, isDenied, noAudit, UNAUDITED } from "./audit"
+import { auditEvent, auditRecorder, isDenied, noAudit } from "./audit"
+import type { AuditOption } from "./audit/option"
 import { env } from "./env"
 import type { RequestAuth } from "./idp/auth"
 import { logger } from "./logger"
@@ -25,7 +26,11 @@ export type PolicyRule = { scope: string | readonly string[]; permission?: strin
 /** Actor kinds a procedure accepts. A kind that is not listed is denied. */
 export type Policy = { service?: PolicyRule; telegram?: PolicyRule; user?: PolicyRule }
 
-type Meta = { policy?: Policy }
+type Meta = {
+  policy?: Policy
+  /** How a mutation is recorded in the audit log; see `audit` in `src/audit`. */
+  audit?: AuditOption
+}
 
 const t = initTRPC
   .context<Context>()
@@ -70,14 +75,17 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 })
 
 /**
- * Records every mutation in `common_audit_events` (see `src/audit`): who called it, with what input, and whether it
- * succeeded, failed or was denied. It runs before the policy so that denied calls are kept too, without their input.
- * Handlers add the target and the state before and after through `ctx.audit`. A failed write is logged and does not
- * fail the call, whose change has already happened.
+ * Records every mutation in `common_audit_events` (see `src/audit`) as its `audit` meta option says: who called it,
+ * on what, and whether it succeeded, failed or was denied, with the input and the states for `full`. It runs before
+ * the policy so that denied calls are kept too, without their input. Handlers add the target and the state before and
+ * after through `ctx.audit`. A failed write is logged and does not fail the call, whose change has already happened.
  */
-const auditMiddleware = t.middleware(async ({ ctx, path, type, getRawInput, next }) => {
+const auditMiddleware = t.middleware(async ({ ctx, meta, path, type, getRawInput, next }) => {
+  const option = meta?.audit
+  if (type === "mutation" && !option) logger.error({ procedure: path }, "[AUDIT] mutation without an audit option")
   // Calls without a valid token are not recorded, so their bodies are never read for the log.
-  if (type !== "mutation" || UNAUDITED.has(path) || ctx.auth?.kind !== "token") return next({ ctx: { audit: noAudit } })
+  if (type !== "mutation" || option?.capture === "none" || ctx.auth?.kind !== "token")
+    return next({ ctx: { audit: noAudit } })
 
   const { recorder, note, skipped } = auditRecorder()
   const result = await next({ ctx: { audit: recorder } })
@@ -86,7 +94,7 @@ const auditMiddleware = t.middleware(async ({ ctx, path, type, getRawInput, next
   try {
     // A denied call's body may never have been read, and the event keeps none of it.
     const rawInput = isDenied(result) ? undefined : await getRawInput().catch(() => undefined)
-    const event = auditEvent({ path, auth: ctx.auth, requestId: ctx.requestId, rawInput, note, result })
+    const event = auditEvent({ path, option, auth: ctx.auth, requestId: ctx.requestId, rawInput, note, result })
     if (event) {
       // Imported here so that loading the router does not open the database.
       const { writeAuditEvent } = await import("./audit/store")

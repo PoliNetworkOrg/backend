@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { asc, eq, inArray, sql } from "drizzle-orm"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, modifiedByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
@@ -58,6 +59,7 @@ export default createTRPCRouter({
     }),
 
   updateCard: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(updateFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
       const { id, ...fields } = input
@@ -70,6 +72,7 @@ export default createTRPCRouter({
     }),
 
   moveCard: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(moveFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
       const index = freshmanSlots.findIndex((slot) => slot.id === input.id)
@@ -103,6 +106,7 @@ export default createTRPCRouter({
     }),
 
   selectFaq: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(selectFreshmanFaqInput)
     .mutation(async ({ input, ctx }) => {
       const author = modifiedByColumns(authorOf(ctx.actor))

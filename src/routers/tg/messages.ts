@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { botReadOrDashboard, SCOPE } from "@/idp/policies"
 import { logger } from "@/logger"
@@ -78,6 +79,7 @@ export default createTRPCRouter({
     }),
 
   add: policy({ service: { scope: SCOPE.tgIngest } })
+    .meta(audit.none("The bot's ingestion of group messages, not changes made by someone"))
     .input(z.object({ messages: z.array(message) }))
     .output(z.object({ error: z.union([z.null(), z.enum(["ENCRYPT_ERROR"])]) }))
     .mutation(async ({ input }) => {

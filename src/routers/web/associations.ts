@@ -1,5 +1,6 @@
 import { asc, eq } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
@@ -76,6 +77,7 @@ export default createTRPCRouter({
     }),
 
   addAssociation: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -104,6 +106,7 @@ export default createTRPCRouter({
     }),
 
   editAssociation: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -143,6 +146,7 @@ export default createTRPCRouter({
     }),
 
   editAssociationLinks: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -181,6 +185,7 @@ export default createTRPCRouter({
     }),
 
   deleteAssociation: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),

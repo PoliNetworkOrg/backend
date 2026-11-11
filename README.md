@@ -62,17 +62,22 @@ The IdP notifies `POST /internal/events` when access changes; the backend also p
 `common_audit_events` records who used which permission to change what through the backend. The tRPC audit middleware
 (`src/audit`) writes one event per mutation: the action (the procedure path), the caller from the token, the target,
 the outcome (`success`, `failure` when an error is thrown or returned, `denied` when the policy refuses the caller), the
-request id shared by the calls of one HTTP request, and when. Handlers add the target and the state before and after
-with `ctx.audit.set(...)`, or `ctx.audit.skip()` when a call changed nothing. Inputs and states are stored without
-secrets (`password`, `token`, `ticket`, `code`, `*Key`, `*Secret` fields) or file contents, and are cut when too large.
-Denied calls keep no input. Calls without a valid token are not recorded.
+request id shared by the calls of one HTTP request, and when. Calls without a valid token are not recorded.
 
-Areas with their own history keep the details there, readable with their own permissions:
+Every mutation declares how it is recorded in its procedure meta, and a test walks the router so that none ships
+without one, like its policy:
 
-- People: events name the actor, the action, the person and the outcome, without the input or the states; what changed
-  is in the person's activity history.
-- Telegram moderation: kept in `tg_audit_log` under its own retention rules and not copied here, like the bot's
-  ingestion (`tg.messages.add`, `tg.users.add`).
+- `.meta(audit.full())`: also the input, the reason and the states before and after that the handler adds with
+  `ctx.audit.set(...)`. `fields` keeps only those fields of the input, for inputs that carry personal data or free
+  text not worth keeping.
+- `.meta(audit.minimal({ target }))`: only the actor, the action, the target and the outcome, for areas that keep their
+  own history behind their own permissions. People records each change in the person's activity history.
+- `.meta(audit.none(why))`: not recorded, e.g. the bot's ingestion, or Telegram moderation, which `tg_audit_log` keeps
+  under its own retention rules.
+
+Handlers call `ctx.audit.skip()` when a call changed nothing. Inputs and states are stored without secrets
+(`password`, `token`, `ticket`, `code`, `*Key`, `*Secret` fields) or file contents, and are cut when too large. Denied
+calls keep no input.
 
 Events are deleted 24 months after they were written (`AUDIT_EVENTS_RETENTION_MONTHS`). Dashboard users with the IdP
 permission `audit:read` read the log with `audit.list`, newest first, paged by `cursor` and filtered by area, outcome,

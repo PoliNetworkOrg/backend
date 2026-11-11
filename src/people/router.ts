@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import { type AuditTargetOf, audit } from "@/audit/option"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
@@ -8,26 +9,45 @@ import type { PeopleService } from "./service"
 import type { Viewer } from "./types"
 
 /**
+ * The person a People call is about: the input's `personId` or `id`, else the created record's. The raw input is not
+ * validated yet, so only a valid People id is taken from it.
+ */
+const personTarget: AuditTargetOf = ({ input, data }) => {
+  for (const value of [input, data]) {
+    if (value === null || typeof value !== "object") continue
+    for (const key of ["personId", "id"]) {
+      const id = C.personIdSchema.safeParse((value as Record<string, unknown>)[key])
+      if (id.success) return { type: "people.person", id: id.data }
+    }
+  }
+  return { type: "people.person", id: null }
+}
+
+/**
  * Factory keeps policy and shape tests independent of databases and external services.
  *
  * The service checks every role change again with the same rules as PoliNetwork Auth (`rules.ts`). Team changes
  * are open to every dashboard user here, since a team's Lead may add and remove its members.
  */
 export function createPeopleRouter(people: PeopleService) {
-  const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
-    if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
-    const sub = ctx.actor.sub
-    const viewer: Viewer = {
-      sub,
-      telegramId: ctx.actor.telegramId,
-      can: ctx.can,
-      holdsRole: (role) => {
-        const index = ctx.access?.current()
-        return !!index && index.hasRole(index.bySub(sub), role)
-      },
-    }
-    return next({ ctx: { viewer } })
-  })
+  // People keeps each record's history in `people_activity`, behind its own permissions: the audit log only says who
+  // changed which record, and whether it worked.
+  const user = policy({ user: { scope: SCOPE.admin } })
+    .meta(audit.minimal({ target: personTarget }))
+    .use(async ({ ctx, next }) => {
+      if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
+      const sub = ctx.actor.sub
+      const viewer: Viewer = {
+        sub,
+        telegramId: ctx.actor.telegramId,
+        can: ctx.can,
+        holdsRole: (role) => {
+          const index = ctx.access?.current()
+          return !!index && index.hasRole(index.bySub(sub), role)
+        },
+      }
+      return next({ ctx: { viewer } })
+    })
   const admin = (permission: string) =>
     user.use(({ ctx, next }) => {
       requireGeneral(ctx.viewer, permission)

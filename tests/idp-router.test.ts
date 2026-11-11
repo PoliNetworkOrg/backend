@@ -84,7 +84,9 @@ beforeAll(async () => {
   ;({ appRouter } = await import("@/routers"))
 })
 
-type ProcedureDef = { _def: { meta?: { policy?: unknown } } }
+type ProcedureDef = {
+  _def: { type: string; meta?: { policy?: unknown; audit?: { capture: string; why?: string } } }
+}
 
 function procedures(): Array<[string, ProcedureDef]> {
   return Object.entries(
@@ -93,6 +95,36 @@ function procedures(): Array<[string, ProcedureDef]> {
 }
 
 describe("app router", () => {
+  it("records People changes without their details, naming a person only by a valid People id", () => {
+    const people = procedures().filter(
+      ([path, procedure]) => path.startsWith("people.") && procedure._def.type === "mutation"
+    )
+    expect(people.length).toBeGreaterThan(10)
+    for (const [, procedure] of people) expect(procedure._def.meta?.audit?.capture).toBe("minimal")
+    const target = (
+      procedures().find(([path]) => path === "people.persons.setNote")?.[1]._def.meta?.audit as unknown as {
+        target: (call: { input: unknown; data: unknown }) => unknown
+      }
+    ).target
+    expect(target({ input: { id: "P-0001", note: "" }, data: undefined })).toEqual({
+      type: "people.person",
+      id: "P-0001",
+    })
+    expect(target({ input: { personId: "P-0002" }, data: undefined })).toEqual({ type: "people.person", id: "P-0002" })
+    expect(target({ input: { name: "Ada" }, data: { id: "P-0003" } })).toEqual({ type: "people.person", id: "P-0003" })
+    expect(target({ input: { id: "ada@example.org" }, data: undefined })).toEqual({ type: "people.person", id: null })
+  })
+
+  it("gives every mutation an audit option, and says why one is not recorded", () => {
+    const mutations = procedures().filter(([, procedure]) => procedure._def.type === "mutation")
+    expect(mutations.length).toBeGreaterThan(60)
+    expect(mutations.filter(([, procedure]) => !procedure._def.meta?.audit).map(([path]) => path)).toEqual([])
+    const unexplained = mutations.filter(
+      ([, procedure]) => procedure._def.meta?.audit?.capture === "none" && !procedure._def.meta.audit.why?.trim()
+    )
+    expect(unexplained.map(([path]) => path)).toEqual([])
+  })
+
   it("gives every procedure a policy", () => {
     const missing = procedures()
       .filter(([, procedure]) => !procedure._def.meta?.policy)

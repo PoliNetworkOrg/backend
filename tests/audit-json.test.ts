@@ -64,6 +64,8 @@ describe("auditEvent", () => {
   const auth = { kind: "token", actor: admin, scopes: new Set(["backend:admin"]) } as const
   const ok = (data: unknown = undefined) => ({ ok: true as const, data })
 
+  const full = { capture: "full" } as const
+
   it("records nothing for calls without a valid token", () => {
     const rejected = { kind: "rejected", status: 401, reason: "Missing bearer token" } as const
     for (const caller of [undefined, rejected])
@@ -91,6 +93,7 @@ describe("auditEvent", () => {
       path: "esign.signers.resetIdentity",
       auth,
       rawInput: {},
+      option: full,
       note: {
         target: { type: "esign.signer", id: "s".repeat(5000), label: "l".repeat(5000) },
         reason: "r".repeat(5000),
@@ -98,17 +101,6 @@ describe("auditEvent", () => {
       result: ok(),
     })
     for (const value of [event?.targetId, event?.targetLabel, event?.reason]) expect(value?.length).toBeLessThan(2100)
-  })
-
-  it("names a person only by a valid People id", () => {
-    const event = auditEvent({
-      path: "people.persons.setNote",
-      auth,
-      rawInput: { id: "ada@example.org", note: "" },
-      note: {},
-      result: { ok: false, error: new TRPCError({ code: "BAD_REQUEST", message: "Invalid input" }) },
-    })
-    expect(event).toMatchObject({ targetType: "people.person", targetId: null, input: null })
   })
 
   it("lists the issues of an invalid input rather than their JSON", () => {
@@ -135,41 +127,84 @@ describe("auditEvent", () => {
     expect(event).toMatchObject({ targetType: "web.report", targetId: null, targetLabel: "2 reports" })
   })
 
-  it("keeps only the actor, the action, the person and the outcome for People", () => {
-    const note = auditEvent({
+  it("records nothing for a mutation declared not to be", () => {
+    const option = { capture: "none", why: "ingestion" } as const
+    expect(auditEvent({ path: "tg.messages.add", option, auth, rawInput: {}, note: {}, result: ok() })).toBeNull()
+  })
+
+  it("keeps only the actor, the action, the target and the outcome when minimal", () => {
+    const event = auditEvent({
       path: "people.persons.setNote",
+      option: {
+        capture: "minimal",
+        target: ({ input }) => ({ type: "people.person", id: (input as { id: string }).id }),
+      },
       auth,
       rawInput: { id: "P-0001", note: "private HR note" },
-      note: {},
+      note: { before: { note: "old" }, after: { note: "new" }, reason: "why" },
       result: ok(),
     })
-    expect(note).toMatchObject({
+    expect(event).toMatchObject({
       action: "people.persons.setNote",
       actorSub: "usr_admin",
       targetType: "people.person",
       targetId: "P-0001",
       outcome: "success",
+      reason: null,
       input: null,
       before: null,
       after: null,
     })
+  })
 
-    const created = auditEvent({
-      path: "people.persons.create",
+  it("stores as little as minimal for a mutation without an option", () => {
+    const event = auditEvent({
+      path: "web.faqs.editFaqs",
       auth,
-      rawInput: { name: "Ada", contactEmail: "ada@example.org", phone: "+39 000" },
-      note: {},
-      result: ok({ id: "P-0002" }),
-    })
-    expect(created).toMatchObject({ targetId: "P-0002", input: null })
-
-    const ended = auditEvent({
-      path: "people.admins.end",
-      auth,
-      rawInput: { personId: "P-0003", reason: "stepped down" },
-      note: {},
+      rawInput: { id: 1 },
+      note: { after: {} },
       result: ok(),
     })
-    expect(ended).toMatchObject({ targetId: "P-0003", reason: null, input: null })
+    expect(event).toMatchObject({ input: null, after: null })
+  })
+
+  it("keeps only the declared fields of the input", () => {
+    const event = auditEvent({
+      path: "azure.members.setAssocNumber",
+      option: { capture: "full", fields: ["userId", "assocNumber"] },
+      auth,
+      rawInput: { userId: "u1", assocNumber: 7, notifyEmail: "ada@example.org" },
+      note: {},
+      result: ok({ error: null }),
+    })
+    expect(event?.input).toEqual({ userId: "u1", assocNumber: 7 })
+  })
+
+  it("prefers the target the handler names, and gives the option's the result", () => {
+    const option = {
+      capture: "full",
+      target: ({ data }: { data: unknown }) => ({
+        type: "web.faq",
+        id: (data as { id: number } | undefined)?.id ?? null,
+      }),
+    } as const
+    const named = auditEvent({
+      path: "web.faqs.addFaqs",
+      option,
+      auth,
+      rawInput: {},
+      note: { target: { type: "web.faq", id: 9, label: "Exams" } },
+      result: ok({ id: 1 }),
+    })
+    expect(named).toMatchObject({ targetId: "9", targetLabel: "Exams" })
+    const derived = auditEvent({
+      path: "web.faqs.addFaqs",
+      option,
+      auth,
+      rawInput: {},
+      note: {},
+      result: ok({ id: 1 }),
+    })
+    expect(derived).toMatchObject({ targetType: "web.faq", targetId: "1" })
   })
 })

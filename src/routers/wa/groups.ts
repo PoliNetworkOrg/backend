@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { dashboard } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
@@ -45,6 +46,7 @@ export default createTRPCRouter({
     }),
 
   add: policy(dashboard("wa:groups:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         title: z.string(),
@@ -59,6 +61,7 @@ export default createTRPCRouter({
     }),
 
   modify: policy(dashboard("wa:groups:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -81,6 +84,7 @@ export default createTRPCRouter({
     }),
 
   delete: policy(dashboard("wa:groups:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -94,6 +98,7 @@ export default createTRPCRouter({
     }),
 
   setHide: policy(dashboard("wa:groups:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),

@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { deleteBlob, uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns } from "@/idp/author"
@@ -42,6 +43,7 @@ export default createTRPCRouter({
     }),
 
   addGuide: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -76,6 +78,7 @@ export default createTRPCRouter({
     }),
 
   deleteGuide: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),

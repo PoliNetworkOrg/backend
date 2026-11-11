@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { desc, eq } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import {
   ARRAY_AUDIT_TYPE,
@@ -44,6 +45,7 @@ export default createTRPCRouter({
    * `idempotencyKey` records nothing and returns the first record.
    */
   record: policy({ service: { scope: SCOPE.tgAudit } })
+    .meta(audit.none("Moderation is kept in tg_audit_log, under its own retention rules"))
     .input(
       z
         .object({

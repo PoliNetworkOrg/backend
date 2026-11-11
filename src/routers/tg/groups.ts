@@ -1,5 +1,6 @@
 import { and, eq, exists, ilike, inArray, ne, not, notExists, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { describeActor } from "@/idp/actor-info"
 import { botReadOrDashboard, dashboard, SCOPE, seesHiddenGroups } from "@/idp/policies"
@@ -153,6 +154,7 @@ export default createTRPCRouter({
     }),
 
   create: policy({ service: { scope: SCOPE.tgGroupsSync } })
+    .meta(audit.full())
     .input(
       z.array(
         z.object({
@@ -224,6 +226,7 @@ export default createTRPCRouter({
     }),
 
   delete: policy({ service: { scope: SCOPE.tgGroupsSync } })
+    .meta(audit.full())
     .input(
       z.object({
         telegramId: z.number(),
@@ -237,6 +240,7 @@ export default createTRPCRouter({
     }),
 
   setHide: policy(dashboard("tg:groups:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         telegramId: z.number(),
@@ -263,6 +267,7 @@ export default createTRPCRouter({
 
   /** The performer is the token's user. */
   leaveChat: policy(dashboard("tg:groups:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         chatId: z.number(),
