@@ -387,6 +387,30 @@ describe("Azure member number changes", () => {
     expect(write).not.toHaveBeenCalled()
   })
 
+  it("audits the resolved directory id when the lookup uses an alias", async () => {
+    const caller = await writer()
+    const { azureDirectory } = await import("@/azure/directory")
+    const member = await azureDirectory.getMember("mock-member-alan")
+    vi.spyOn(azureDirectory, "getMember").mockResolvedValueOnce(member)
+
+    await expect(caller.members.setAssocNumber({ userId: "alan-alias", assocNumber: 2042 })).resolves.toEqual({
+      error: null,
+      notificationSent: null,
+    })
+    expect(audited.at(-1)).toMatchObject({ targetType: "azure.member", targetId: "mock-member-alan" })
+  })
+
+  it("keeps the input audit target when the member lookup fails", async () => {
+    const caller = await writer()
+    const { azureDirectory } = await import("@/azure/directory")
+    vi.spyOn(azureDirectory, "getMember").mockResolvedValueOnce(null)
+
+    await expect(caller.members.setAssocNumber({ userId: "missing-alias", assocNumber: 2042 })).resolves.toMatchObject({
+      error: "This member no longer exists in the directory.",
+    })
+    expect(audited.at(-1)).toMatchObject({ targetType: "azure.member", targetId: "missing-alias" })
+  })
+
   it("changes the number and emails the member", async () => {
     const caller = await writer()
 

@@ -127,17 +127,23 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       // Both orders are read in the reorder's transaction, so they are the ones it changed.
-      const { before, after } = await DB.transaction(async (tx) => {
+      const { before, after, updatedCount } = await DB.transaction(async (tx) => {
         const order = () =>
-          tx.select({ id: PROJECTS.id, title: PROJECTS.title }).from(PROJECTS).orderBy(asc(PROJECTS.order))
+          tx
+            .select({ id: PROJECTS.id, title: PROJECTS.title, order: PROJECTS.order })
+            .from(PROJECTS)
+            .orderBy(asc(PROJECTS.order))
         const before = await order()
-        await Promise.all(
-          input.projectIds.map((id, index) => tx.update(PROJECTS).set({ order: index }).where(eq(PROJECTS.id, id)))
+        const updated = await Promise.all(
+          input.projectIds.map((id, index) =>
+            tx.update(PROJECTS).set({ order: index }).where(eq(PROJECTS.id, id)).returning({ id: PROJECTS.id })
+          )
         )
-        return { before, after: await order() }
+        return { before, after: await order(), updatedCount: updated.reduce((total, rows) => total + rows.length, 0) }
       })
 
-      ctx.audit.set({ target: { type: "web.projects", id: "order", label: "Projects order" }, before, after })
+      if (updatedCount === 0) ctx.audit.skip()
+      else ctx.audit.set({ target: { type: "web.projects", id: "order", label: "Projects order" }, before, after })
       return { error: null }
     }),
 

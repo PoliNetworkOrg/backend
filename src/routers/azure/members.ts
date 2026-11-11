@@ -57,7 +57,10 @@ export default createTRPCRouter({
         const changed = await serializeMemberWrite(async () => {
           const member = await currentMember(input.userId)
           if (!member) return { error: "This member no longer exists in the directory." }
-          ctx.audit.set({ before: { assocNumber: member.employeeId } })
+          ctx.audit.set({
+            target: { type: "azure.member", id: member.id },
+            before: { assocNumber: member.employeeId },
+          })
           if (member.employeeId === input.assocNumber.toString())
             return { error: `The member already has number ${input.assocNumber}.` }
 
