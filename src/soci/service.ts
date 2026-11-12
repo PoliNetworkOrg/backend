@@ -61,6 +61,7 @@ const FIELD_LABELS: Record<string, string> = {
   birthDate: "birth date",
   birthPlace: "birth place",
   residence: "residence",
+  phone: "phone",
   admittedOn: "admission date",
 }
 
@@ -132,6 +133,7 @@ export function createSociService(options: SociOptions) {
     birthDate: d.birthDate,
     birthPlace: d.birthPlace,
     residence: d.residence,
+    phone: d.phone,
   })
 
   return {

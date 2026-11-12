@@ -24,13 +24,8 @@ function load(r: Row): Socio {
     codiceFiscale: r.codiceFiscale,
     birthDate: day(r.birthDate),
     birthPlace: r.birthPlace,
-    residence: {
-      street: r.residenceStreet,
-      postalCode: r.residencePostalCode,
-      city: r.residenceCity,
-      province: r.residenceProvince,
-      country: r.residenceCountry,
-    },
+    residence: r.residence,
+    phone: r.phone,
     admittedOn: day(r.admittedOn),
     endedOn: day(r.endedOn),
     endReason: r.endReason,
@@ -45,16 +40,9 @@ function load(r: Row): Socio {
 }
 
 function save(s: SocioChanges): Partial<Insert> {
-  const { residence, createdAt, updatedAt, ...rest } = s as SocioChanges & { createdAt?: string }
+  const { createdAt, updatedAt, ...rest } = s as SocioChanges & { createdAt?: string }
   return {
     ...rest,
-    ...(residence && {
-      residenceStreet: residence.street,
-      residencePostalCode: residence.postalCode,
-      residenceCity: residence.city,
-      residenceProvince: residence.province,
-      residenceCountry: residence.country,
-    }),
     ...(createdAt && { createdAt: new Date(createdAt) }),
     updatedAt: new Date(updatedAt),
   }

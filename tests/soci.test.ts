@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 import { checkCharacter, codiceFiscaleProblem, matchesBirthDate } from "@/soci/codice-fiscale"
-import { admitInputSchema, codiceFiscaleSchema, registerInputSchema, updateInputSchema } from "@/soci/contract"
+import {
+  admitInputSchema,
+  codiceFiscaleSchema,
+  phoneSchema,
+  registerInputSchema,
+  updateInputSchema,
+} from "@/soci/contract"
 import { admitInput, details, harness, OTHER_CF, registerInput, VALID_CF } from "./soci-fixtures"
 
 const ACTOR = "usr_direttivo"
@@ -40,22 +46,31 @@ describe("codice fiscale", () => {
     expect(JSON.stringify(parsed.error?.issues)).toContain("doesn't match the codice fiscale")
   })
 
-  it("requires every detail but the alias to admit, and only the legal name to register", () => {
+  it("requires every detail but the alias and the phone to admit, and only the legal name to register", () => {
     expect(admitInputSchema.safeParse({ ...admitInput(), details: details({ birthPlace: "" }) }).success).toBe(false)
-    expect(
-      admitInputSchema.safeParse({
-        ...admitInput(),
-        details: details({ residence: { street: "Via Roma 1", postalCode: "20133", city: "Milano", country: "IT" } }),
-      }).success
-    ).toBe(false)
-    const abroad = admitInputSchema.parse({
-      ...admitInput(),
-      details: details({ residence: { street: "Rue X 1", postalCode: "75001", city: "Paris", country: "fr" } }),
-    })
-    expect(abroad.details.residence).toMatchObject({ country: "FR", province: null })
+    expect(admitInputSchema.safeParse({ ...admitInput(), details: details({ residence: " " }) }).success).toBe(false)
+    expect(admitInput().details).toMatchObject({ residence: "Via Roma 1, 20133 Milano (MI)", phone: null })
+    // Migration 0034 can assemble up to 348 characters from the old parts: such a record must stay editable.
+    const update = (residence: string) =>
+      updateInputSchema.safeParse({ number: 344, details: details({ residence }), admittedOn: "2026-11-09" }).success
+    expect(update("x".repeat(348))).toBe(true)
+    expect(update("x".repeat(351))).toBe(false)
     const registered = registerInput("mock-member-alan")
-    expect(registered.details).toMatchObject({ codiceFiscale: null, birthDate: null, residence: { street: null } })
+    expect(registered.details).toMatchObject({ codiceFiscale: null, birthDate: null, residence: null, phone: null })
     expect(registerInputSchema.safeParse({ ...registered, details: { lastName: "Turing" } }).success).toBe(false)
+  })
+})
+
+describe("phone", () => {
+  it("accepts international numbers, dropping spaces and separators", () => {
+    expect(phoneSchema.parse("+39 333 123 4567")).toBe("+393331234567")
+    expect(phoneSchema.parse("+44 (20) 7946-0958")).toBe("+442079460958")
+    expect(admitInput({ details: details({ phone: "+39 333.123.4567" }) }).details.phone).toBe("+393331234567")
+  })
+
+  it("refuses numbers without the country code", () => {
+    for (const phone of ["333 123 4567", "0039 333 123 4567", "+0 333 123 4567", "+39 333", "+39 333 abc 4567"])
+      expect(phoneSchema.safeParse(phone).success, phone).toBe(false)
   })
 })
 

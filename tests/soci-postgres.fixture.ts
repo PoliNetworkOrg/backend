@@ -32,7 +32,8 @@ const socio = (number: number, entraObjectId: string, codiceFiscale: string | nu
   codiceFiscale,
   birthDate: "1980-01-01",
   birthPlace: "Roma",
-  residence: { street: "Via Roma 1", postalCode: "20133", city: "Milano", province: "MI", country: "IT" },
+  residence: "Via Roma 1, 20133 Milano (MI)",
+  phone: "+393331234567",
   admittedOn: "2026-11-09",
   endedOn: null,
   endReason: null,
@@ -80,7 +81,7 @@ try {
   await assert.rejects(
     db.insert(members).values({
       ...socio(352, "oid-x", null),
-      residenceStreet: null,
+      residence: null,
       endedOn: "2026-12-31",
       createdAt: new Date(at),
       updatedAt: new Date(at),

@@ -33,29 +33,11 @@ const dateSchema = z.iso.date()
 const text = (max: number) => z.string().trim().min(1).max(max)
 /** A name as written on an identity document. */
 const legalName = text(80)
-/** ISO 3166-1 alpha-2, e.g. `IT`. */
-const countrySchema = z
+/** International format: `+`, the country code and the number, e.g. `+393331234567`. */
+export const phoneSchema = z
   .string()
-  .trim()
-  .toUpperCase()
-  .regex(/^[A-Z]{2}$/, "A two-letter country code, e.g. IT")
-/** The two-letter sigla of an Italian province, e.g. `MI`. */
-const provinceSchema = z
-  .string()
-  .trim()
-  .toUpperCase()
-  .regex(/^[A-Z]{2}$/, "The province's two-letter code, e.g. MI")
-
-export const residenceSchema = z.object({
-  /** Street and number. */
-  street: z.string().nullable(),
-  postalCode: z.string().nullable(),
-  city: z.string().nullable(),
-  /** Only in Italy. */
-  province: z.string().nullable(),
-  country: z.string().nullable(),
-})
-export type Residence = z.infer<typeof residenceSchema>
+  .transform((value) => value.replace(/[\s().-]/g, ""))
+  .pipe(z.string().regex(/^\+[1-9]\d{6,14}$/, "A phone number in international format, e.g. +39 333 123 4567"))
 
 /** The bookkeeping data the association keeps. Nullable fields may be missing for a socio registered afterwards. */
 const bookkeepingFields = {
@@ -67,7 +49,10 @@ const bookkeepingFields = {
   birthDate: z.string().nullable(),
   /** The comune, or the city and country. */
   birthPlace: z.string().nullable(),
-  residence: residenceSchema,
+  /** The residence address as one line, as the Libro Soci writes it, e.g. `Via Roma 1, Milano (MI)`. */
+  residence: z.string().nullable(),
+  /** International format. Never required. */
+  phone: z.string().nullable(),
 }
 
 /** One row of the register. */
@@ -145,27 +130,6 @@ const optional = <T extends z.ZodType<string, string>>(schema: T) =>
     .nullish()
     .transform(blankToNull)
 
-const residenceInput = <R extends boolean>(required: R) => {
-  const field = (schema: z.ZodType<string, string>) => (required ? schema : optional(schema))
-  return z
-    .object({
-      street: field(text(200)),
-      postalCode: field(text(16)),
-      city: field(text(120)),
-      province: optional(provinceSchema),
-      country: field(countrySchema),
-    })
-    .superRefine((r, ctx) => {
-      const italy = r.country === "IT"
-      if (italy && r.postalCode && !/^\d{5}$/.test(r.postalCode))
-        ctx.addIssue({ code: "custom", path: ["postalCode"], message: "An Italian postal code has five digits." })
-      if (!italy && r.province)
-        ctx.addIssue({ code: "custom", path: ["province"], message: "The province is only for Italy." })
-      if (required && italy && !r.province)
-        ctx.addIssue({ code: "custom", path: ["province"], message: "Choose the province." })
-    })
-}
-
 function detailsInput<R extends boolean>(required: R) {
   const field = (schema: z.ZodType<string, string>) => (required ? schema : optional(schema))
   return z
@@ -176,9 +140,9 @@ function detailsInput<R extends boolean>(required: R) {
       codiceFiscale: required ? codiceFiscaleSchema : optional(codiceFiscaleSchema),
       birthDate: field(dateSchema),
       birthPlace: field(text(120)),
-      residence: required
-        ? residenceInput(true)
-        : residenceInput(false).prefault({ street: null, postalCode: null, city: null, country: null }),
+      // Fits the longest line migration 0034 could assemble from the old parts (200 + 16 + 120 + province + country).
+      residence: field(text(350)),
+      phone: optional(phoneSchema),
     })
     .superRefine((d, ctx) => {
       if (d.codiceFiscale && d.birthDate && !matchesBirthDate(d.codiceFiscale, d.birthDate))
@@ -190,7 +154,7 @@ function detailsInput<R extends boolean>(required: R) {
     })
 }
 
-/** Everything required but the alias: for admitting a new socio. */
+/** Everything required but the alias and the phone: for admitting a new socio. */
 export const requiredDetailsSchema = detailsInput(true)
 /** Only the legal name required: for a socio registered afterwards, and for edits. Empty strings mean unknown. */
 export const optionalDetailsSchema = detailsInput(false)
