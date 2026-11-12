@@ -50,6 +50,11 @@ describe("codice fiscale", () => {
     expect(admitInputSchema.safeParse({ ...admitInput(), details: details({ birthPlace: "" }) }).success).toBe(false)
     expect(admitInputSchema.safeParse({ ...admitInput(), details: details({ residence: " " }) }).success).toBe(false)
     expect(admitInput().details).toMatchObject({ residence: "Via Roma 1, 20133 Milano (MI)", phone: null })
+    // Migration 0034 can assemble up to 348 characters from the old parts: such a record must stay editable.
+    const update = (residence: string) =>
+      updateInputSchema.safeParse({ number: 344, details: details({ residence }), admittedOn: "2026-11-09" }).success
+    expect(update("x".repeat(348))).toBe(true)
+    expect(update("x".repeat(351))).toBe(false)
     const registered = registerInput("mock-member-alan")
     expect(registered.details).toMatchObject({ codiceFiscale: null, birthDate: null, residence: null, phone: null })
     expect(registerInputSchema.safeParse({ ...registered, details: { lastName: "Turing" } }).success).toBe(false)

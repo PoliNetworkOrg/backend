@@ -140,7 +140,8 @@ function detailsInput<R extends boolean>(required: R) {
       codiceFiscale: required ? codiceFiscaleSchema : optional(codiceFiscaleSchema),
       birthDate: field(dateSchema),
       birthPlace: field(text(120)),
-      residence: field(text(200)),
+      // Fits the longest line migration 0034 could assemble from the old parts (200 + 16 + 120 + province + country).
+      residence: field(text(350)),
       phone: optional(phoneSchema),
     })
     .superRefine((d, ctx) => {
