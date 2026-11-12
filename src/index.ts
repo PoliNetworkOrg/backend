@@ -18,7 +18,6 @@ export type {
   AdmitInput as SociAdmitInput,
   AdmitResult as SociAdmitResult,
   RegisterInput as SociRegisterInput,
-  Residence as SociResidence,
   SetNumberInput as SociSetNumberInput,
   SetNumberResult as SociSetNumberResult,
   SociList,

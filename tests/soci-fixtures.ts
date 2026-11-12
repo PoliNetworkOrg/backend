@@ -71,7 +71,8 @@ export const details = (overrides: Record<string, unknown> = {}) => ({
   codiceFiscale: VALID_CF,
   birthDate: "1980-01-01",
   birthPlace: "Roma",
-  residence: { street: "Via Roma 1", postalCode: "20133", city: "Milano", province: "MI", country: "IT" },
+  residence: "Via Roma 1, 20133 Milano (MI)",
+  phone: "",
   ...overrides,
 })
 

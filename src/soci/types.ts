@@ -1,4 +1,4 @@
-import type { ACCOUNT_STATES, END_REASONS, Residence } from "./contract"
+import type { ACCOUNT_STATES, END_REASONS } from "./contract"
 
 /** One admission in the Libro Soci. */
 export type Socio = {
@@ -13,7 +13,8 @@ export type Socio = {
   codiceFiscale: string | null
   birthDate: string | null
   birthPlace: string | null
-  residence: Residence
+  residence: string | null
+  phone: string | null
   admittedOn: string
   endedOn: string | null
   endReason: (typeof END_REASONS)[number] | null

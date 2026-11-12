@@ -21,13 +21,10 @@ export const members = createTable.soci(
     codiceFiscale: text("codice_fiscale"),
     birthDate: date("birth_date", { mode: "string" }),
     birthPlace: text("birth_place"),
-    residenceStreet: text("residence_street"),
-    residencePostalCode: text("residence_postal_code"),
-    residenceCity: text("residence_city"),
-    /** Only in Italy. */
-    residenceProvince: text("residence_province"),
-    /** ISO 3166-1 alpha-2. */
-    residenceCountry: text("residence_country"),
+    /** One line, as the Libro Soci writes it. */
+    residence: text(),
+    /** International format, e.g. `+393331234567`. */
+    phone: text(),
     admittedOn: date("admitted_on", { mode: "string" }).notNull(),
     endedOn: date("ended_on", { mode: "string" }),
     endReason: text("end_reason").$type<(typeof END_REASONS)[number]>(),
