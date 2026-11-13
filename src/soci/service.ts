@@ -13,6 +13,7 @@ import {
   formatEuro,
   formatItalianDay,
   paymentReference,
+  reminderDay,
   reminderOn,
   renewalDeadline,
   romeDay,
@@ -706,6 +707,8 @@ export function createSociService(options: SociOptions) {
       )
       const fee = await feeOf(s, input.year)
       if (!fee) {
+        if (exemptYearFor(s.admittedOn) === input.year)
+          fail("PRECONDITION_FAILED", `The ${feeYearLabel(input.year)} fee is exempt.`)
         const opened = await store.openFee(
           s.id,
           { ...emptyFee, ...payment, year: input.year, amountCents: FEE_CENTS, createdAt: at },
@@ -807,6 +810,7 @@ export function createSociService(options: SociOptions) {
     async completeDetails(entraObjectId: string, sub: string, input: C.CompleteDetailsInput): Promise<void> {
       await writes.serialize(async () => {
         const s = await self(entraObjectId)
+        if (s.endedOn) fail("PRECONDITION_FAILED", "Your socio status has ended.")
         const given = C.SELF_FIELDS.filter((key) => input[key] !== null)
         const recorded = given.filter((key) => s[key] !== null)
         if (recorded.length)
@@ -834,8 +838,8 @@ export function createSociService(options: SociOptions) {
     // Jobs.
 
     /**
-     * Daily: opens this fee year for every active socio without a fee, Due (with the opening email) or Exempt, then
-     * sends the 1 and 21 December reminders. Idempotent: a second run that day opens and queues nothing.
+     * Daily: opens this fee year for every active socio without a fee, Due (with the opening email until the deadline)
+     * or Exempt, then sends the 1 and 21 December reminders. Idempotent: a second run that day opens and queues nothing.
      */
     async runDaily(): Promise<{ opened: number; reminded: number }> {
       const bank = options.fees.bank
@@ -865,7 +869,10 @@ export function createSociService(options: SociOptions) {
             updatedAt: at,
           },
           entry(SYSTEM, exempt ? `Opened the ${label} fee: exempt, admitted in the summer` : `Opened the ${label} fee`),
-          exempt ? undefined : feeMail(s, `opening:${year}:${s.id}`, "opening", mailData(s, year))
+          // Past the renewal deadline the email would ask to pay by a day gone: the fee opens Due without it.
+          exempt || day > renewalDeadline(year)
+            ? undefined
+            : feeMail(s, `opening:${year}:${s.id}`, "opening", mailData(s, year))
         )
         if (fee) opened++
       }
@@ -876,6 +883,8 @@ export function createSociService(options: SociOptions) {
         for (const fee of await store.fees({ year })) {
           const s = byId.get(fee.memberId)
           if (fee.status !== "due" || !s || s.endedOn) continue
+          // Opened or rejected on or after the reminder's day: that email already gave the deadline.
+          if (romeDay(new Date(fee.updatedAt)) >= reminderDay(year, reminder)) continue
           const email = feeMail(s, `reminder:${year}:${reminder}:${s.id}`, "reminder", mailData(s, year))
           if (email && (await store.enqueue(s.id, email, now().toISOString()))) reminded++
         }

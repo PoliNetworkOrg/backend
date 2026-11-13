@@ -121,7 +121,8 @@ MB, judged by content, never expired).
 
 - **Admitting or registering** records the admission's fee year as paid (method `admission`).
 - **Every day at 08:00** (Europe/Rome) `runDaily` opens the current fee year for every active socio without a fee: Due,
-  with the opening email, or Exempt. On 1 and 21 December it reminds every socio whose fee is still Due. It is
+  with the opening email (none once 31 December has passed), or Exempt. On 1 and 21 December it reminds every socio
+  whose fee is still Due, unless an opening or rejection email since that day already gave them the deadline. It is
   idempotent, and does nothing until `SOCI_IBAN` and `SOCI_BENEFICIARI` are set.
 - **The socio** (`me.*`, `people:self`, found by the Microsoft 365 object ID in Auth's access snapshot) sees their
   record, fees and bank details, uploads the transfer receipt as `FormData` (`file`, `transferDate`, `declaredCents`),

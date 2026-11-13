@@ -62,3 +62,7 @@ export function reminderOn(day: string) {
   if (month !== 12) return null
   return date >= 21 ? "dec-21" : "dec-1"
 }
+
+/** The day a reminder is for: `2026-12-01` or `2026-12-21`. */
+export const reminderDay = (year: number, reminder: "dec-1" | "dec-21") =>
+  `${year}-12-${reminder === "dec-1" ? "01" : "21"}`

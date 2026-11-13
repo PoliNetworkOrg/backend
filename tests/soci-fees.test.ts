@@ -156,6 +156,14 @@ describe("opening the fee year", () => {
     expect(await h.service.runDaily()).toEqual({ opened: 1, reminded: 0 })
     expect((await h.service.listFees({})).fees.map((f) => f.number)).toEqual([344, 1002])
   })
+
+  it("opens a Due fee without the opening email once the renewal deadline has passed", async () => {
+    const h = await register()
+    h.setNow("2027-02-01")
+    expect(await h.service.runDaily()).toEqual({ opened: 2, reminded: 0 })
+    expect((await h.service.listFees({ year: 2026, status: "due" })).fees.map((f) => f.number)).toEqual([1001, 1002])
+    expect(mailIds(h)).toEqual([])
+  })
 })
 
 describe("reminders", () => {
@@ -180,6 +188,27 @@ describe("reminders", () => {
     expect(mailIds(h).filter((id) => id.startsWith("reminder"))).toEqual([
       "reminder:2026:dec-1:2",
       "reminder:2026:dec-21:2",
+    ])
+  })
+
+  it("skip a fee opened or rejected on or after the reminder's day, whose email already gave the deadline", async () => {
+    const h = await register()
+    // Ada's fee opens on 10 December: the opening email, then only the 21 December reminder.
+    h.setNow("2026-12-10")
+    await h.service.runDaily()
+    expect(mailIds(h)).toEqual(["opening:2026:2", "opening:2026:3"])
+    // Alan's receipt is rejected on 11 December, after the 1 December reminder: the rejection gives the deadline.
+    await h.service.uploadReceipt(ALAN, "usr_alan", { name: "r.pdf", bytes: await pdf() }, receipt)
+    h.setNow("2026-12-11")
+    const fileId = (await h.service.get({ number: 1002 })).fees[0].upload?.fileId ?? ""
+    await h.service.rejectFee(ACTOR, { number: 1002, year: 2026, fileId, reason: "Wrong amount." })
+    h.setNow("2026-12-12")
+    expect((await h.service.runDaily()).reminded).toBe(0)
+    h.setNow("2026-12-21")
+    expect((await h.service.runDaily()).reminded).toBe(2)
+    expect(mailIds(h).filter((id) => id.startsWith("reminder"))).toEqual([
+      "reminder:2026:dec-21:2",
+      "reminder:2026:dec-21:3",
     ])
   })
 })
@@ -277,6 +306,13 @@ describe("receipts and review", () => {
 
   it("marks a fee as paid by hand, opening it when the year hasn't yet", async () => {
     const h = await register()
+    // Admitted in the summer: the year will open an Exempt fee, so it can't be marked as paid before.
+    const { admittedOn } = socio(h, 1001)
+    socio(h, 1001).admittedOn = "2026-07-15"
+    await expect(
+      h.service.markPaid(ACTOR, { number: 1001, year: 2026, paidOn: "2026-10-02", method: "other", note: null })
+    ).rejects.toThrow(/exempt/)
+    socio(h, 1001).admittedOn = admittedOn
     await h.service.markPaid(ACTOR, { number: 1002, year: 2026, paidOn: "2026-10-02", method: "other", note: "Cash" })
     expect((await h.service.get({ number: 1002 })).fees[0]).toMatchObject({
       status: "paid",
@@ -365,6 +401,10 @@ describe("My area", () => {
       actor: "usr_ada",
       text: "Completed residence, phone",
     })
+    Object.assign(socio(h, 1001), { endedOn: "2026-11-01", endReason: "resigned" })
+    await expect(h.service.completeDetails(ADA, "usr_ada", { ...none, birthPlace: "Londra" })).rejects.toThrow(
+      /has ended/
+    )
   })
 })
 
