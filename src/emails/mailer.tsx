@@ -1,4 +1,3 @@
-import { render } from "@react-email/components"
 import { createTestAccount, createTransport, getTestMessageUrl } from "nodemailer"
 import type { JSX } from "react"
 import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } from "@/azure/functions/emails"
@@ -6,29 +5,31 @@ import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import type { FeeMailKind, SociMail } from "@/soci/types"
+import { renderEmail } from "./render"
 import BirthdayEmail, { birthdaySubject } from "./templates/birthday"
 import FeeConfirmedEmail, { feeConfirmedSubject } from "./templates/fee-confirmed"
 import FeeOpeningEmail, { feeOpeningSubject } from "./templates/fee-opening"
 import FeeRejectedEmail, { feeRejectedSubject } from "./templates/fee-rejected"
 import FeeReminderEmail, { feeReminderSubject } from "./templates/fee-reminder"
-import MemberNumberChanged from "./templates/member-number-changed"
+import MemberNumberChanged, { memberNumberChangedSubject } from "./templates/member-number-changed"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
-import SignatureRequestEmail from "./templates/signature-request"
+import SignatureRequestEmail, { signatureRequestSubject } from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
-import Welcome from "./templates/welcome"
+import Welcome, { welcomeSubject } from "./templates/welcome"
 
 const makeSubject = (subject: string) => (env.NODE_ENV === "development" ? `[DEV] ${subject}` : subject)
 
-const testAccount = await createTestAccount()
-const transporter = createTransport({
-  host: testAccount.smtp.host,
-  port: testAccount.smtp.port,
-  secure: testAccount.smtp.secure,
-  auth: {
-    user: testAccount.user,
-    pass: testAccount.pass,
-  },
-})
+async function createDevTransport() {
+  const account = await createTestAccount()
+  return createTransport({
+    host: account.smtp.host,
+    port: account.smtp.port,
+    secure: account.smtp.secure,
+    auth: { user: account.user, pass: account.pass },
+  })
+}
+
+let devTransport: ReturnType<typeof createDevTransport> | undefined
 
 async function devSendMail(
   to: string | string[],
@@ -37,13 +38,16 @@ async function devSendMail(
   attachments: EmailAttachment[] = [],
   options: EmailOptions = {}
 ) {
-  const html = await render(component)
+  const { html, text, inlineImages } = await renderEmail(component)
+  devTransport ??= createDevTransport()
+  const transporter = await devTransport
   const res = await transporter.sendMail({
     to,
     replyTo: options.replyTo,
     subject,
     html,
-    attachments: attachments.map((a) => ({ ...a, content: Buffer.from(a.content) })),
+    text,
+    attachments: [...inlineImages, ...attachments.map((a) => ({ ...a, content: Buffer.from(a.content) }))],
   })
   logger.info(`[EMAIL] new email, click to see: ${getTestMessageUrl(res)}`)
   return true
@@ -56,7 +60,7 @@ export async function sendWelcomeEmail(
   accountCredentials: { email: string; password: string },
   memberInfo: { firstName: string; assocNumber: number }
 ) {
-  const subject = makeSubject("Welcome to PoliNetwork!")
+  const subject = makeSubject(welcomeSubject)
   return sendEmail(
     toAddress,
     subject,
@@ -78,7 +82,7 @@ export async function sendMemberNumberChangedEmail(
     email: string | null
   }
 ) {
-  const subject = makeSubject("Your PoliNetwork member number has changed")
+  const subject = makeSubject(memberNumberChangedSubject)
   return sendEmail(
     toAddress,
     subject,
@@ -103,7 +107,7 @@ export async function sendSignatureRequestEmail(
     setupUrl: string
   }
 ) {
-  return sendEmail(toAddress, makeSubject(`Signature needed: ${props.title}`), <SignatureRequestEmail {...props} />)
+  return sendEmail(toAddress, makeSubject(signatureRequestSubject(props)), <SignatureRequestEmail {...props} />)
 }
 
 export async function sendRequestUpdateEmail(toAddress: string, props: RequestUpdate) {

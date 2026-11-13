@@ -1,109 +1,88 @@
-import {
-  Body,
-  Button,
-  Container,
-  Head,
-  Heading,
-  Html,
-  Link,
-  Preview,
-  pixelBasedPreset,
-  Section,
-  Tailwind,
-  Text,
-} from "@react-email/components"
+import { Link } from "@react-email/components"
 import type { RequestUpdate } from "@/esign/service"
-import { Footer } from "../components/footer"
-import { Logo } from "../components/logo"
+import { EmailLayout, linkStyle, MailAction, MailText, smallText } from "../components/email-layout"
+import { Multiline } from "../components/multiline"
 import type { EmailTemplate } from "../types"
 
 export const requestUpdateSubject = (props: RequestUpdate) =>
-  `${{ declined: "Declined", completed: "Signed by everyone", delivery_failed: "Not delivered" }[props.outcome]}: ${props.title}`
-
+  `${{ declined: "Firma rifiutata", completed: "Tutte le firme sono state raccolte", delivery_failed: "Il PDF firmato non è stato consegnato" }[props.outcome]}: ${props.title}`
 function Summary(props: RequestUpdate) {
   const title = <strong>{props.title}</strong>
   switch (props.outcome) {
     case "declined":
       return (
         <>
-          <Text className="my-2 text-base leading-normal">
-            {props.by} declined to sign {title}.
-          </Text>
+          <MailText>
+            {props.by} ha rifiutato di firmare {title}.
+          </MailText>
           {props.reason && (
-            <Text className="my-4 whitespace-pre-line border-0 border-l-4 border-solid border-gray-300 pl-3 text-base leading-normal text-gray-700">
-              “{props.reason}”
-            </Text>
+            <MailText style={{ borderLeft: "4px solid #cbd5e1", paddingLeft: 12 }}>
+              “<Multiline>{props.reason}</Multiline>”
+            </MailText>
           )}
         </>
       )
     case "completed": {
       const { savedTo, emailedTo } = props
-      const saved = savedTo && (savedTo.url ? <Link href={savedTo.url}>{savedTo.path}</Link> : savedTo.path)
+      const saved =
+        savedTo &&
+        (savedTo.url ? (
+          <Link href={savedTo.url} style={linkStyle}>
+            {savedTo.path}
+          </Link>
+        ) : (
+          savedTo.path
+        ))
       const emailed = emailedTo.length > 0 && emailedTo.join(", ")
       return (
-        <Text className="my-2 text-base leading-normal">
-          Everyone signed {title}.
+        <MailText>
+          Tutti hanno firmato {title}.
           {(saved || emailed) && (
             <>
               {" "}
-              The signed PDF {saved && <>is saved in {saved}</>}
-              {saved && emailed && " and "}
-              {emailed && `was emailed to ${emailed}`}.
+              Il PDF firmato {saved && <>è salvato in {saved}</>}
+              {saved && emailed && " ed "}
+              {emailed && `è stato inviato via email a ${emailed}`}.
             </>
           )}
-        </Text>
+        </MailText>
       )
     }
     case "delivery_failed":
       return (
         <>
-          <Text className="my-2 text-base leading-normal">
-            The signed PDF of {props.requestedBy ? <>{props.requestedBy}’s request </> : null}
-            {title} couldn’t be {props.failed.step === "save" ? "saved to" : "emailed to"} {props.failed.target}.{" "}
-            {props.canRetry ? "You can retry it from the request." : "A manager can retry it."}
-          </Text>
-          <Text className="my-2 text-sm leading-normal text-gray-700">Error: {props.error}</Text>
+          <MailText>
+            Non è stato possibile {props.failed.step === "save" ? "salvare in" : "inviare a"} {props.failed.target} il
+            PDF firmato relativo alla richiesta{props.requestedBy ? ` di ${props.requestedBy}` : ""}, {title}.{" "}
+            {props.canRetry
+              ? "Puoi riprovare dalla pagina della richiesta."
+              : "Un responsabile può riprovare dalla pagina della richiesta."}
+          </MailText>
+          <MailText style={smallText}>
+            Errore: <Multiline>{props.error}</Multiline>
+          </MailText>
         </>
       )
   }
 }
-
-/** Tells a request's creator, and for a failed delivery its managers, how it ended. */
-const RequestUpdateEmail: EmailTemplate<RequestUpdate> = (props) => {
-  const heading = {
-    declined: "Request declined",
-    completed: "Everyone signed",
-    delivery_failed: "The signed PDF wasn’t delivered",
-  }[props.outcome]
-  return (
-    <Html>
-      <Tailwind config={{ presets: [pixelBasedPreset] }}>
-        <Head />
-        <Preview>{requestUpdateSubject(props)}</Preview>
-        <Body className="m-0 bg-white p-0 font-sans text-base leading-normal">
-          <Logo />
-          <Container className="mx-auto bg-white px-5 max-w-[460px]">
-            <Heading className="m-0 text-center text-2xl font-bold leading-8">{heading}</Heading>
-            <Section className="py-8">
-              <Text className="my-2 text-base leading-normal">Hi {props.recipientName},</Text>
-              <Summary {...props} />
-              <Section className="my-6 text-center">
-                <Button
-                  href={props.url}
-                  className="rounded-md bg-[#1156AE] px-5 py-3 text-base font-semibold text-white"
-                >
-                  Open the request
-                </Button>
-              </Section>
-            </Section>
-          </Container>
-          <Footer />
-        </Body>
-      </Tailwind>
-    </Html>
-  )
-}
-
+const RequestUpdateEmail: EmailTemplate<RequestUpdate> = (props) => (
+  <EmailLayout
+    kind={
+      (
+        {
+          declined: "request-update",
+          completed: "request-completed",
+          delivery_failed: "request-delivery-failed",
+        } as const
+      )[props.outcome]
+    }
+    preview={requestUpdateSubject(props)}
+  >
+    <MailText>Ciao {props.recipientName},</MailText>
+    <Summary {...props} />
+    <MailAction href={props.url}>Apri la richiesta</MailAction>
+  </EmailLayout>
+)
 RequestUpdateEmail.PreviewProps = {
   recipientName: "Luca",
   title: "Verbale del Consiglio Direttivo del 10 ottobre 2026",
@@ -112,5 +91,4 @@ RequestUpdateEmail.PreviewProps = {
   by: "Anna Bianchi",
   reason: "La data della riunione è sbagliata.",
 }
-
 export default RequestUpdateEmail

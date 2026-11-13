@@ -28,6 +28,8 @@ describe("birthday email presentation", () => {
     // Dark mode recolours declared colours but not images: no text on artwork, no white islands, no outer tint.
     expect(html).not.toMatch(/background-image|background="|bgcolor|data:image|cid:/)
     expect(root.querySelector("body")?.getAttribute("style") ?? "").not.toContain("background")
+    // The card is outlined by a border instead.
+    expect(root.querySelector(".birthday-card")?.getAttribute("style")).toMatch(/border-style:solid;border-width:1px/)
   })
 
   it("asks the clients that listen to keep it light", async () => {

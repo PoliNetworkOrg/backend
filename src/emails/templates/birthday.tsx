@@ -49,6 +49,7 @@ const BirthdayEmail: EmailTemplate<BirthdayMailData> = (data) => (
   <Html lang="it">
     <Tailwind config={{ presets: [pixelBasedPreset] }}>
       <Head>
+        <title>{birthdaySubject(data)}</title>
         <meta name="color-scheme" content="light only" />
         <meta name="supported-color-schemes" content="light only" />
         <style>{":root { color-scheme: light only; }"}</style>
@@ -57,19 +58,30 @@ const BirthdayEmail: EmailTemplate<BirthdayMailData> = (data) => (
           href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600&family=Red+Hat+Text:wght@400;500;700&display=swap"
         />
       </Head>
-      <Preview>Oggi è il tuo giorno: tanti auguri!</Preview>
-      <Body className="m-0 p-0 py-6 text-[#020617]" style={text}>
-        <Container className="birthday-card mx-auto max-w-[480px] rounded-[20px] bg-white">
+      <Preview>Un pensiero per te da tutta PoliNetwork</Preview>
+      <Body className="m-0 px-3 py-6 text-[#020617]" style={text}>
+        {/* A border, not an outer tint, outlines the card: dark mode keeps borders while it darkens the card. */}
+        <Container className="birthday-card mx-auto max-w-[480px] overflow-hidden rounded-[21px] border border-solid border-[#E2E8F0] bg-white">
           <Img
             className="birthday-header"
             src={BIRTHDAY_HEADER_URL}
             width={480}
             height={200}
             alt="PoliNetwork"
-            style={{ display: "block", width: "100%", maxWidth: 480, height: "auto", border: 0 }}
+            // Rounded on the image too, to the card's inner curve: clients that drop overflow:hidden still get clean corners.
+            style={{
+              display: "block",
+              width: "100%",
+              maxWidth: 480,
+              height: "auto",
+              border: 0,
+              borderRadius: "20px 20px 0 0",
+            }}
           />
           <Section className="px-8 pt-8 text-center">
-            <Text className="m-0 text-[44px] leading-none">🎂</Text>
+            <Text aria-hidden="true" className="m-0 text-[44px] leading-none">
+              🎂
+            </Text>
             <Heading
               className="birthday-title m-0 mt-4 text-[32px] font-medium leading-[38px] tracking-[-0.5px] text-[#020617]"
               style={display}
@@ -123,7 +135,7 @@ const BirthdayEmail: EmailTemplate<BirthdayMailData> = (data) => (
         </Container>
         <Container className="mx-auto max-w-[480px]">
           <Text className="mx-6 my-6 text-center text-[12px] leading-[18px] text-[#64748B]" style={text}>
-            Messaggio automatico, non rispondere a questa email. Per qualsiasi cosa scrivi a{" "}
+            Messaggio automatico: non rispondere a questa email. Per qualsiasi cosa, scrivi a{" "}
             <Link href="mailto:direttivo@polinetwork.org" className="text-[#0369A1] underline">
               direttivo@polinetwork.org
             </Link>

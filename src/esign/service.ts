@@ -352,8 +352,8 @@ export function createEsignService(options: ServiceOptions) {
     return document
   }
 
-  async function profileName(sub: string) {
-    return (await store.getProfile(sub))?.name ?? "A PoliNetwork member"
+  async function profileName(sub: string, fallback = "A PoliNetwork member") {
+    return (await store.getProfile(sub))?.name ?? fallback
   }
 
   async function view(caller: Caller, request: SigningRequest, rules: Rules): Promise<RequestView> {
@@ -407,7 +407,7 @@ export function createEsignService(options: ServiceOptions) {
    * couldn't be.
    */
   async function notifyTurn(request: SigningRequest, signers: Signer[]) {
-    const requestedBy = await profileName(request.createdBySub)
+    const requestedBy = await profileName(request.createdBySub, "Un socio PoliNetwork")
     const results = await Promise.all(
       signers.map(async (signer) => {
         const profile = await store.getProfile(signer.sub)
@@ -526,7 +526,7 @@ export function createEsignService(options: ServiceOptions) {
     }
     if (retryBy) return
     const managers = await managersOf(request)
-    const requestedBy = await profileName(request.createdBySub)
+    const requestedBy = await profileName(request.createdBySub, "Un socio PoliNetwork")
     const failed =
       step === "save" && output
         ? { step, target: drivePath(output.folderPath, output.fileName) }
@@ -538,7 +538,7 @@ export function createEsignService(options: ServiceOptions) {
       (sub) => ({
         outcome: "delivery_failed",
         failed,
-        error: delivery.error ?? "Unknown error",
+        error: delivery.error ?? "Errore sconosciuto",
         requestedBy: sub === request.createdBySub ? null : requestedBy,
         canRetry: managers.has(sub),
       }),
