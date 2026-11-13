@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { SQL } from "bun"
+import { PDFDocument } from "pdf-lib"
 import type { Context } from "@/trpc"
 
 // A disposable database on the integration server, with the fixed test credentials used in CI.
@@ -67,7 +68,11 @@ try {
   const website = documents.createCaller({
     auth: { kind: "token", actor: { kind: "service", client: "website" }, scopes: new Set(["backend:public:read"]) },
   })
-  const pdf = (name = "file.pdf", type = "application/pdf") => new File(["%PDF-1.4 test"], name, { type })
+  const onePage = await PDFDocument.create()
+  onePage.addPage()
+  const pdfBytes = new Uint8Array(await onePage.save())
+  const pdf = (name = "file.pdf", type = "application/pdf", content: BlobPart = pdfBytes) =>
+    new File([content], name, { type })
   const form = (fields: Record<string, string | File>) => {
     const fd = new FormData()
     for (const [key, value] of Object.entries(fields)) fd.append(key, value)
@@ -146,9 +151,14 @@ try {
     code: "BAD_REQUEST",
   })
   await assert.rejects(addVersion(statutoDoc.id, "3.0", "01/02/2026"), { code: "BAD_REQUEST" })
+  // The declared type is only a claim: the bytes must be a PDF with pages.
+  for (const content of ["not a pdf", "%PDF-1.4 truncated", new Uint8Array([0x89, 0x50, 0x4e, 0x47])])
+    await assert.rejects(addVersion(statutoDoc.id, "3.0", "2026-01-01", pdf("x.pdf", "application/pdf", content)), {
+      code: "BAD_REQUEST",
+    })
   assert.equal(stored.size, 3)
   ok(await addVersion(atto.id, "2.0", "2020-01-01")) // The same label on another document is allowed.
-  checked.push("versions: PDF only, ISO dates, unique per document, NOT_FOUND for missing documents")
+  checked.push("versions: PDF content only, ISO dates, unique per document, NOT_FOUND for missing documents")
 
   const catalog = await website.getCatalog()
   assert.deepEqual(

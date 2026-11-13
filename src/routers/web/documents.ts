@@ -1,4 +1,6 @@
+import { TRPCError } from "@trpc/server"
 import { and, asc, desc, eq, inArray, max, ne, sql } from "drizzle-orm"
+import { PDFDocument } from "pdf-lib"
 import z from "zod"
 import { deleteBlob, uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
@@ -95,6 +97,26 @@ async function deleteBlobs(files: string[]) {
   for (const [index, result] of results.entries())
     if (result.status === "rejected")
       logger.error({ err: result.reason, file: files[index] }, "[documents] could not delete a blob")
+}
+
+/**
+ * The uploaded bytes, checked to be a readable PDF with pages: the browser's MIME type is only a claim. Encrypted PDFs
+ * are accepted, as official documents are often permission-restricted.
+ */
+async function readPdf(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let pages = 0
+  if (Buffer.from(bytes.subarray(0, 5)).toString("latin1") === "%PDF-")
+    try {
+      const pdf = await PDFDocument.load(bytes, {
+        ignoreEncryption: true,
+        updateMetadata: false,
+        throwOnInvalidObject: false,
+      })
+      pages = pdf.getPageCount()
+    } catch {}
+  if (!pages) throw new TRPCError({ code: "BAD_REQUEST", message: "The file is not a readable PDF." })
+  return Buffer.from(bytes)
 }
 
 const sameIds = (a: number[], b: number[]) => a.length === b.length && new Set([...a, ...b]).size === a.length
@@ -450,6 +472,7 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { documentId, version, date, file } = input
       const author = createdByColumns(authorOf(ctx.actor))
+      const bytes = await readPdf(file)
 
       const [document] = await DB.select({ id: DOCUMENTS.id }).from(DOCUMENTS).where(eq(DOCUMENTS.id, documentId))
       if (!document) return { error: "NOT_FOUND" as const }
@@ -458,7 +481,7 @@ export default createTRPCRouter({
         .where(and(eq(VERSIONS.documentId, documentId), eq(VERSIONS.version, version)))
       if (existing) return { error: "DUPLICATE_VERSION" as const }
 
-      const uploadedFile = await uploadBlob(Buffer.from(await file.arrayBuffer()), "pdf", file.type)
+      const uploadedFile = await uploadBlob(bytes, "pdf", "application/pdf")
       // The document may have been deleted, or the version added, while the file was uploading.
       const result = await DB.transaction(async (tx) => {
         const [locked] = await tx
