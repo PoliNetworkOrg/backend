@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm"
 import { check, customType, date, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
 import type { ACCOUNT_STATES, END_REASONS, FEE_STATUSES, PAYMENT_METHODS } from "@/soci/contract"
-import type { FeeMailData, MailKind, SociMail } from "@/soci/types"
+import type { MailContent, MailKind, SociMail } from "@/soci/types"
 import { createTable } from "../create-table"
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: "date" })
@@ -156,7 +156,7 @@ export const fees = createTable.soci(
   ]
 )
 
-/** The outbox of fee emails, drained every minute. The id is the idempotency key, e.g. `reminder:2026:dec-1:12`. */
+/** The outbox of fee and birthday emails, drained every minute. The id is the idempotency key, e.g. `reminder:2026:dec-1:12`. */
 export const mail = createTable.soci(
   "mail",
   {
@@ -166,7 +166,7 @@ export const mail = createTable.soci(
       .references(() => members.id),
     to: text().notNull(),
     kind: text().$type<MailKind>().notNull(),
-    data: jsonb().$type<FeeMailData>().notNull(),
+    data: jsonb().$type<MailContent["data"]>().notNull(),
     status: text().$type<SociMail["status"]>().notNull(),
     createdAt: at("created_at").notNull(),
     attemptedAt: at("attempted_at"),

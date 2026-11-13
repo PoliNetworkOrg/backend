@@ -1,5 +1,6 @@
-import { CodeInline, Section, Text } from "@react-email/components"
+import { Column, Row, Section } from "@react-email/components"
 import type { FeeMailData } from "@/soci/types"
+import { MailText } from "./email-layout"
 
 /** How to pay the fee: amount, bank details, the transfer's reason and the deadline. */
 export function FeePayment({ data }: { data: FeeMailData }) {
@@ -8,15 +9,19 @@ export function FeePayment({ data }: { data: FeeMailData }) {
     ["IBAN", data.iban],
     ["Beneficiario", data.beneficiary],
     ["Causale", data.reference],
-    ["Entro il", data.deadline],
+    ["Scadenza", data.deadline],
   ]
   return (
-    <Section className="my-4 rounded-md bg-blue-100 p-4">
-      {rows.map(([label, value]) => (
-        <Text key={label} className="my-1 text-sm leading-normal">
-          {label}: <CodeInline className="text-xs sm:text-sm">{value}</CodeInline>
-        </Text>
-      ))}
+    <Section style={{ margin: "16px 0", backgroundColor: "#f0f9ff", border: "1px solid #e0edf7", borderRadius: 14 }}>
+      <Row>
+        <Column style={{ padding: 18 }}>
+          {rows.map(([label, value]) => (
+            <MailText key={label} style={{ margin: "8px 0", fontSize: 14, lineHeight: "23px" }}>
+              {label}: <span style={{ fontFamily: "Consolas, monospace", wordBreak: "break-word" }}>{value}</span>
+            </MailText>
+          ))}
+        </Column>
+      </Row>
     </Section>
   )
 }

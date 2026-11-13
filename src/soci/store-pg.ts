@@ -88,11 +88,12 @@ function saveFee(f: FeeChanges | NewFee): Partial<FeeRow> {
   }
 }
 
-const loadMail = (r: typeof mail.$inferSelect): SociMail => ({
-  ...r,
-  createdAt: r.createdAt.toISOString(),
-  attemptedAt: r.attemptedAt?.toISOString() ?? null,
-})
+const loadMail = (r: typeof mail.$inferSelect) =>
+  ({
+    ...r,
+    createdAt: r.createdAt.toISOString(),
+    attemptedAt: r.attemptedAt?.toISOString() ?? null,
+  }) as SociMail
 
 const mailRow = (memberId: number, m: NewMail, at: string) => ({
   ...m,

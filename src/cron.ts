@@ -41,13 +41,19 @@ export function cron() {
       logger.error(err, "[CRON] Soci mail outbox")
     }
   })
-  // Opens the fee year and sends the December reminders. Idempotent, and a missed day is caught up the next one.
+  // Opens the fee year, sends the December reminders and the birthday emails. Idempotent, and a missed day is caught up the next one.
   new Cron("0 0 8 * * *", { timezone: "Europe/Rome" }, async () => {
     try {
       const { soci } = await import("./soci")
       await soci.runDaily()
     } catch (err) {
       logger.error(err, "[CRON] Soci daily fee run")
+    }
+    try {
+      const { soci } = await import("./soci")
+      await soci.sendBirthdays()
+    } catch (err) {
+      logger.error(err, "[CRON] Soci birthday emails")
     }
   })
 }

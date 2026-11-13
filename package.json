@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch --no-clear-screen ./src/server.ts | pino-pretty",
-    "build": "shx rm -rf dist && bun build ./src/server.ts --production --outdir ./dist --sourcemap=linked --target bun && shx cp -r ./drizzle ./dist/",
+    "build": "shx rm -rf dist && bun build ./src/server.ts --production --outdir ./dist --sourcemap=linked --target bun && shx cp -r ./drizzle ./dist/ && shx cp -r ./src/emails/assets ./dist/",
     "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
     "email": "email dev --port 3012 --dir src/emails/templates",
     "start": "bun run ./dist/server.js",

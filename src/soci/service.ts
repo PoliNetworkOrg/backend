@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server"
 import { IncompleteMemberError, safeErrorDetail } from "@/azure/errors"
 import { MAIL_DOMAIN, mailboxLocalPart } from "@/azure/mailbox"
 import type { AzureDirectory, CreatedMember, MemberSummary } from "@/azure/types"
+import { isBirthday } from "./birthdays"
 import { matchesBirthDate } from "./codice-fiscale"
 import * as C from "./contract"
 import {
@@ -22,7 +23,7 @@ import { receiptType } from "./receipt"
 import type {
   ActivityEntry,
   FeeMailData,
-  MailKind,
+  FeeMailKind,
   NewFee,
   NewMail,
   SociMail,
@@ -69,6 +70,7 @@ export type SociOptions = {
     /** `null` until `SOCI_IBAN` and `SOCI_BENEFICIARI` are set: then no fee year is opened. */
     bank: { iban: string; beneficiary: string } | null
     myAreaUrl: string
+    /** Sends one outbox email, fee or birthday; throws when it can't. */
     send: (mail: SociMail) => Promise<void>
   }
   now?: () => Date
@@ -190,7 +192,7 @@ export function createSociService(options: SociOptions) {
   }
 
   /** An email to the socio's PoliNetwork mailbox, or none once the account is gone. */
-  function feeMail(s: Socio, id: string, kind: MailKind, data: FeeMailData): NewMail | undefined {
+  function feeMail(s: Socio, id: string, kind: FeeMailKind, data: FeeMailData): NewMail | undefined {
     return s.accountState === "deleted" ? undefined : { id, to: s.mailbox, kind, data }
   }
 
@@ -892,7 +894,28 @@ export function createSociService(options: SociOptions) {
       return { opened, reminded }
     },
 
-    /** Sends queued fee emails; the cron calls it every minute. */
+    /**
+     * Daily: queues a birthday email for every active socio born on this day, or on 29 February when this year has
+     * none. Idempotent per socio and year.
+     */
+    async sendBirthdays(): Promise<number> {
+      const day = today()
+      let queued = 0
+      for (const s of await store.list()) {
+        if (s.endedOn || s.accountState === "deleted" || !s.birthDate || !isBirthday(s.birthDate, day)) continue
+        const email: NewMail = {
+          id: `birthday:${day.slice(0, 4)}:${s.id}`,
+          to: s.mailbox,
+          kind: "birthday",
+          data: { name: s.alias ?? s.firstName, number: s.number, since: Number(s.admittedOn.slice(0, 4)) },
+        }
+        if (await store.enqueue(s.id, email, now().toISOString())) queued++
+      }
+      if (queued) logger.info({ day, queued }, "[soci] birthday emails queued")
+      return queued
+    },
+
+    /** Sends queued emails; the cron calls it every minute. */
     async deliverPending(): Promise<void> {
       const at = now()
       const claimed = await store.claimMail(at.toISOString(), new Date(at.getTime() - 10 * 60_000).toISOString(), 20)
@@ -902,7 +925,7 @@ export function createSociService(options: SociOptions) {
           await options.fees.send(queued)
         } catch (err) {
           error = err instanceof Error ? err.message : String(err)
-          logger.error({ error: safeErrorDetail(err), mail: queued.id }, "[soci] fee email failed")
+          logger.error({ error: safeErrorDetail(err), mail: queued.id }, "[soci] email failed")
         }
         await store.finishMail(queued, error, now().toISOString())
       }
