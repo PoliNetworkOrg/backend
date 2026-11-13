@@ -11,6 +11,10 @@ import { codiceFiscaleProblem, matchesBirthDate, normalizeCodiceFiscale } from "
 export const END_REASONS = ["lapsed", "resigned", "expelled", "deceased", "other"] as const
 /** The Microsoft 365 account behind the record. */
 export const ACCOUNT_STATES = ["active", "pending_deletion", "deleted"] as const
+/** A fee year's state for one socio. `uploaded` is "To review" in the dashboard. */
+export const FEE_STATUSES = ["due", "uploaded", "paid", "exempt"] as const
+/** How a fee was paid. `admission` is set only by admitting or registering a socio. */
+export const PAYMENT_METHODS = ["transfer", "admission", "other"] as const
 
 export const memberNumberSchema = z.number().int().positive().max(999_999)
 
@@ -55,6 +59,37 @@ const bookkeepingFields = {
   phone: z.string().nullable(),
 }
 
+/** One socio's fee for one fee year. Amounts are in cents. */
+export const feeSchema = z.object({
+  /** The fee year's first calendar year: 2026 is `2026/27`. */
+  year: z.number(),
+  label: z.string(),
+  status: z.enum(FEE_STATUSES),
+  amountCents: z.number(),
+  /** The last receipt uploaded, kept after a rejection so the Direttivo can see what was refused. */
+  upload: z
+    .object({
+      fileId: z.string(),
+      fileName: z.string(),
+      contentType: z.string(),
+      transferDate: z.string(),
+      declaredCents: z.number(),
+      uploadedAt: z.string(),
+    })
+    .nullable(),
+  /** The last rejection, kept after a new upload. */
+  lastRejection: z.object({ reason: z.string(), by: z.string(), at: z.string() }).nullable(),
+  payment: z
+    .object({
+      paidOn: z.string(),
+      method: z.enum(PAYMENT_METHODS),
+      note: z.string().nullable(),
+      recordedBy: z.string(),
+    })
+    .nullable(),
+})
+export type Fee = z.infer<typeof feeSchema>
+
 /** One row of the register. */
 export const socioRowSchema = z.object({
   number: z.number(),
@@ -79,6 +114,8 @@ export const socioRowSchema = z.object({
    * whose account still is. `null` when they agree, or when Microsoft 365 couldn't be read.
    */
   mismatch: z.enum(["not_in_soci", "still_in_soci"]).nullable(),
+  /** This fee year's status; `null` when no fee has been opened for the socio. */
+  fee: z.enum(FEE_STATUSES).nullable(),
 })
 export type SocioRow = z.infer<typeof socioRowSchema>
 
@@ -100,6 +137,8 @@ export const socioRecordSchema = socioRowSchema.extend({
   accountNumber: z.string().nullable(),
   /** Newest first. */
   activity: z.array(activitySchema),
+  /** Newest year first. */
+  fees: z.array(feeSchema),
   createdBy: z.string(),
   createdAt: z.string(),
   updatedBy: z.string(),
@@ -224,3 +263,101 @@ export type AdmitResult = z.infer<typeof admitResultSchema>
 
 export const setNumberResultSchema = z.object({ number: z.number(), notificationSent: z.boolean().nullable() })
 export type SetNumberResult = z.infer<typeof setNumberResultSchema>
+
+// Fees.
+
+export const feeYearSchema = z.number().int().min(2000).max(2100)
+
+export const feesListInputSchema = z.object({
+  /** Defaults to the current fee year. */
+  year: feeYearSchema.optional(),
+  status: z.enum(FEE_STATUSES).optional(),
+})
+export type FeesListInput = z.output<typeof feesListInputSchema>
+
+export const feesListSchema = z.object({
+  year: z.number(),
+  label: z.string(),
+  /** Every opened fee of the year, whatever `status` filters. */
+  totals: z.object({ due: z.number(), uploaded: z.number(), paid: z.number(), exempt: z.number() }),
+  fees: z.array(
+    z.object({
+      number: z.number(),
+      firstName: z.string(),
+      lastName: z.string(),
+      alias: z.string().nullable(),
+      mailbox: z.string(),
+      endedOn: z.string().nullable(),
+      fee: feeSchema,
+    })
+  ),
+})
+export type FeesList = z.infer<typeof feesListSchema>
+
+export const feeRefInputSchema = z.object({ number: memberNumberSchema, year: feeYearSchema })
+export type FeeRefInput = z.output<typeof feeRefInputSchema>
+
+/** The receipt the Direttivo reviewed: a newer upload in the meantime makes the review fail rather than apply to it. */
+export const reviewInputSchema = feeRefInputSchema.extend({ fileId: z.uuid() })
+export type ReviewInput = z.output<typeof reviewInputSchema>
+
+export const rejectInputSchema = reviewInputSchema.extend({ reason: text(500) })
+export type RejectInput = z.output<typeof rejectInputSchema>
+
+export const markPaidInputSchema = feeRefInputSchema.extend({
+  paidOn: dateSchema,
+  method: z.enum(["transfer", "other"]),
+  note: optional(text(500)),
+})
+export type MarkPaidInput = z.output<typeof markPaidInputSchema>
+
+export const fileInputSchema = z.object({ fileId: z.uuid() })
+export const fileSchema = z.object({ fileName: z.string(), contentType: z.string(), base64: z.string() })
+export type FeeFile = z.infer<typeof fileSchema>
+
+// My area.
+
+/** The fields a socio may fill in themselves, while they are empty. */
+export const SELF_FIELDS = ["codiceFiscale", "birthDate", "birthPlace", "residence", "phone"] as const
+
+export const meSchema = z.object({
+  number: z.number(),
+  admittedOn: z.string(),
+  endedOn: z.string().nullable(),
+  endReason: z.enum(END_REASONS).nullable(),
+  details: z.object(bookkeepingFields),
+  /** Empty fields the socio can complete; the phone is never counted, as it's optional. */
+  missing: z.array(z.enum(SELF_FIELDS)),
+  /** How to pay this fee year's fee. */
+  payment: z.object({
+    year: z.number(),
+    label: z.string(),
+    amountCents: z.number(),
+    deadline: z.string(),
+    reference: z.string(),
+    /** `null` when the backend has no bank details configured. */
+    iban: z.string().nullable(),
+    beneficiary: z.string().nullable(),
+  }),
+  /** Newest year first. */
+  fees: z.array(feeSchema),
+})
+export type Me = z.infer<typeof meSchema>
+
+export const receiptInputSchema = z.object({
+  /** The day of the transfer, not after today. */
+  transferDate: dateSchema,
+  declaredCents: z.coerce.number().int().positive().max(100_000),
+})
+export type ReceiptInput = z.output<typeof receiptInputSchema>
+
+export const completeDetailsInputSchema = z
+  .object({
+    codiceFiscale: optional(codiceFiscaleSchema),
+    birthDate: optional(dateSchema),
+    birthPlace: optional(text(120)),
+    residence: optional(text(350)),
+    phone: optional(phoneSchema),
+  })
+  .refine((d) => SELF_FIELDS.some((key) => d[key] !== null), "Fill in at least one field.")
+export type CompleteDetailsInput = z.output<typeof completeDetailsInputSchema>

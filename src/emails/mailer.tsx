@@ -5,6 +5,11 @@ import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } 
 import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
+import type { SociMail } from "@/soci/types"
+import FeeConfirmedEmail, { feeConfirmedSubject } from "./templates/fee-confirmed"
+import FeeOpeningEmail, { feeOpeningSubject } from "./templates/fee-opening"
+import FeeRejectedEmail, { feeRejectedSubject } from "./templates/fee-rejected"
+import FeeReminderEmail, { feeReminderSubject } from "./templates/fee-reminder"
 import MemberNumberChanged from "./templates/member-number-changed"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
 import SignatureRequestEmail from "./templates/signature-request"
@@ -129,6 +134,27 @@ export async function sendPeopleEmail(input: { id: string; to: string; subject: 
     await azureSendEmail(input.to, input.subject, component, [], {
       throwOnError: true,
       messageId: `<people-${Buffer.from(input.id).toString("base64url")}@polinetwork.org>`,
+    })
+  }
+}
+
+const FEE_EMAILS = {
+  opening: { subject: feeOpeningSubject, Template: FeeOpeningEmail },
+  reminder: { subject: feeReminderSubject, Template: FeeReminderEmail },
+  confirmed: { subject: feeConfirmedSubject, Template: FeeConfirmedEmail },
+  rejected: { subject: feeRejectedSubject, Template: FeeRejectedEmail },
+} satisfies Record<SociMail["kind"], unknown>
+
+/** Soci's outbox: throws on failure, and gives each email a stable Message-ID from its idempotency key. */
+export async function sendSociEmail(mail: SociMail) {
+  const { subject, Template } = FEE_EMAILS[mail.kind]
+  const component = <Template {...mail.data} />
+  if (env.NODE_ENV === "development" && env.USE_DEV_MAILER) {
+    await devSendMail(mail.to, makeSubject(subject(mail.data)), component)
+  } else {
+    await azureSendEmail(mail.to, makeSubject(subject(mail.data)), component, [], {
+      throwOnError: true,
+      messageId: `<soci-${Buffer.from(mail.id).toString("base64url")}@polinetwork.org>`,
     })
   }
 }

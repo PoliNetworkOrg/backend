@@ -253,6 +253,13 @@
       "when": 1794495453875,
       "tag": "0035_soci_residence_drop_parts",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794572877513,
+      "tag": "0036_soci_fees",
+      "breakpoints": true
     }
   ]
 }

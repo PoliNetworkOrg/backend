@@ -1,7 +1,8 @@
 import type { Actor } from "@polinetwork/auth-kit"
+import { PDFDocument } from "pdf-lib"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { Context } from "@/trpc"
-import { admitInput, harness } from "./soci-fixtures"
+import { admitInput, harness, registerInput } from "./soci-fixtures"
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -45,6 +46,14 @@ describe("Soci tRPC contract", () => {
       "members.register": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "members.update": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "members.setNumber": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
+      "fees.list": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
+      "fees.file": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
+      "fees.confirm": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
+      "fees.reject": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
+      "fees.markPaid": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
+      "me.get": { policy: { user: { scope: "backend:admin", permission: "people:self" } } },
+      "me.uploadReceipt": { policy: { user: { scope: "backend:admin", permission: "people:self" } } },
+      "me.completeDetails": { policy: { user: { scope: "backend:admin", permission: "people:self" } } },
     })
   })
 
@@ -78,5 +87,47 @@ describe("Soci tRPC contract", () => {
 
     await caller.members.admit(input)
     expect((await caller.members.get({ number: 344 })).createdBy).toBe("usr_direttivo")
+  })
+
+  it("finds the socio of me.* by the account's Microsoft 365 object ID, and refuses anyone else", async () => {
+    const h = harness()
+    await h.service.register("usr_direttivo", registerInput("mock-member-alan"))
+    await h.service.runDaily()
+    const soci = makeRouter(h.service)
+    const signedIn = (entraObjectId: string | null, granted = ["people:self"]) => {
+      const ctx = context(granted, { ...user, sub: "usr_socio" })
+      return soci.createCaller({
+        ...ctx,
+        access: { ...ctx.access, current: () => ({ bySub: () => ({ entraObjectId }) }) as never },
+      } as Context)
+    }
+
+    expect((await signedIn("mock-member-alan").me.get()).number).toBe(1002)
+    await expect(signedIn("mock-member-alan", ["admin:access"]).me.get()).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(signedIn(null).me.get()).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(signedIn("mock-member-grace").me.get()).rejects.toMatchObject({ code: "NOT_FOUND" })
+
+    const doc = await PDFDocument.create()
+    doc.addPage([100, 100])
+    const form = (file: Blob, declaredCents = "500") => {
+      const fd = new FormData()
+      fd.set("file", file, "bonifico.pdf")
+      fd.set("transferDate", "2026-11-09")
+      fd.set("declaredCents", declaredCents)
+      return fd
+    }
+    const pdf = new Blob([new Uint8Array(await doc.save())], { type: "application/pdf" })
+    await expect(signedIn("mock-member-alan").me.uploadReceipt(form(pdf, "zero"))).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+    await expect(
+      signedIn("mock-member-alan").me.uploadReceipt(form(new Blob([new Uint8Array(10 * 1024 * 1024 + 1)])))
+    ).rejects.toThrow(/larger than 10 MB/)
+    await signedIn("mock-member-alan").me.uploadReceipt(form(pdf))
+    expect((await signedIn("mock-member-alan").me.get()).fees[0]).toMatchObject({
+      status: "uploaded",
+      upload: { fileName: "bonifico.pdf", declaredCents: 500 },
+    })
+    expect((await h.service.get({ number: 1002 })).activity[0].actor).toBe("usr_socio")
   })
 })
