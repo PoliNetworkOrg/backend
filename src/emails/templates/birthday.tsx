@@ -2,7 +2,9 @@ import {
   Body,
   Container,
   Head,
+  Heading,
   Html,
+  Img,
   Link,
   Preview,
   pixelBasedPreset,
@@ -16,52 +18,106 @@ import type { EmailTemplate } from "../types"
 export const birthdaySubject = (data: BirthdayMailData) => `Tanti auguri, ${data.name}!`
 
 // The website's type and palette (PoliNetworkOrg/web): DM Sans for titles, Red Hat Text for text, Tailwind slate and
-// sky. Clients that drop web fonts (Gmail, Outlook) fall back to Helvetica/Arial.
+// sky. Only Apple Mail loads web fonts; Gmail and Outlook fall back to Helvetica/Arial.
 const display = { fontFamily: "'DM Sans', Helvetica, Arial, sans-serif" }
 const text = { fontFamily: "'Red Hat Text', Helvetica, Arial, sans-serif", letterSpacing: "0.3px" }
+/** Bold in the same colour as the text, so dark mode recolours both alike. */
+const bold = { fontWeight: 700 }
+const label = {
+  ...text,
+  fontSize: 11,
+  lineHeight: "16px",
+  letterSpacing: "1px",
+  textTransform: "uppercase" as const,
+  color: "#64748B",
+}
+const value = { ...display, fontSize: 20, lineHeight: "28px", fontWeight: 600, color: "#020617" }
+
+/** The commit that holds `src/emails/assets/birthday-header.gif`: emails need a public URL that never changes. */
+const ARTWORK_COMMIT = "c23cad0c6cc981da176fb809c4c260217f74e735"
+export const BIRTHDAY_HEADER_URL = `https://raw.githubusercontent.com/PoliNetworkOrg/backend/${ARTWORK_COMMIT}/src/emails/assets/birthday-header.gif`
 
 /**
- * To every active socio on their birthday (28 February for those born on the 29th, in years without one). The wishes
- * come first; the membership details are a quiet line at the bottom.
+ * To every active socio on their birthday (28 February for those born on the 29th, in years without one).
+ *
+ * Built for dark mode: Outlook and the Gmail apps recolour every colour the email declares but never image pixels.
+ * So the artwork (logo, website shapes, falling confetti) is a plain `<img>` with nothing over it, and the greeting
+ * is ordinary text on the card, recoloured together with it. Nothing sits on a background image and there is no
+ * outer tint, which in dark mode turned into a grey band.
  */
 const BirthdayEmail: EmailTemplate<BirthdayMailData> = (data) => (
   <Html lang="it">
     <Tailwind config={{ presets: [pixelBasedPreset] }}>
       <Head>
+        <meta name="color-scheme" content="light only" />
+        <meta name="supported-color-schemes" content="light only" />
+        <style>{":root { color-scheme: light only; }"}</style>
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500&family=Red+Hat+Text:wght@400;500&display=swap"
+          href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600&family=Red+Hat+Text:wght@400;500;700&display=swap"
         />
       </Head>
       <Preview>Oggi è il tuo giorno: tanti auguri!</Preview>
-      <Body className="m-0 bg-[#F1F5F9] px-3 py-10 text-[#020617]" style={text}>
-        <Container className="mx-auto max-w-[480px] rounded-[20px] border border-solid border-[#E2E8F0] bg-white">
-          <Section className="px-8 pb-2 pt-12 text-center">
+      <Body className="m-0 p-0 py-6 text-[#020617]" style={text}>
+        <Container className="birthday-card mx-auto max-w-[480px] rounded-[20px] bg-white">
+          <Img
+            className="birthday-header"
+            src={BIRTHDAY_HEADER_URL}
+            width={480}
+            height={200}
+            alt="PoliNetwork"
+            style={{ display: "block", width: "100%", maxWidth: 480, height: "auto", border: 0 }}
+          />
+          <Section className="px-8 pt-8 text-center">
             <Text className="m-0 text-[44px] leading-none">🎂</Text>
-            <Text className="m-0 mt-6 text-[34px] font-medium leading-[40px] tracking-[-0.5px]" style={display}>
+            <Heading
+              className="birthday-title m-0 mt-4 text-[32px] font-medium leading-[38px] tracking-[-0.5px] text-[#020617]"
+              style={display}
+            >
               Tanti auguri, {data.name}!
-            </Text>
+            </Heading>
           </Section>
-          <Section className="px-8 pb-10 pt-4">
+          <Section className="mail-content px-8 pb-10 pt-6">
+            {/* The membership details: plain text only, no coloured surface, so dark mode recolours them like the rest. */}
+            <table className="birthday-membership" role="presentation" cellPadding={0} cellSpacing={0}>
+              <tbody>
+                <tr>
+                  <td style={{ paddingRight: 20 }}>
+                    <Text className="m-0" style={label}>
+                      Socio n.
+                    </Text>
+                    <Text className="m-0" style={value}>
+                      {String(data.number).padStart(4, "0")}
+                    </Text>
+                  </td>
+                  <td style={{ paddingLeft: 20, borderLeft: "1px solid #E2E8F0" }}>
+                    <Text className="m-0" style={label}>
+                      Con noi dal
+                    </Text>
+                    <Text className="m-0" style={value}>
+                      {data.since}
+                    </Text>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
             <Text className="my-4 text-[16px] leading-[26px]" style={text}>
-              Oggi è il tuo giorno, e volevamo essere tra i primi a fartelo sapere.
+              Oggi è il tuo giorno e volevamo essere tra i primi a farti gli auguri di{" "}
+              <strong style={bold}>buon compleanno</strong>!
             </Text>
             <Text className="my-4 text-[16px] leading-[26px]" style={text}>
-              Ti auguriamo un anno pieno di cose belle: esami che vanno come speri, progetti che ti appassionano e
-              persone con cui condividerli. Goditi la giornata e festeggia come si deve.
+              Grazie per il tempo, le idee e l’impegno che dedichi a PoliNetwork. Il tuo contributo ci aiuta a mettere
+              in contatto gli studenti e a creare occasioni per incontrarsi e collaborare.{" "}
+              <strong style={bold}>Noi ne siamo fieri</strong>, e speriamo lo sia anche tu.
+            </Text>
+            <Text className="my-4 text-[16px] leading-[26px]" style={text}>
+              Ti auguriamo una <strong style={bold}>giornata piena di cose belle</strong>, da festeggiare con le persone
+              a cui vuoi bene.
             </Text>
             <Text className="mb-0 mt-7 text-[16px] leading-[24px]" style={text}>
               Un abbraccio,
               <br />
               il Consiglio Direttivo di PoliNetwork
-            </Text>
-            <Text className="mb-0 mt-8">
-              <span
-                className="rounded-[60px] bg-[#F0F9FF] px-3 py-[6px] text-[12px] font-medium text-[#0369A1]"
-                style={text}
-              >
-                Socio n. {String(data.number).padStart(4, "0")} · con noi dal {data.since}
-              </span>
             </Text>
           </Section>
         </Container>
