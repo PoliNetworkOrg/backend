@@ -1,0 +1,34 @@
+# Local development services: PostgreSQL and Redis for the backend. `docker compose up -d --wait` starts them.
+# They listen on localhost only, on ports that do not clash with Auth's database (55432); never point anything but
+# local development at them. See CONTRIBUTING.md for the matching `.env`.
+name: polinetwork-backend
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: polinetwork_backend
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d polinetwork_backend"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  db:

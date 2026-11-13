@@ -11,6 +11,9 @@ If you are using another language than TS... then you might fulfill a PR and imp
 
 ## Quickstart
 
+[CONTRIBUTING.md](CONTRIBUTING.md) walks through the setup step by step, with local PostgreSQL and Redis from
+`compose.yaml` and the connection to a local PoliNetwork Auth.
+
 Requirements:
 
 - Bun installed
