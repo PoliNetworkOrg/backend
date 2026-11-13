@@ -34,7 +34,7 @@ Requirements:
    ```sh
    bun dev
    ```
-5. (Optional) Fill the database with sample data: Telegram users, groups and messages, course groups and labels, projects, associations, FAQs, freshman guides, group link reports, audit log entries and grants:
+5. (Optional) Fill the database with sample data: Telegram users, groups and messages, course groups and labels, projects, associations, FAQs, freshman guides, website documents (with placeholder file links), group link reports, audit log entries and grants:
    ```sh
    bun run seed:db
    ```

@@ -722,6 +722,76 @@ await seedTable("web_guides_matricole", SCHEMA.WEB.guidesMatricole, () =>
   ].map((g) => ({ ...g, file: `https://example.com/seed/guida-matricole-${g.version}.pdf`, ...seedAuthor }))
 )
 
+// Documents reference their categories, so the three tables are seeded (or replaced) together.
+const DOCUMENT_CONTENT: {
+  slug: string
+  title: string
+  description: string
+  documents: { slug: string; title: string; description: string | null; versions: [string, string][] }[]
+}[] = [
+  {
+    slug: "esempio-statuto",
+    title: "Statuto e regolamenti (esempio)",
+    description: "Documenti di esempio per lo sviluppo locale.",
+    documents: [
+      {
+        slug: "esempio-statuto-associazione",
+        title: "Statuto di esempio",
+        description: "Un documento con più versioni.",
+        versions: [
+          ["1.0", "2023-03-01"],
+          ["2.0", "2025-05-20"],
+        ],
+      },
+      {
+        slug: "esempio-regolamento",
+        title: "Regolamento di esempio",
+        description: null,
+        versions: [["1", "2024-10-01"]],
+      },
+    ],
+  },
+  {
+    slug: "esempio-bilanci",
+    title: "Bilanci (esempio)",
+    description: "Una categoria con un documento ancora senza versioni, nascosto dal sito.",
+    documents: [{ slug: "esempio-bilancio-bozza", title: "Bilancio in bozza", description: null, versions: [] }],
+  },
+]
+const [firstDocumentCategory] = await DB.select().from(SCHEMA.WEB.webDocumentCategories).limit(1)
+if (firstDocumentCategory && !force) console.log("SEED: web_document_categories already contains data, skipping")
+else {
+  await DB.transaction(async (tx) => {
+    if (firstDocumentCategory) {
+      await tx.delete(SCHEMA.WEB.webDocuments) // Their versions are deleted with them.
+      await tx.delete(SCHEMA.WEB.webDocumentCategories)
+    }
+    for (const [position, { documents, ...category }] of DOCUMENT_CONTENT.entries()) {
+      const [{ id: categoryId }] = await tx
+        .insert(SCHEMA.WEB.webDocumentCategories)
+        .values({ ...category, position, ...seedAuthor })
+        .returning({ id: SCHEMA.WEB.webDocumentCategories.id })
+      for (const [documentPosition, { versions, ...document }] of documents.entries()) {
+        const [{ id: documentId }] = await tx
+          .insert(SCHEMA.WEB.webDocuments)
+          .values({ ...document, categoryId, position: documentPosition, ...seedAuthor })
+          .returning({ id: SCHEMA.WEB.webDocuments.id })
+        if (versions.length)
+          await tx.insert(SCHEMA.WEB.webDocumentVersions).values(
+            versions.map(([version, date]) => ({
+              documentId,
+              version,
+              date,
+              file: `https://example.com/seed/${document.slug}-${version}.pdf`,
+              ...seedAuthor,
+            }))
+          )
+      }
+    }
+  })
+  console.log(`SEED: web_document_categories → ${DOCUMENT_CONTENT.length} rows, with sample documents`)
+}
+
 const waGroupIds = (await DB.select({ id: SCHEMA.WA.waGroups.id }).from(SCHEMA.WA.waGroups)).map((g) => g.id)
 const tgCourseGroupIds = [...tgGroupIdByLink.values()]
 await seedTable("web_group_link_reports", SCHEMA.WEB.groupLinkReports, () => {
