@@ -133,9 +133,11 @@ describe.skipIf(!testPort)("database seed", () => {
       query(`SELECT 'users' AS name, count(*)::int AS count FROM tg_users
         UNION ALL SELECT 'messages', count(*)::int FROM tg_messages
         UNION ALL SELECT 'faqs', count(*)::int FROM web_faqs
+        UNION ALL SELECT 'document_versions', count(*)::int FROM web_document_versions
         UNION ALL SELECT 'grants', count(*)::int FROM tg_grants
         ORDER BY name`)
     const expected = [
+      { name: "document_versions", count: 3 },
       { name: "faqs", count: 9 },
       { name: "grants", count: 11 },
       { name: "messages", count: 60000 },
@@ -158,12 +160,14 @@ describe.skipIf(!testPort)("database seed", () => {
 
     await query(`UPDATE tg_users SET first_name = 'replace-me';
       UPDATE web_faq_categories SET title_it = 'replace-me';
-      UPDATE web_projects SET title = 'replace-me'`)
+      UPDATE web_projects SET title = 'replace-me';
+      UPDATE web_document_categories SET title = 'replace-me'`)
     await seed(true)
 
     expect(await counts()).toEqual(expected)
     expect(await query("SELECT * FROM tg_users WHERE first_name = 'replace-me'")).toEqual([])
     expect(await query("SELECT * FROM web_faq_categories WHERE title_it = 'replace-me'")).toEqual([])
     expect(await query("SELECT * FROM web_projects WHERE title = 'replace-me'")).toEqual([])
+    expect(await query("SELECT * FROM web_document_categories WHERE title = 'replace-me'")).toEqual([])
   }, 30_000)
 })
