@@ -157,8 +157,13 @@ try {
       code: "BAD_REQUEST",
     })
   assert.equal(stored.size, 3)
+  // Ids beyond the integer columns are invalid input, not a database error.
+  await assert.rejects(addVersion(2 ** 31, "1.0", "2026-01-01"), { code: "BAD_REQUEST" })
+  await assert.rejects(editor.deleteVersion({ id: 2 ** 31 }), { code: "BAD_REQUEST" })
   ok(await addVersion(atto.id, "2.0", "2020-01-01")) // The same label on another document is allowed.
-  checked.push("versions: PDF content only, ISO dates, unique per document, NOT_FOUND for missing documents")
+  checked.push(
+    "versions: PDF content only, ISO dates, integer ids, unique per document, NOT_FOUND for missing documents"
+  )
 
   const catalog = await website.getCatalog()
   assert.deepEqual(

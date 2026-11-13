@@ -19,7 +19,7 @@ const slugSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase kebab-case")
 const titleSchema = z.string().trim().min(1).max(200)
 const descriptionSchema = z.string().trim().max(2000)
-const idSchema = z.number().int().positive()
+const idSchema = z.int32().positive() // The id columns are PostgreSQL integers.
 const orderSchema = z
   .array(idSchema)
   .min(1)
@@ -32,7 +32,7 @@ const documentFileSchema = z
   .max(10 * 1024 * 1024)
 
 const versionFormSchema = z.object({
-  documentId: z.coerce.number<string>().int().positive(),
+  documentId: z.coerce.number<string>().pipe(idSchema),
   version: z.string().trim().min(1).max(50),
   date: z.iso.date(),
   file: documentFileSchema,
