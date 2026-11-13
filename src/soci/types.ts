@@ -72,8 +72,9 @@ export type StoredFile = {
   uploadedAt: string
 }
 
-export const MAIL_KINDS = ["opening", "reminder", "confirmed", "rejected"] as const
-export type MailKind = (typeof MAIL_KINDS)[number]
+export const FEE_MAIL_KINDS = ["opening", "reminder", "confirmed", "rejected"] as const
+export type FeeMailKind = (typeof FEE_MAIL_KINDS)[number]
+export type MailKind = FeeMailKind | "birthday"
 /** What every fee email shows; `reason` only on a rejection, `paidOn` only on a confirmation. */
 export type FeeMailData = {
   name: string
@@ -88,19 +89,22 @@ export type FeeMailData = {
   paidOn?: string
 }
 
+export type BirthdayMailData = { name: string }
+
+/** What an email says: its template and that template's data. */
+export type MailContent = { kind: FeeMailKind; data: FeeMailData } | { kind: "birthday"; data: BirthdayMailData }
+
 /** An email in the outbox (`soci_mail`). The id is its idempotency key, e.g. `reminder:2026:dec-1:12`. */
-export type SociMail = {
+export type SociMail = MailContent & {
   id: string
   memberId: number
   to: string
-  kind: MailKind
-  data: FeeMailData
   status: "pending" | "sending" | "sent" | "failed"
   createdAt: string
   attemptedAt: string | null
   error: string | null
 }
-export type NewMail = Pick<SociMail, "id" | "to" | "kind" | "data">
+export type NewMail = MailContent & { id: string; to: string }
 
 export interface SociStore {
   /** Every record, by number. */

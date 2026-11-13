@@ -12,8 +12,7 @@ const FeeConfirmedEmail: EmailTemplate<FeeMailData> = (data) => (
     preview={`Abbiamo registrato la tua quota associativa ${data.yearLabel}`}
     title="Quota pagata"
     name={data.name}
-    myAreaUrl={data.myAreaUrl}
-    action="Apri la tua area personale"
+    action={{ label: "Apri la tua area personale", href: data.myAreaUrl }}
   >
     <Text className="my-2 text-base leading-normal">
       abbiamo registrato il pagamento della tua quota associativa {data.yearLabel}

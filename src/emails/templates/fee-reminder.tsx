@@ -13,8 +13,7 @@ const FeeReminderEmail: EmailTemplate<FeeMailData> = (data) => (
     preview={`La quota ${data.yearLabel} non risulta ancora pagata: scade il ${data.deadline}`}
     title="Promemoria quota associativa"
     name={data.name}
-    myAreaUrl={data.myAreaUrl}
-    action="Carica la ricevuta"
+    action={{ label: "Carica la ricevuta", href: data.myAreaUrl }}
   >
     <Text className="my-2 text-base leading-normal">
       la tua quota associativa {data.yearLabel} non risulta ancora pagata. Se non è pagata entro il {data.deadline}, lo

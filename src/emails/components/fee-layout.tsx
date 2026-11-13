@@ -16,13 +16,13 @@ import type { ReactNode } from "react"
 import { Footer } from "./footer"
 import { Logo } from "./logo"
 
-/** The frame of every fee email: Italian, greeting the socio by the name they go by. */
+/** The frame of every Soci email: Italian, greeting the socio by the name they go by, with an optional button. */
 export function FeeLayout(props: {
   preview: string
   title: string
   name: string
-  myAreaUrl: string
-  action: string
+  /** The button to My area, if any. */
+  action?: { label: string; href: string }
   children: ReactNode
 }) {
   return (
@@ -39,14 +39,16 @@ export function FeeLayout(props: {
                 Ciao <strong>{props.name}</strong>,
               </Text>
               {props.children}
-              <Section className="my-6 text-center">
-                <Button
-                  href={props.myAreaUrl}
-                  className="rounded-md bg-[#1156AE] px-5 py-3 text-sm font-semibold text-white"
-                >
-                  {props.action}
-                </Button>
-              </Section>
+              {props.action ? (
+                <Section className="my-6 text-center">
+                  <Button
+                    href={props.action.href}
+                    className="rounded-md bg-[#1156AE] px-5 py-3 text-sm font-semibold text-white"
+                  >
+                    {props.action.label}
+                  </Button>
+                </Section>
+              ) : null}
               <Text className="my-2 text-sm leading-normal text-gray-700">~ Il Consiglio Direttivo di PoliNetwork</Text>
             </Section>
           </Container>

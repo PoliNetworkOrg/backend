@@ -260,7 +260,9 @@ describe("receipts and review", () => {
     let fee = (await h.service.get({ number: 1001 })).fees[0]
     expect(fee).toMatchObject({ status: "due", lastRejection: { reason: "Amount is 3 €.", by: ACTOR } })
     expect(fee.upload).not.toBeNull()
-    expect([...h.outbox.values()].find((m) => m.kind === "rejected")?.data.reason).toBe("Amount is 3 €.")
+    expect([...h.outbox.values()].find((m) => m.kind === "rejected")).toMatchObject({
+      data: { reason: "Amount is 3 €." },
+    })
 
     h.setNow("2026-11-12")
     await h.service.uploadReceipt(
@@ -290,7 +292,7 @@ describe("receipts and review", () => {
       payment: { paidOn: "2026-11-11", method: "transfer", recordedBy: ACTOR },
       lastRejection: { reason: "Amount is 3 €." },
     })
-    expect(h.outbox.get("confirmed:2026:2")?.data.paidOn).toBe("11 novembre 2026")
+    expect(h.outbox.get("confirmed:2026:2")).toMatchObject({ data: { paidOn: "11 novembre 2026" } })
     await expect(
       h.service.uploadReceipt(ADA, "usr_ada", { name: "r3.pdf", bytes: await pdf() }, receipt)
     ).rejects.toThrow(/already paid/)

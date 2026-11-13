@@ -129,6 +129,8 @@ MB, judged by content, never expired).
   and fills in their own empty fields.
 - **The Direttivo** confirms or rejects (with a reason) an uploaded receipt, or marks a fee as paid by hand, which also
   opens a fee the year hasn't opened yet.
+- **Birthdays:** at 08:00 `sendBirthdays` greets every active socio born that day (29 February: the 28th in years
+  without one), whatever the bank details.
 - **Emails** (Italian React Email templates, `bun run email` to preview) go to the socio's PoliNetwork mailbox through
   the `soci_mail` outbox, drained every minute. Each email's id is its idempotency key, e.g. `reminder:2026:dec-1:12`,
   so a job that runs twice never sends twice.

@@ -12,8 +12,7 @@ const FeeRejectedEmail: EmailTemplate<FeeMailData> = (data) => (
     preview={`La ricevuta della quota ${data.yearLabel} non è stata accettata`}
     title="Ricevuta non accettata"
     name={data.name}
-    myAreaUrl={data.myAreaUrl}
-    action="Carica una nuova ricevuta"
+    action={{ label: "Carica una nuova ricevuta", href: data.myAreaUrl }}
   >
     <Text className="my-2 text-base leading-normal">
       il Consiglio Direttivo non ha accettato la ricevuta che hai caricato per la quota associativa {data.yearLabel}. Il

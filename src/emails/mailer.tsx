@@ -5,7 +5,8 @@ import { sendEmail as azureSendEmail, type EmailAttachment, type EmailOptions } 
 import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
-import type { SociMail } from "@/soci/types"
+import type { FeeMailKind, SociMail } from "@/soci/types"
+import BirthdayEmail, { birthdaySubject } from "./templates/birthday"
 import FeeConfirmedEmail, { feeConfirmedSubject } from "./templates/fee-confirmed"
 import FeeOpeningEmail, { feeOpeningSubject } from "./templates/fee-opening"
 import FeeRejectedEmail, { feeRejectedSubject } from "./templates/fee-rejected"
@@ -143,16 +144,24 @@ const FEE_EMAILS = {
   reminder: { subject: feeReminderSubject, Template: FeeReminderEmail },
   confirmed: { subject: feeConfirmedSubject, Template: FeeConfirmedEmail },
   rejected: { subject: feeRejectedSubject, Template: FeeRejectedEmail },
-} satisfies Record<SociMail["kind"], unknown>
+} satisfies Record<FeeMailKind, unknown>
 
 /** Soci's outbox: throws on failure, and gives each email a stable Message-ID from its idempotency key. */
 export async function sendSociEmail(mail: SociMail) {
-  const { subject, Template } = FEE_EMAILS[mail.kind]
-  const component = <Template {...mail.data} />
-  if (env.NODE_ENV === "development" && env.USE_DEV_MAILER) {
-    await devSendMail(mail.to, makeSubject(subject(mail.data)), component)
+  let subject: string
+  let component: JSX.Element
+  if (mail.kind === "birthday") {
+    subject = birthdaySubject(mail.data)
+    component = <BirthdayEmail {...mail.data} />
   } else {
-    await azureSendEmail(mail.to, makeSubject(subject(mail.data)), component, [], {
+    const { subject: subjectOf, Template } = FEE_EMAILS[mail.kind]
+    subject = subjectOf(mail.data)
+    component = <Template {...mail.data} />
+  }
+  if (env.NODE_ENV === "development" && env.USE_DEV_MAILER) {
+    await devSendMail(mail.to, makeSubject(subject), component)
+  } else {
+    await azureSendEmail(mail.to, makeSubject(subject), component, [], {
       throwOnError: true,
       messageId: `<soci-${Buffer.from(mail.id).toString("base64url")}@polinetwork.org>`,
     })
