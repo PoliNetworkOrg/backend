@@ -89,7 +89,8 @@ export type FeeMailData = {
   paidOn?: string
 }
 
-export type BirthdayMailData = { name: string }
+/** `since` is the year of admission. */
+export type BirthdayMailData = { name: string; number: number; since: number }
 
 /** What an email says: its template and that template's data. */
 export type MailContent = { kind: FeeMailKind; data: FeeMailData } | { kind: "birthday"; data: BirthdayMailData }

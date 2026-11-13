@@ -907,7 +907,7 @@ export function createSociService(options: SociOptions) {
           id: `birthday:${day.slice(0, 4)}:${s.id}`,
           to: s.mailbox,
           kind: "birthday",
-          data: { name: s.alias ?? s.firstName },
+          data: { name: s.alias ?? s.firstName, number: s.number, since: Number(s.admittedOn.slice(0, 4)) },
         }
         if (await store.enqueue(s.id, email, now().toISOString())) queued++
       }

@@ -45,8 +45,8 @@ describe("birthdays", () => {
     expect(await h.service.sendBirthdays()).toBe(2)
     expect(await h.service.sendBirthdays()).toBe(0)
     expect(birthdays(h)).toEqual([
-      ["birthday:2027:1", "mario.rossi@polinetwork.org", { name: "Mario" }],
-      ["birthday:2027:2", "ada.lovelace@polinetwork.org", { name: "Ada" }],
+      ["birthday:2027:1", "mario.rossi@polinetwork.org", { name: "Mario", number: 344, since: 2026 }],
+      ["birthday:2027:2", "ada.lovelace@polinetwork.org", { name: "Ada", number: 1001, since: 2025 }],
     ])
 
     // In a leap year Ada's comes on the 29th.
@@ -81,7 +81,11 @@ describe("birthdays", () => {
     await h.service.sendBirthdays()
     await h.service.deliverPending()
     expect(h.send).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "birthday:2027:1", kind: "birthday", data: { name: "Mario" } })
+      expect.objectContaining({
+        id: "birthday:2027:1",
+        kind: "birthday",
+        data: { name: "Mario", number: 344, since: 2026 },
+      })
     )
     expect(h.outbox.get("birthday:2027:1")?.status).toBe("sent")
     expect((await h.service.get({ number: 344 })).activity[0].text).toBe("Sent the birthday email")
