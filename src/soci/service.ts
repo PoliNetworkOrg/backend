@@ -1,9 +1,36 @@
+import { randomUUID } from "node:crypto"
 import { TRPCError } from "@trpc/server"
 import { IncompleteMemberError, safeErrorDetail } from "@/azure/errors"
 import { MAIL_DOMAIN, mailboxLocalPart } from "@/azure/mailbox"
 import type { AzureDirectory, CreatedMember, MemberSummary } from "@/azure/types"
-import type * as C from "./contract"
-import type { ActivityEntry, Socio, SocioChanges, SociStore } from "./types"
+import { matchesBirthDate } from "./codice-fiscale"
+import * as C from "./contract"
+import {
+  exemptYearFor,
+  FEE_CENTS,
+  feeYearLabel,
+  feeYearOf,
+  formatEuro,
+  formatItalianDay,
+  paymentReference,
+  reminderDay,
+  reminderOn,
+  renewalDeadline,
+  romeDay,
+} from "./fees"
+import { receiptType } from "./receipt"
+import type {
+  ActivityEntry,
+  FeeMailData,
+  MailKind,
+  NewFee,
+  NewMail,
+  SociMail,
+  Socio,
+  SocioChanges,
+  SociStore,
+  StoredFee,
+} from "./types"
 
 type Logger = {
   info: (obj: object, msg: string) => void
@@ -37,6 +64,13 @@ export type SociOptions = {
     ) => Promise<boolean>
   }
   logger: Logger
+  /** Fees: the bank details of the association, My area's address, and the outbox's sender. */
+  fees: {
+    /** `null` until `SOCI_IBAN` and `SOCI_BENEFICIARI` are set: then no fee year is opened. */
+    bank: { iban: string; beneficiary: string } | null
+    myAreaUrl: string
+    send: (mail: SociMail) => Promise<void>
+  }
   now?: () => Date
 }
 
@@ -53,6 +87,27 @@ function parseNumber(employeeId: string | null) {
 }
 
 const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+const SYSTEM = "system"
+const SELF_LABELS: Record<(typeof C.SELF_FIELDS)[number], string> = {
+  codiceFiscale: "codice fiscale",
+  birthDate: "birth date",
+  birthPlace: "birth place",
+  residence: "residence",
+  phone: "phone",
+}
+const emptyFee = {
+  fileId: null,
+  transferDate: null,
+  declaredCents: null,
+  uploadedAt: null,
+  reviewedBy: null,
+  reviewedAt: null,
+  rejectionReason: null,
+  paidOn: null,
+  method: null,
+  note: null,
+  recordedBy: null,
+} satisfies Partial<NewFee>
 const FIELD_LABELS: Record<string, string> = {
   firstName: "first name",
   lastName: "last name",
@@ -69,6 +124,97 @@ export function createSociService(options: SociOptions) {
   const { store, directory, writes, mail, logger } = options
   const now = options.now ?? (() => new Date())
   const entry = (actor: string, text: string): ActivityEntry => ({ actor, text, at: now().toISOString() })
+  const today = () => romeDay(now())
+  const currentYear = () => feeYearOf(today())
+
+  /** The fee year of the admission, recorded as paid: the Direttivo admits someone after they've paid. */
+  function admissionFee(admittedOn: string, actor: string, at: string): NewFee {
+    return {
+      ...emptyFee,
+      year: feeYearOf(admittedOn),
+      status: "paid",
+      amountCents: FEE_CENTS,
+      paidOn: admittedOn,
+      method: "admission",
+      recordedBy: actor,
+      createdAt: at,
+      updatedAt: at,
+    }
+  }
+
+  async function feeView(fees: StoredFee[]): Promise<C.Fee[]> {
+    const names = await store.fileNames(fees.flatMap((f) => (f.fileId ? [f.fileId] : [])))
+    return fees.map((f) => {
+      const file = f.fileId ? names.get(f.fileId) : undefined
+      return {
+        year: f.year,
+        label: feeYearLabel(f.year),
+        status: f.status,
+        amountCents: f.amountCents,
+        upload:
+          f.fileId && file && f.transferDate && f.declaredCents !== null && f.uploadedAt
+            ? {
+                fileId: f.fileId,
+                fileName: file.fileName,
+                contentType: file.contentType,
+                transferDate: f.transferDate,
+                declaredCents: f.declaredCents,
+                uploadedAt: f.uploadedAt,
+              }
+            : null,
+        lastRejection:
+          f.rejectionReason && f.reviewedBy && f.reviewedAt
+            ? { reason: f.rejectionReason, by: f.reviewedBy, at: f.reviewedAt }
+            : null,
+        payment:
+          f.status === "paid" && f.paidOn && f.method && f.recordedBy
+            ? { paidOn: f.paidOn, method: f.method, note: f.note, recordedBy: f.recordedBy }
+            : null,
+      }
+    })
+  }
+
+  /** What every fee email shows, for the socio and the fee year. */
+  function mailData(s: Socio, year: number, extra: Partial<FeeMailData> = {}): FeeMailData {
+    return {
+      name: s.alias ?? s.firstName,
+      yearLabel: feeYearLabel(year),
+      amount: formatEuro(FEE_CENTS),
+      deadline: formatItalianDay(renewalDeadline(year)),
+      iban: options.fees.bank?.iban ?? "",
+      beneficiary: options.fees.bank?.beneficiary ?? "",
+      reference: paymentReference(year, s.number, s.firstName, s.lastName),
+      myAreaUrl: options.fees.myAreaUrl,
+      ...extra,
+    }
+  }
+
+  /** An email to the socio's PoliNetwork mailbox, or none once the account is gone. */
+  function feeMail(s: Socio, id: string, kind: MailKind, data: FeeMailData): NewMail | undefined {
+    return s.accountState === "deleted" ? undefined : { id, to: s.mailbox, kind, data }
+  }
+
+  async function feeOf(s: Socio, year: number) {
+    return (await store.fees({ memberId: s.id, year }))[0] ?? null
+  }
+
+  async function requireFee(s: Socio, year: number) {
+    return (await feeOf(s, year)) ?? fail("NOT_FOUND", `Socio ${s.number} has no fee for ${feeYearLabel(year)}.`)
+  }
+
+  /** A review applies only to the receipt that was reviewed, not to one the socio uploaded since. */
+  function reviewed(fee: StoredFee, fileId: string) {
+    if (fee.fileId !== fileId) fail("CONFLICT", "The socio uploaded a new receipt in the meantime: review that one.")
+  }
+
+  function changed(ok: boolean) {
+    if (!ok) fail("CONFLICT", "The fee changed in the meantime: reload and try again.")
+  }
+
+  /** The socio behind the signed-in account, found by its Microsoft 365 object ID. */
+  async function self(entraObjectId: string) {
+    return (await store.byObjectId(entraObjectId)) ?? fail("NOT_FOUND", "Your account has no socio record.")
+  }
 
   async function sociGroup() {
     try {
@@ -79,7 +225,7 @@ export function createSociService(options: SociOptions) {
     }
   }
 
-  function row(s: Socio, soci: Set<string> | null): C.SocioRow {
+  function row(s: Socio, soci: Set<string> | null, fee: StoredFee | null = null): C.SocioRow {
     const inSoci = soci ? soci.has(s.entraObjectId) : null
     const mismatch =
       inSoci === null ? null : !s.endedOn && !inSoci ? "not_in_soci" : s.endedOn && inSoci ? "still_in_soci" : null
@@ -98,6 +244,7 @@ export function createSociService(options: SociOptions) {
       accountState: s.accountState,
       inSoci,
       mismatch,
+      fee: fee?.status ?? null,
     }
   }
 
@@ -138,25 +285,35 @@ export function createSociService(options: SociOptions) {
 
   return {
     async list(): Promise<C.SociList> {
-      const [records, group] = await Promise.all([store.list(), sociGroup()])
+      const [records, group, fees] = await Promise.all([store.list(), sociGroup(), store.fees({ year: currentYear() })])
       const soci = group && new Set(group.map((m) => m.id))
-      return { members: records.map((s) => row(s, soci)), directoryAvailable: soci !== null }
+      const feeOfMember = new Map(fees.map((f) => [f.memberId, f]))
+      return {
+        members: records.map((s) => row(s, soci, feeOfMember.get(s.id) ?? null)),
+        directoryAvailable: soci !== null,
+      }
     },
 
     async get(input: C.NumberInput): Promise<C.SocioRecord> {
       const s = await find(input.number)
       const deleted = s.accountState === "deleted"
-      const [history, group, account] = await Promise.all([
+      const [history, group, account, fees] = await Promise.all([
         store.activity(s.id),
         deleted ? Promise.resolve([]) : sociGroup(),
         deleted ? Promise.resolve(null) : writes.currentMember(s.entraObjectId).catch(() => null),
+        store.fees({ memberId: s.id }),
       ])
       const { id: _, ...record } = s
       return {
         ...record,
-        ...row(s, group && new Set(group.map((m) => m.id))),
+        ...row(
+          s,
+          group && new Set(group.map((m) => m.id)),
+          fees.find((f) => f.year === currentYear())
+        ),
         accountNumber: account?.employeeId ?? null,
         activity: history,
+        fees: await feeView(fees),
       }
     },
 
@@ -251,7 +408,8 @@ export function createSociService(options: SociOptions) {
               updatedBy: actor,
               updatedAt: at,
             },
-            entry(actor, `Admitted with number ${number}; account ${member.mail} created`)
+            entry(actor, `Admitted with number ${number}; account ${member.mail} created`),
+            [admissionFee(input.admittedOn, actor, at)]
           )
         } catch (error) {
           logger.error({ error: safeErrorDetail(error), by: actor, memberId: member.id }, "[soci] record not written")
@@ -353,7 +511,8 @@ export function createSociService(options: SociOptions) {
             accountNumber === null
               ? `Registered from Microsoft 365 with the new number ${number}`
               : `Registered from Microsoft 365 with number ${number}`
-          )
+          ),
+          [admissionFee(input.admittedOn, actor, at)]
         )
       })
       logger.info({ by: actor, memberId: socio.entraObjectId, number: socio.number }, "[soci] socio registered")
@@ -426,6 +585,327 @@ export function createSociService(options: SociOptions) {
         }
       }
       return { number: input.newNumber, notificationSent }
+    },
+
+    // Fees, for the Direttivo.
+
+    async listFees(input: C.FeesListInput): Promise<C.FeesList> {
+      const year = input.year ?? currentYear()
+      const [fees, records] = await Promise.all([store.fees({ year }), store.list()])
+      const byId = new Map(records.map((s) => [s.id, s]))
+      const totals = { due: 0, uploaded: 0, paid: 0, exempt: 0 }
+      for (const f of fees) totals[f.status]++
+      const shown = fees.filter((f) => !input.status || f.status === input.status)
+      const views = await feeView(shown)
+      return {
+        year,
+        label: feeYearLabel(year),
+        totals,
+        fees: shown
+          .map((f, i) => {
+            const s = byId.get(f.memberId) as Socio
+            return {
+              number: s.number,
+              firstName: s.firstName,
+              lastName: s.lastName,
+              alias: s.alias,
+              mailbox: s.mailbox,
+              endedOn: s.endedOn,
+              fee: views[i],
+            }
+          })
+          .sort((a, b) => a.number - b.number),
+      }
+    },
+
+    async feeFile(input: { fileId: string }): Promise<C.FeeFile> {
+      const file = (await store.file(input.fileId)) ?? fail("NOT_FOUND", "There is no such file.")
+      return {
+        fileName: file.fileName,
+        contentType: file.contentType,
+        base64: Buffer.from(file.content).toString("base64"),
+      }
+    },
+
+    async confirmFee(actor: string, input: C.ReviewInput): Promise<void> {
+      const s = await find(input.number)
+      const fee = await requireFee(s, input.year)
+      if (fee.status !== "uploaded") fail("PRECONDITION_FAILED", "Only an uploaded receipt can be confirmed.")
+      reviewed(fee, input.fileId)
+      const at = now().toISOString()
+      changed(
+        await store.updateFee(
+          { ...fee, fileId: input.fileId },
+          ["uploaded"],
+          {
+            status: "paid",
+            paidOn: fee.transferDate,
+            method: "transfer",
+            note: null,
+            recordedBy: actor,
+            reviewedBy: actor,
+            reviewedAt: at,
+            updatedAt: at,
+          },
+          entry(actor, `Confirmed the ${feeYearLabel(input.year)} fee`),
+          feeMail(
+            s,
+            `confirmed:${input.year}:${s.id}`,
+            "confirmed",
+            mailData(s, input.year, { paidOn: formatItalianDay(fee.transferDate as string) })
+          )
+        )
+      )
+      logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee confirmed")
+    },
+
+    async rejectFee(actor: string, input: C.RejectInput): Promise<void> {
+      const s = await find(input.number)
+      const fee = await requireFee(s, input.year)
+      if (fee.status !== "uploaded") fail("PRECONDITION_FAILED", "Only an uploaded receipt can be rejected.")
+      reviewed(fee, input.fileId)
+      const at = now().toISOString()
+      changed(
+        await store.updateFee(
+          { ...fee, fileId: input.fileId },
+          ["uploaded"],
+          { status: "due", rejectionReason: input.reason, reviewedBy: actor, reviewedAt: at, updatedAt: at },
+          entry(actor, `Rejected the ${feeYearLabel(input.year)} receipt: ${input.reason}`),
+          feeMail(
+            s,
+            `rejected:${input.year}:${s.id}:${fee.uploadedAt}`,
+            "rejected",
+            mailData(s, input.year, { reason: input.reason })
+          )
+        )
+      )
+      logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee rejected")
+    },
+
+    /** Records a payment made outside the dashboard, opening the fee if the year hasn't opened it yet. */
+    async markPaid(actor: string, input: C.MarkPaidInput): Promise<void> {
+      const s = await find(input.number)
+      if (input.year > currentYear()) fail("BAD_REQUEST", `The ${feeYearLabel(input.year)} fee year hasn't started.`)
+      if (input.year < feeYearOf(s.admittedOn))
+        fail("BAD_REQUEST", `Socio ${s.number} was admitted after ${feeYearLabel(input.year)}.`)
+      if (input.paidOn > today()) fail("BAD_REQUEST", "The payment date is in the future.")
+      const at = now().toISOString()
+      const payment = {
+        status: "paid" as const,
+        paidOn: input.paidOn,
+        method: input.method,
+        note: input.note,
+        recordedBy: actor,
+        updatedAt: at,
+      }
+      const text = `Marked the ${feeYearLabel(input.year)} fee as paid (${input.method}, ${input.paidOn})`
+      const email = feeMail(
+        s,
+        `confirmed:${input.year}:${s.id}`,
+        "confirmed",
+        mailData(s, input.year, { paidOn: formatItalianDay(input.paidOn) })
+      )
+      const fee = await feeOf(s, input.year)
+      if (!fee) {
+        if (exemptYearFor(s.admittedOn) === input.year)
+          fail("PRECONDITION_FAILED", `The ${feeYearLabel(input.year)} fee is exempt.`)
+        const opened = await store.openFee(
+          s.id,
+          { ...emptyFee, ...payment, year: input.year, amountCents: FEE_CENTS, createdAt: at },
+          entry(actor, text),
+          email
+        )
+        changed(opened !== null)
+      } else {
+        if (fee.status === "paid") fail("CONFLICT", `The ${feeYearLabel(input.year)} fee is already paid.`)
+        if (fee.status === "exempt") fail("PRECONDITION_FAILED", `The ${feeYearLabel(input.year)} fee is exempt.`)
+        changed(await store.updateFee(fee, ["due", "uploaded"], payment, entry(actor, text), email))
+      }
+      logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee marked as paid")
+    },
+
+    // My area: the signed-in socio, found by their Microsoft 365 object ID.
+
+    async me(entraObjectId: string): Promise<C.Me> {
+      const s = await self(entraObjectId)
+      const year = currentYear()
+      const fees = await store.fees({ memberId: s.id })
+      return {
+        number: s.number,
+        admittedOn: s.admittedOn,
+        endedOn: s.endedOn,
+        endReason: s.endReason,
+        details: {
+          firstName: s.firstName,
+          lastName: s.lastName,
+          alias: s.alias,
+          codiceFiscale: s.codiceFiscale,
+          birthDate: s.birthDate,
+          birthPlace: s.birthPlace,
+          residence: s.residence,
+          phone: s.phone,
+        },
+        missing: C.SELF_FIELDS.filter((key) => key !== "phone" && s[key] === null),
+        payment: {
+          year,
+          label: feeYearLabel(year),
+          amountCents: FEE_CENTS,
+          deadline: renewalDeadline(year),
+          reference: paymentReference(year, s.number, s.firstName, s.lastName),
+          iban: options.fees.bank?.iban ?? null,
+          beneficiary: options.fees.bank?.beneficiary ?? null,
+        },
+        fees: await feeView(fees),
+      }
+    },
+
+    /** The transfer receipt for this fee year, replacing one still waiting for review. */
+    async uploadReceipt(
+      entraObjectId: string,
+      sub: string,
+      file: { name: string; bytes: Uint8Array },
+      input: C.ReceiptInput
+    ): Promise<void> {
+      const s = await self(entraObjectId)
+      if (s.endedOn) fail("PRECONDITION_FAILED", "Your socio status has ended.")
+      const year = currentYear()
+      const fee =
+        (await feeOf(s, year)) ??
+        fail("PRECONDITION_FAILED", `Your ${feeYearLabel(year)} fee isn't open yet: try again tomorrow.`)
+      if (fee.status === "paid") fail("PRECONDITION_FAILED", `Your ${feeYearLabel(year)} fee is already paid.`)
+      if (fee.status === "exempt") fail("PRECONDITION_FAILED", `You're exempt from the ${feeYearLabel(year)} fee.`)
+      if (input.transferDate > today()) fail("BAD_REQUEST", "The transfer date is in the future.")
+      const contentType = await receiptType(file.bytes)
+      const at = now().toISOString()
+      const fileId = randomUUID()
+      const fileName =
+        file.name
+          .replace(/^.*[\\/]/, "")
+          .split("")
+          .filter((c) => c.charCodeAt(0) >= 32)
+          .join("")
+          .trim()
+          .slice(0, 200) || "receipt"
+      changed(
+        await store.updateFee(
+          fee,
+          ["due", "uploaded"],
+          {
+            status: "uploaded",
+            fileId,
+            transferDate: input.transferDate,
+            declaredCents: input.declaredCents,
+            uploadedAt: at,
+            updatedAt: at,
+          },
+          entry(sub, `Uploaded a transfer receipt for ${feeYearLabel(year)}`),
+          undefined,
+          { id: fileId, memberId: s.id, fileName, contentType, content: file.bytes, uploadedBy: sub, uploadedAt: at }
+        )
+      )
+      logger.info({ number: s.number, year }, "[soci] receipt uploaded")
+    },
+
+    /** Fills in the socio's own empty fields. Recorded ones only the Direttivo changes. */
+    async completeDetails(entraObjectId: string, sub: string, input: C.CompleteDetailsInput): Promise<void> {
+      await writes.serialize(async () => {
+        const s = await self(entraObjectId)
+        if (s.endedOn) fail("PRECONDITION_FAILED", "Your socio status has ended.")
+        const given = C.SELF_FIELDS.filter((key) => input[key] !== null)
+        const recorded = given.filter((key) => s[key] !== null)
+        if (recorded.length)
+          fail(
+            "BAD_REQUEST",
+            `Already recorded: ${recorded.map((key) => SELF_LABELS[key]).join(", ")}. Ask the Direttivo to change it.`
+          )
+        const codiceFiscale = input.codiceFiscale ?? s.codiceFiscale
+        const birthDate = input.birthDate ?? s.birthDate
+        if (codiceFiscale && birthDate && !matchesBirthDate(codiceFiscale, birthDate))
+          fail("BAD_REQUEST", "The birth date doesn't match the codice fiscale.")
+        if (input.codiceFiscale && !s.endedOn) await requireUniqueCodiceFiscale(input.codiceFiscale, s.id)
+        await store.update(
+          s.id,
+          {
+            ...Object.fromEntries(given.map((key) => [key, input[key]])),
+            updatedBy: sub,
+            updatedAt: now().toISOString(),
+          },
+          entry(sub, `Completed ${given.map((key) => SELF_LABELS[key]).join(", ")}`)
+        )
+      })
+    },
+
+    // Jobs.
+
+    /**
+     * Daily: opens this fee year for every active socio without a fee, Due (with the opening email until the deadline)
+     * or Exempt, then sends the 1 and 21 December reminders. Idempotent: a second run that day opens and queues nothing.
+     */
+    async runDaily(): Promise<{ opened: number; reminded: number }> {
+      const bank = options.fees.bank
+      if (!bank) {
+        logger.error({}, "[soci] SOCI_IBAN and SOCI_BENEFICIARI aren't set: no fee year is opened")
+        return { opened: 0, reminded: 0 }
+      }
+      const day = today()
+      const year = feeYearOf(day)
+      const label = feeYearLabel(year)
+      const records = await store.list()
+      const byId = new Map(records.map((s) => [s.id, s]))
+      const open = new Set((await store.fees({ year })).map((f) => f.memberId))
+      let opened = 0
+      for (const s of records) {
+        if (s.endedOn || open.has(s.id) || s.admittedOn > day || feeYearOf(s.admittedOn) > year) continue
+        const exempt = exemptYearFor(s.admittedOn) === year
+        const at = now().toISOString()
+        const fee = await store.openFee(
+          s.id,
+          {
+            ...emptyFee,
+            year,
+            status: exempt ? "exempt" : "due",
+            amountCents: exempt ? 0 : FEE_CENTS,
+            createdAt: at,
+            updatedAt: at,
+          },
+          entry(SYSTEM, exempt ? `Opened the ${label} fee: exempt, admitted in the summer` : `Opened the ${label} fee`),
+          // Past the renewal deadline the email would ask to pay by a day gone: the fee opens Due without it.
+          exempt || day > renewalDeadline(year)
+            ? undefined
+            : feeMail(s, `opening:${year}:${s.id}`, "opening", mailData(s, year))
+        )
+        if (fee) opened++
+      }
+
+      let reminded = 0
+      const reminder = reminderOn(day)
+      if (reminder)
+        for (const fee of await store.fees({ year })) {
+          const s = byId.get(fee.memberId)
+          if (fee.status !== "due" || !s || s.endedOn) continue
+          // Opened or rejected on or after the reminder's day: that email already gave the deadline.
+          if (romeDay(new Date(fee.updatedAt)) >= reminderDay(year, reminder)) continue
+          const email = feeMail(s, `reminder:${year}:${reminder}:${s.id}`, "reminder", mailData(s, year))
+          if (email && (await store.enqueue(s.id, email, now().toISOString()))) reminded++
+        }
+      if (opened || reminded) logger.info({ year, opened, reminded }, "[soci] daily fee run")
+      return { opened, reminded }
+    },
+
+    /** Sends queued fee emails; the cron calls it every minute. */
+    async deliverPending(): Promise<void> {
+      const at = now()
+      const claimed = await store.claimMail(at.toISOString(), new Date(at.getTime() - 10 * 60_000).toISOString(), 20)
+      for (const queued of claimed) {
+        let error: string | null = null
+        try {
+          await options.fees.send(queued)
+        } catch (err) {
+          error = err instanceof Error ? err.message : String(err)
+          logger.error({ error: safeErrorDetail(err), mail: queued.id }, "[soci] fee email failed")
+        }
+        await store.finishMail(queued, error, now().toISOString())
+      }
     },
   }
 }

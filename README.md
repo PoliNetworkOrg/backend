@@ -107,10 +107,36 @@ the admin repository's `docs/people/soci.md`.
   fields are optional. `members.unregistered` lists the Soci group's accounts without a record.
 - `members.list` reports mismatches: an active record whose account isn't in Soci, or an ended one whose account is.
 
-Every procedure needs `admin:access` and `soci:read` (list, get, unregistered) or `soci:write` (admit, register,
-update, setNumber). Microsoft 365 writes run one at a time behind an in-process lock (`src/azure/member-writes.ts`),
-which also remembers numbers Entra's searches don't show yet. `azure.members` is read-only: admitting a socio and
-changing a member number go through `soci.members.*`.
+Every `members.*` and `fees.*` procedure needs `admin:access` and `soci:read` (list, get, unregistered, fees list and
+file) or `soci:write` (admit, register, update, setNumber, confirm, reject, markPaid). Microsoft 365 writes run one at
+a time behind an in-process lock (`src/azure/member-writes.ts`), which also remembers numbers Entra's searches don't
+show yet. `azure.members` is read-only: admitting a socio and changing a member number go through `soci.members.*`.
+
+### Fees
+
+The rules are hard-coded from the Regolamento Interno (`src/soci/fees.ts`): €5.00 per fee year, 1 September – 31
+August (`2026/27`), renewals until 31 December, and the fee year after a summer admission (1 June – 31 August) is
+exempt. Fees live in `soci_fees`, one per socio and year; uploaded receipts in `soci_files` (PDF, PNG or JPEG up to 10
+MB, judged by content, never expired).
+
+- **Admitting or registering** records the admission's fee year as paid (method `admission`).
+- **Every day at 08:00** (Europe/Rome) `runDaily` opens the current fee year for every active socio without a fee: Due,
+  with the opening email (none once 31 December has passed), or Exempt. On 1 and 21 December it reminds every socio
+  whose fee is still Due, unless an opening or rejection email since that day already gave them the deadline. It is
+  idempotent, and does nothing until `SOCI_IBAN` and `SOCI_BENEFICIARI` are set.
+- **The socio** (`me.*`, `people:self`, found by the Microsoft 365 object ID in Auth's access snapshot) sees their
+  record, fees and bank details, uploads the transfer receipt as `FormData` (`file`, `transferDate`, `declaredCents`),
+  and fills in their own empty fields.
+- **The Direttivo** confirms or rejects (with a reason) an uploaded receipt, or marks a fee as paid by hand, which also
+  opens a fee the year hasn't opened yet.
+- **Emails** (Italian React Email templates, `bun run email` to preview) go to the socio's PoliNetwork mailbox through
+  the `soci_mail` outbox, drained every minute. Each email's id is its idempotency key, e.g. `reminder:2026:dec-1:12`,
+  so a job that runs twice never sends twice.
+
+| Variable           | Purpose                                                              |
+| ------------------ | -------------------------------------------------------------------- |
+| `SOCI_IBAN`        | The IBAN soci pay the fee to. Until it and the beneficiary are set, no fee year is opened. |
+| `SOCI_BENEFICIARI` | The account holder shown with the IBAN, e.g. `PoliNetwork APS`.     |
 
 ## E-signing with the CIE
 

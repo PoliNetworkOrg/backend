@@ -3,7 +3,7 @@ import { SQL } from "bun"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { schema } from "@/db/schema"
-import { members } from "@/db/schema/soci"
+import { mail, members } from "@/db/schema/soci"
 import { createSociPgStore } from "@/soci/store-pg"
 import type { NewSocio } from "@/soci/types"
 
@@ -88,6 +88,97 @@ try {
     } as never)
   )
   checked.push("an ended record frees its code for a re-admission, and an end needs its reason")
+
+  const blank = {
+    fileId: null,
+    transferDate: null,
+    declaredCents: null,
+    uploadedAt: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+    paidOn: null,
+    method: null,
+    note: null,
+    recordedBy: null,
+  }
+  const due = { ...blank, year: 2026, status: "due" as const, amountCents: 500, createdAt: at, updatedAt: at }
+  const outgoing = (id: string) => ({
+    id,
+    to: "mario@polinetwork.org",
+    kind: "opening" as const,
+    data: { name: "Mario" } as never,
+  })
+  const fee = await store.openFee(readmitted.id, due, entry("Opened"), outgoing("opening:2026:x"))
+  assert.ok(fee)
+  assert.equal(await store.openFee(readmitted.id, due, entry("Opened again"), outgoing("opening:2026:y")), null)
+  const fileId = "5f0c6a2e-8a1b-4c2d-9e3f-0a1b2c3d4e5f"
+  const file = {
+    id: fileId,
+    memberId: readmitted.id,
+    fileName: "r.pdf",
+    contentType: "application/pdf",
+    content: new Uint8Array([37, 80, 68, 70]),
+    uploadedBy: "usr_mario",
+    uploadedAt: at,
+  }
+  // An upload without its file is refused by the table.
+  await assert.rejects(store.updateFee(fee, ["due"], { status: "uploaded", updatedAt: at }, entry("Bad upload")))
+  const upload = {
+    status: "uploaded" as const,
+    fileId,
+    transferDate: "2026-11-09",
+    declaredCents: 500,
+    uploadedAt: at,
+    updatedAt: at,
+  }
+  // A fee that changed in the meantime keeps its state, and the new file is rolled back with it.
+  assert.equal(await store.updateFee(fee, ["paid"], upload, entry("Uploaded"), undefined, file), false)
+  assert.equal(await store.file(fileId), null)
+  assert.equal(await store.updateFee(fee, ["due"], upload, entry("Uploaded"), undefined, file), true)
+  assert.equal(await store.updateFee(fee, ["due"], upload, entry("Uploaded twice")), false)
+  // A review applies only while the fee still holds the reviewed file.
+  const otherFile = { ...fee, fileId: "00000000-0000-4000-8000-000000000000" }
+  assert.equal(await store.updateFee(otherFile, ["uploaded"], { status: "due", updatedAt: at }, entry("No")), false)
+  const [loadedFee] = await store.fees({ memberId: readmitted.id })
+  assert.deepEqual({ ...loadedFee }, { ...fee, ...upload, id: fee.id, memberId: readmitted.id })
+  assert.deepEqual((await store.file(fileId))?.content, new Uint8Array([37, 80, 68, 70]))
+  assert.deepEqual(
+    [...(await store.fileNames([fileId])).values()],
+    [{ fileName: "r.pdf", contentType: "application/pdf" }]
+  )
+  const paid = {
+    ...blank,
+    year: 2025,
+    status: "paid" as const,
+    amountCents: 500,
+    paidOn: "2025-10-01",
+    method: "admission" as const,
+    recordedBy: "usr_direttivo",
+    createdAt: at,
+    updatedAt: at,
+  }
+  const admitted = await store.insert(socio(360, "oid-anna", null), entry("Admitted"), [paid])
+  assert.deepEqual(
+    (await store.fees({ memberId: admitted.id })).map(({ id: _, memberId: __, ...f }) => f),
+    [paid]
+  )
+  checked.push("a fee opens once per year, changes only from the expected status, and keeps its receipt")
+
+  assert.equal(await store.enqueue(readmitted.id, outgoing("opening:2026:x"), at), false)
+  assert.equal(await store.enqueue(readmitted.id, outgoing("reminder:2026:dec-1:x"), at), true)
+  const claimed = await store.claimMail(at, at, 10)
+  assert.deepEqual(claimed.map((m) => m.id).sort(), ["opening:2026:x", "reminder:2026:dec-1:x"])
+  assert.deepEqual(await store.claimMail(at, at, 10), [])
+  await store.finishMail(claimed[0], null, at)
+  // Still `sending` an hour later: the outcome is unknown, so it fails rather than sending twice.
+  assert.deepEqual(await store.claimMail("2026-11-09T11:00:01.000Z", "2026-11-09T10:50:00.000Z", 10), [])
+  const statuses = await db.select({ id: mail.id, status: mail.status }).from(mail).orderBy(mail.id)
+  assert.deepEqual(
+    statuses.map((m) => m.status),
+    claimed[0].id === statuses[0].id ? ["sent", "failed"] : ["failed", "sent"]
+  )
+  checked.push("an email is queued once per key, claimed once, and fails when its outcome is unknown")
   console.log(JSON.stringify({ checked }))
 } finally {
   await client.close()
