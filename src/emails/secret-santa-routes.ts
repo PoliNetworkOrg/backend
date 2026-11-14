@@ -15,7 +15,7 @@ const schema = z.discriminatedUnion("kind", [
     kind: z.literal("reassigned"),
     withdrawnName: z.string().min(1).max(200),
     hasNewMatch: z.boolean(),
-    reason: z.enum(["withdrawn", "unconfirmed"]).optional(),
+    reason: z.enum(["withdrawn", "unconfirmed", "admin"]).optional(),
   }),
   base.extend({ kind: z.literal("confirmation-reminder"), closesAt: z.number().int().positive() }),
   base.extend({ kind: z.literal("removed"), closesAt: z.number().int().positive() }),

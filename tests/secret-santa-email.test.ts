@@ -63,6 +63,26 @@ describe("Secret Santa mail endpoint", () => {
 })
 
 describe("Secret Santa email rendering", () => {
+  it("describes an organizer correction without claiming that the previous recipient withdrew", async () => {
+    const data = { name: "Ada", withdrawnName: "Person B", reason: "admin" as const, hasNewMatch: true, url }
+    const mail = await renderEmail(createElement(Reassigned, data))
+    expect(mail.text).toContain("Gli organizzatori hanno aggiornato")
+    expect(mail.text).not.toContain("si è ritirato")
+    expect(mail.text).not.toContain("non ha confermato")
+    expect(mail.text).not.toContain("Person B")
+    expect(mail.text).toContain("la tua conferma resta valida")
+    const send = vi.fn(async (_mail: SecretSantaEmailRequest) => {})
+    const app = secretSantaEmailRoutes({ token, publicUrl: "https://live.example", send })
+    expect(
+      (
+        await app.request("/", {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ ...data, id: "correction", kind: "reassigned", to: "ada@example.test" }),
+        })
+      ).status
+    ).toBe(204)
+  })
   it("renders the last warning with the Italian date, escaped name, authenticated-site CTA and inline logo", async () => {
     const mail = await renderEmail(createElement(Confirmation, request))
     expect(mail.text).toContain("Ada <Lovelace>")
