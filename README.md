@@ -37,7 +37,7 @@ Requirements:
    ```sh
    bun dev
    ```
-5. (Optional) Fill the database with sample data: Telegram users, groups and messages, course groups and labels, projects, associations, FAQs, freshman guides, group link reports, audit log entries and grants:
+5. (Optional) Fill the database with sample data: Telegram users, groups and messages, course groups and labels, projects, associations, FAQs, freshman guides, website documents (with placeholder file links), group link reports, audit log entries and grants:
    ```sh
    bun run seed:db
    ```
@@ -90,6 +90,58 @@ The backend checks every role change with the same rules as Auth (`src/people/ru
 `src/auth/people-binding.ts`): no self-grants, the right permission per kind, and bounded delegation against the
 role's permissions. A concept with no role bound in Auth, or with more than one, can't be assigned. Writes are
 serialized by one transaction lock. Grant `idp:people:roles` to the backend's OAuth client to let it change roles.
+
+## Soci
+
+The `soci` router is the Libro Soci: one record per admission in `soci_members`, keyed on the Microsoft 365 account
+(`entra_object_id`) and the member number, with the bookkeeping data the association must keep and an append-only
+history in `soci_activity`. Records are never deleted, and a re-admission is a new record with a new number.
+Microsoft 365 stays the source of truth for who is a socio now: a PoliNetwork account in the Soci group. The design is
+the admin repository's `docs/people/soci.md`.
+
+- **Numbers are never reused.** `soci_numbers` keeps every number a record has held. A number is free only if no record
+  has ever held it and no Microsoft 365 user has it as `employeeId`.
+- **One active record per codice fiscale.** Codes are validated (format, omocodia, check character) and checked
+  against the birth date.
+- **Admitting** (`members.admit`) runs the Microsoft 365 workflow (account, `employeeId`, licences, Soci group, welcome
+  email to a typed address that isn't stored), then writes the record. A record that can't be written deletes the
+  account.
+- **Registering** (`members.register`) writes a record for an account already in Soci, with its current number; personal
+  fields are optional. `members.unregistered` lists the Soci group's accounts without a record.
+- `members.list` reports mismatches: an active record whose account isn't in Soci, or an ended one whose account is.
+
+Every `members.*` and `fees.*` procedure needs `admin:access` and `soci:read` (list, get, unregistered, fees list and
+file) or `soci:write` (admit, register, update, setNumber, confirm, reject, markPaid). Microsoft 365 writes run one at
+a time behind an in-process lock (`src/azure/member-writes.ts`), which also remembers numbers Entra's searches don't
+show yet. `azure.members` is read-only: admitting a socio and changing a member number go through `soci.members.*`.
+
+### Fees
+
+The rules are hard-coded from the Regolamento Interno (`src/soci/fees.ts`): €5.00 per fee year, 1 September – 31
+August (`2026/27`), renewals until 31 December, and the fee year after a summer admission (1 June – 31 August) is
+exempt. Fees live in `soci_fees`, one per socio and year; uploaded receipts in `soci_files` (PDF, PNG or JPEG up to 10
+MB, judged by content, never expired).
+
+- **Admitting or registering** records the admission's fee year as paid (method `admission`).
+- **Every day at 08:00** (Europe/Rome) `runDaily` opens the current fee year for every active socio without a fee: Due,
+  with the opening email (none once 31 December has passed), or Exempt. On 1 and 21 December it reminds every socio
+  whose fee is still Due, unless an opening or rejection email since that day already gave them the deadline. It is
+  idempotent, and does nothing until `SOCI_IBAN` and `SOCI_BENEFICIARI` are set.
+- **The socio** (`me.*`, `people:self`, found by the Microsoft 365 object ID in Auth's access snapshot) sees their
+  record, fees and bank details, uploads the transfer receipt as `FormData` (`file`, `transferDate`, `declaredCents`),
+  and fills in their own empty fields.
+- **The Direttivo** confirms or rejects (with a reason) an uploaded receipt, or marks a fee as paid by hand, which also
+  opens a fee the year hasn't opened yet.
+- **Birthdays:** at 08:00 `sendBirthdays` greets every active socio born that day (29 February: the 28th in years
+  without one), whatever the bank details.
+- **Emails** (Italian React Email templates, `bun run email` to preview) go to the socio's PoliNetwork mailbox through
+  the `soci_mail` outbox, drained every minute. Each email's id is its idempotency key, e.g. `reminder:2026:dec-1:12`,
+  so a job that runs twice never sends twice.
+
+| Variable           | Purpose                                                              |
+| ------------------ | -------------------------------------------------------------------- |
+| `SOCI_IBAN`        | The IBAN soci pay the fee to. Until it and the beneficiary are set, no fee year is opened. |
+| `SOCI_BENEFICIARI` | The account holder shown with the IBAN, e.g. `PoliNetwork APS`.     |
 
 ## E-signing with the CIE
 

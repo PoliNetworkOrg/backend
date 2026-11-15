@@ -69,6 +69,13 @@ export const env = createEnv({
       ),
     /** Dashboard origin, for links in signature emails. */
     ESIGN_DASHBOARD_URL: z.url().default("https://admin.polinetwork.org"),
+    /** Where soci pay the association fee. Until both are set, no fee year is opened. */
+    SOCI_IBAN: z
+      .string()
+      .transform((value) => value.replace(/\s/g, "").toUpperCase())
+      .pipe(z.string().regex(/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/, "an IBAN"))
+      .optional(),
+    SOCI_BENEFICIARI: z.string().trim().min(1).optional(),
     /** Accept signing certificates not issued by the CIE CAs, e.g. the agent's development key. */
     ESIGN_ALLOW_TEST_CERTIFICATES: z
       .enum(["true", "false"])

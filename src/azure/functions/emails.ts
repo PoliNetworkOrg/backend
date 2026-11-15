@@ -1,6 +1,6 @@
-import { render, toPlainText } from "@react-email/components"
 import MailComposer from "nodemailer/lib/mail-composer/index.js"
 import type { JSX } from "react"
+import { renderEmail } from "@/emails/render"
 import { env } from "@/env"
 import { logger } from "@/logger"
 import { getAzureClient } from "../client"
@@ -10,6 +10,10 @@ export type EmailAttachment = { filename: string; content: Uint8Array; contentTy
 /** Where replies go instead of the sender's mailbox. */
 export type EmailOptions = {
   replyTo?: { name: string; address: string }
+  /** Another mailbox than AZURE_EMAIL_SENDER; the app needs Mail.Send on it too. */
+  from?: string
+  /** Carbon copy, as the `Cc` header of the MIME message (Graph takes the recipients from it). */
+  cc?: string[]
   throwOnError?: boolean
   messageId?: string
 }
@@ -21,29 +25,29 @@ export async function sendEmail(
   attachments: EmailAttachment[] = [],
   options: EmailOptions = {}
 ) {
-  const html = await render(component)
-  const text = toPlainText(html, {
-    selectors: [
-      { selector: '*[style*="display:none"i]', format: "skip" }, // prevent duplicate text
-    ],
-  })
-  const sender = encodeURIComponent(env.AZURE_EMAIL_SENDER)
+  const { html, text, inlineImages } = await renderEmail(component)
+  const senderAddress = options.from ?? env.AZURE_EMAIL_SENDER
+  const sender = encodeURIComponent(senderAddress)
 
   // To send multipart emails (both HTML and plain text) with Microsoft Graph API,
   // we need to send raw MIME content.
   const mail = new MailComposer({
-    from: sender,
+    from: { name: "PoliNetwork APS", address: senderAddress },
     to,
+    cc: options.cc?.length ? options.cc : undefined,
     replyTo: options.replyTo,
     subject,
     text,
     html,
     messageId: options.messageId,
-    attachments: attachments.map((a) => ({
-      filename: a.filename,
-      content: Buffer.from(a.content),
-      contentType: a.contentType,
-    })),
+    attachments: [
+      ...inlineImages,
+      ...attachments.map((a) => ({
+        filename: a.filename,
+        content: Buffer.from(a.content),
+        contentType: a.contentType,
+      })),
+    ],
   })
   const mimeMessage = await mail.compile().build()
   const base64Encoded = mimeMessage.toString("base64")
@@ -51,7 +55,7 @@ export async function sendEmail(
   try {
     const client = getAzureClient()
     await client.api(`/users/${sender}/sendMail`).header("Content-Type", "text/plain").post(base64Encoded)
-    logger.info({ subject, to }, "[Azure Graph API] Email sent")
+    logger.info({ subject, to, cc: options.cc }, "[Azure Graph API] Email sent")
 
     return true
   } catch (error) {

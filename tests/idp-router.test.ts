@@ -117,12 +117,12 @@ describe("app router", () => {
     expect(policyOf("azure.members.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:members:read" },
     })
-    expect(policyOf("azure.members.create")?.policy).toEqual({
-      user: { scope: "backend:admin", permission: "azure:members:create" },
-    })
-    expect(policyOf("azure.members.setAssocNumber")).toMatchObject({
-      policy: { user: { scope: "backend:admin", permission: "azure:members:write" } },
-    })
+    // Directory writes go through soci.members.*, which keeps the Libro Soci in step.
+    expect(
+      procedures()
+        .filter(([name]) => name.startsWith("azure.members."))
+        .map(([name]) => name)
+    ).toEqual(["azure.members.getAll"])
     expect(policyOf("azure.groups.getAll")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "azure:groups:read" },
     })
@@ -132,6 +132,11 @@ describe("app router", () => {
         .filter(([name]) => name.startsWith("azure.groups."))
         .map(([name]) => name)
     ).toEqual(["azure.groups.getAll"])
+    // The Libro Soci: the policy carries the soci permission, and the router also requires admin:access.
+    for (const path of ["soci.members.list", "soci.members.get", "soci.members.unregistered"])
+      expect(policyOf(path)?.policy, path).toEqual({ user: { scope: "backend:admin", permission: "soci:read" } })
+    for (const path of ["admit", "register", "update", "setNumber"].map((name) => `soci.members.${name}`))
+      expect(policyOf(path)?.policy, path).toEqual({ user: { scope: "backend:admin", permission: "soci:write" } })
     expect(policyOf("tg.groups.leaveChat")?.policy).toEqual({
       user: { scope: "backend:admin", permission: "tg:groups:manage" },
     })

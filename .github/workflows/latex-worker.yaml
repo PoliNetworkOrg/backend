@@ -1,0 +1,101 @@
+name: LaTeX worker image
+# The regulations editor's compile worker (docker/latex-worker.Dockerfile), built FROM the legal repository's TeX Live
+# image. Kept apart from the backend image's workflow (docker.yaml) so it can never block or fail that one.
+#
+# ghcr.io/polinetworkorg/legal-texlive is a private package of the private PoliNetworkOrg/legal repository. Until it
+# grants this repository read access, this workflow can't pull it: it then skips the build with a notice and stays
+# green. Once the base is readable, the hourly check builds the worker on its own (and rebuilds it whenever the base
+# image or the worker's sources change).
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docker/latex-worker.Dockerfile
+      - src/regulations/worker/**
+      - src/regulations/compile/protocol.ts
+      - src/regulations/compile/queue.ts
+      - .github/workflows/latex-worker.yaml
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even if the published image is up to date
+        type: boolean
+        default: false
+
+concurrency:
+  group: latex-worker-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BASE_IMAGE: ghcr.io/polinetworkorg/legal-texlive:latest
+  IMAGE: ghcr.io/polinetworkorg/latex-worker:latest
+
+jobs:
+  build:
+    name: Build the LaTeX worker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check that the base image is readable
+        id: base
+        run: |
+          if digest=$(docker buildx imagetools inspect "$BASE_IMAGE" --format '{{json .Manifest.Digest}}' 2>/tmp/inspect.err); then
+            echo "readable=true" >> "$GITHUB_OUTPUT"
+            echo "digest=$(echo "$digest" | tr -d '"')" >> "$GITHUB_OUTPUT"
+          else
+            echo "readable=false" >> "$GITHUB_OUTPUT"
+            msg="Skipped: $BASE_IMAGE is not readable from this repository ($(head -c 300 /tmp/inspect.err | tr '\n' ' '))."
+            msg="$msg To enable the worker image, open the legal-texlive package on GitHub (PoliNetworkOrg → Packages → legal-texlive → Package settings → Manage Actions access), add the repository PoliNetworkOrg/backend with the Read role, then run this workflow (or wait for the hourly check)."
+            echo "::notice title=LaTeX worker not built::$msg"
+            echo "### LaTeX worker not built" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # The image carries the digest of its base and a hash of its sources: an unchanged pair needs no rebuild.
+      - name: Decide whether to build
+        id: plan
+        if: steps.base.outputs.readable == 'true'
+        run: |
+          key="${{ steps.base.outputs.digest }}-${{ hashFiles('docker/latex-worker.Dockerfile', 'src/regulations/worker/**', 'src/regulations/compile/**', 'package.json', 'bun.lock') }}"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          current=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image}}' 2>/dev/null \
+            | jq -r '[.. | objects | .config?.Labels?["org.polinetwork.build-key"]? // empty] | first // ""' || true)
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$current" = "$key" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Up to date: $IMAGE was built from this base and these sources." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" != "true" ] && [ "$current" = "$key" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Up to date: $IMAGE was built from this base and these sources (run with force to rebuild)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+        if: steps.plan.outputs.build == 'true'
+      - uses: docker/setup-buildx-action@v3
+        if: steps.plan.outputs.build == 'true'
+
+      - name: Build and push the worker image
+        if: steps.plan.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/latex-worker.Dockerfile
+          build-args: TEXLIVE_IMAGE=${{ env.BASE_IMAGE }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}
+          labels: org.polinetwork.build-key=${{ steps.plan.outputs.key }}
