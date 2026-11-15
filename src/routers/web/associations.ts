@@ -124,17 +124,23 @@ export default createTRPCRouter({
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
 
-      const [before] = await DB.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1)
-      const [res] = await DB.update(ASSOCIATIONS)
-        .set({
-          name,
-          descriptionIt,
-          descriptionEn,
-          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(ASSOCIATIONS.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(ASSOCIATIONS)
+          .set({
+            name,
+            descriptionIt,
+            descriptionEn,
+            ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(ASSOCIATIONS.id, id))
+          .returning()
+
+        return { before, res }
+      })
 
       ctx.audit.set({
         target: { type: "web.association", id, label: res?.name ?? before?.name },
@@ -157,23 +163,29 @@ export default createTRPCRouter({
       const { id, links } = input
       const { email, website, facebook, instagram, tiktok, x, youtube, telegram, linkedin, spotify } = links
 
-      const [before] = await DB.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1)
-      const [res] = await DB.update(ASSOCIATIONS)
-        .set({
-          email,
-          website,
-          facebook,
-          instagram,
-          tiktok,
-          x,
-          youtube,
-          telegram,
-          linkedin,
-          spotify,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(ASSOCIATIONS.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(ASSOCIATIONS)
+          .set({
+            email,
+            website,
+            facebook,
+            instagram,
+            tiktok,
+            x,
+            youtube,
+            telegram,
+            linkedin,
+            spotify,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(ASSOCIATIONS.id, id))
+          .returning()
+
+        return { before, res }
+      })
 
       ctx.audit.set({
         target: { type: "web.association", id, label: res?.name ?? before?.name },

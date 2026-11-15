@@ -159,10 +159,13 @@ function outcomeOf(result: Result): { outcome: TAuditOutcome; error: string | nu
   return error === null ? { outcome: AUDIT_OUTCOME.SUCCESS, error: null } : { outcome: AUDIT_OUTCOME.FAILURE, error }
 }
 
-/** Only `fields` of a copied input, when it is an object. */
-function onlyFields(copy: AuditJson, fields: readonly string[] | undefined): AuditJson {
-  if (!fields || copy === null || typeof copy !== "object" || Array.isArray(copy)) return copy
-  return Object.fromEntries(fields.flatMap((field) => (field in copy ? [[field, copy[field] ?? null]] : [])))
+/** Select declared input fields before redaction and size limits are applied. */
+function onlyFields(input: unknown, fields: readonly string[] | undefined): unknown {
+  if (!fields) return input
+  if (input instanceof FormData || input instanceof Map) input = Object.fromEntries(input.entries())
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return {}
+  const record = input as Record<string, unknown>
+  return Object.fromEntries(fields.flatMap((field) => (Object.hasOwn(record, field) ? [[field, record[field]]] : [])))
 }
 
 /**
@@ -212,7 +215,7 @@ export function auditEvent(options: {
     ...event,
     reason: cut(note.reason ?? null),
     // A refused call changed nothing, and its input is whatever the caller chose to send.
-    input: outcome === AUDIT_OUTCOME.DENIED ? null : onlyFields(auditJson(options.rawInput), option.fields),
+    input: outcome === AUDIT_OUTCOME.DENIED ? null : auditJson(onlyFields(options.rawInput, option.fields)),
     before: note.before === undefined ? null : auditJson(note.before),
     after: note.after === undefined ? null : auditJson(note.after),
   }

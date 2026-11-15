@@ -89,11 +89,26 @@ export const reports = createTRPCRouter({
     .meta(audit.full())
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
     .mutation(async ({ input, ctx }) => {
-      const before = await DB.select().from(REPORTS).where(inArray(REPORTS.id, input.ids))
-      const after = await DB.update(REPORTS)
-        .set({ status: "resolved" })
-        .where(inArray(REPORTS.id, input.ids))
-        .returning()
+      const { before, after } = await DB.transaction(async (tx) => {
+        const before = await tx
+          .select()
+          .from(REPORTS)
+          .where(inArray(REPORTS.id, input.ids))
+          .orderBy(REPORTS.id)
+          .for("update")
+        const after = await tx
+          .update(REPORTS)
+          .set({ status: "resolved" })
+          .where(
+            inArray(
+              REPORTS.id,
+              before.map((row) => row.id)
+            )
+          )
+          .returning()
+        return { before, after }
+      })
+
       ctx.audit.set({ target: reportsTarget(input.ids), before, after })
       return after
     }),
@@ -102,11 +117,26 @@ export const reports = createTRPCRouter({
     .meta(audit.full())
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
     .mutation(async ({ input, ctx }) => {
-      const before = await DB.select().from(REPORTS).where(inArray(REPORTS.id, input.ids))
-      const after = await DB.update(REPORTS)
-        .set({ status: "dismissed" })
-        .where(inArray(REPORTS.id, input.ids))
-        .returning()
+      const { before, after } = await DB.transaction(async (tx) => {
+        const before = await tx
+          .select()
+          .from(REPORTS)
+          .where(inArray(REPORTS.id, input.ids))
+          .orderBy(REPORTS.id)
+          .for("update")
+        const after = await tx
+          .update(REPORTS)
+          .set({ status: "dismissed" })
+          .where(
+            inArray(
+              REPORTS.id,
+              before.map((row) => row.id)
+            )
+          )
+          .returning()
+        return { before, after }
+      })
+
       ctx.audit.set({ target: reportsTarget(input.ids), before, after })
       return after
     }),

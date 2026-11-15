@@ -190,7 +190,7 @@ export const esignRouter = createTRPCRouter({
 
   requests: createTRPCRouter({
     create: user
-      .meta(audit.full({ fields: ["title", "documentId", "ordered", "signers", "output"] }))
+      .meta(audit.full({ fields: ["title", "documentId", "ordered", "output"] }))
       .input(
         z.object({
           title: z.string().trim().min(1).max(200),

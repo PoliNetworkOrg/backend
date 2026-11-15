@@ -63,11 +63,17 @@ export default createTRPCRouter({
     .input(updateFreshmanCardInput)
     .mutation(async ({ input, ctx }) => {
       const { id, ...fields } = input
-      const [updated] = await DB.update(CARDS)
-        .set({ ...fields, ...modifiedByColumns(authorOf(ctx.actor)) })
-        .where(eq(CARDS.id, id))
-        .returning({ id: CARDS.id })
-      if (!updated) throw new TRPCError({ code: "NOT_FOUND", message: "The website slot is not initialized." })
+      const { before, after } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(CARDS).where(eq(CARDS.id, id)).for("update")
+        if (!before) throw new TRPCError({ code: "NOT_FOUND", message: "The website slot is not initialized." })
+        const [after] = await tx
+          .update(CARDS)
+          .set({ ...fields, ...modifiedByColumns(authorOf(ctx.actor)) })
+          .where(eq(CARDS.id, id))
+          .returning()
+        return { before, after }
+      })
+      ctx.audit.set({ target: { type: "web.freshmanCard", id }, before, after })
       return { error: null }
     }),
 
@@ -81,7 +87,7 @@ export default createTRPCRouter({
       if (!next || next.group !== slot.group)
         throw new TRPCError({ code: "BAD_REQUEST", message: "Cards can only move within their website section." })
       const author = modifiedByColumns(authorOf(ctx.actor))
-      await DB.transaction(async (tx) => {
+      const { before, after } = await DB.transaction(async (tx) => {
         const rows = await tx
           .select()
           .from(CARDS)
@@ -99,9 +105,11 @@ export default createTRPCRouter({
           icon: row.icon,
           ...author,
         })
-        await tx.update(CARDS).set(values(target)).where(eq(CARDS.id, current.id))
-        await tx.update(CARDS).set(values(current)).where(eq(CARDS.id, target.id))
+        const first = await tx.update(CARDS).set(values(target)).where(eq(CARDS.id, current.id)).returning()
+        const second = await tx.update(CARDS).set(values(current)).where(eq(CARDS.id, target.id)).returning()
+        return { before: rows, after: [...first, ...second] }
       })
+      ctx.audit.set({ target: { type: "web.freshmanCard", id: input.id }, before, after })
       return { error: null }
     }),
 
@@ -110,7 +118,7 @@ export default createTRPCRouter({
     .input(selectFreshmanFaqInput)
     .mutation(async ({ input, ctx }) => {
       const author = modifiedByColumns(authorOf(ctx.actor))
-      await DB.transaction(async (tx) => {
+      const { before, after } = await DB.transaction(async (tx) => {
         // Serialize writes to the five slots before reading; public snapshot reads remain unblocked.
         // Catalog deletions take the same lock before checking whether a FAQ is selected.
         await tx.execute(sql`LOCK TABLE ${FEATURED} IN SHARE ROW EXCLUSIVE MODE`)
@@ -121,24 +129,31 @@ export default createTRPCRouter({
         if (!faq) throw new TRPCError({ code: "NOT_FOUND", message: "This FAQ no longer exists." })
         const current = rows.find((row) => row.position === input.position)
         if (!current) throw new TRPCError({ code: "NOT_FOUND" })
-        if (current.faqId === input.faqId) return
+        if (current.faqId === input.faqId) return { before: [current], after: [current] }
         const existing = rows.find((row) => row.faqId === input.faqId)
         if (existing) {
           // Reinsert the pair atomically so the declared immediate unique constraint also permits swaps.
           // Preserve each slot's creation metadata and record this edit on both positions.
           await tx.delete(FEATURED).where(inArray(FEATURED.position, [current.position, existing.position]))
           const updatedAt = new Date()
-          await tx.insert(FEATURED).values([
-            { ...current, faqId: existing.faqId, ...author, updatedAt },
-            { ...existing, faqId: current.faqId, ...author, updatedAt },
-          ])
+          const after = await tx
+            .insert(FEATURED)
+            .values([
+              { ...current, faqId: existing.faqId, ...author, updatedAt },
+              { ...existing, faqId: current.faqId, ...author, updatedAt },
+            ])
+            .returning()
+          return { before: [current, existing], after }
         } else {
-          await tx
+          const after = await tx
             .update(FEATURED)
             .set({ faqId: input.faqId, ...author })
             .where(eq(FEATURED.position, input.position))
+            .returning()
+          return { before: [current], after }
         }
       })
+      ctx.audit.set({ target: { type: "web.freshmanFaq", id: input.position }, before, after })
       return { error: null }
     }),
 })

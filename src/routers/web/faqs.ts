@@ -124,18 +124,24 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, descriptionIt, descriptionEn, categoryId } = input
 
-      const [before] = await DB.select().from(FAQS).where(eq(FAQS.id, id)).limit(1)
-      const [res] = await DB.update(FAQS)
-        .set({
-          titleIt,
-          titleEn,
-          descriptionIt,
-          descriptionEn,
-          categoryId,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(FAQS.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(FAQS).where(eq(FAQS.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(FAQS)
+          .set({
+            titleIt,
+            titleEn,
+            descriptionIt,
+            descriptionEn,
+            categoryId,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(FAQS.id, id))
+          .returning()
+
+        return { before, res }
+      })
 
       ctx.audit.set({ target: { type: "web.faq", id, label: res?.titleIt ?? before?.titleIt }, before, after: res })
       if (!res) return { error: "NOT_FOUND" }
@@ -155,16 +161,22 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, icon } = input
 
-      const [before] = await DB.select().from(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).limit(1)
-      const [res] = await DB.update(FAQ_CATEGORIES)
-        .set({
-          titleIt,
-          titleEn,
-          icon,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(FAQ_CATEGORIES.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(FAQ_CATEGORIES)
+          .set({
+            titleIt,
+            titleEn,
+            icon,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(FAQ_CATEGORIES.id, id))
+          .returning()
+
+        return { before, res }
+      })
 
       ctx.audit.set({
         target: { type: "web.faqCategory", id, label: res?.titleIt ?? before?.titleIt },

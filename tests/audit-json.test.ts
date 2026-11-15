@@ -180,6 +180,32 @@ describe("auditEvent", () => {
     expect(event?.input).toEqual({ userId: "u1", assocNumber: 7 })
   })
 
+  it("selects fields before object and total size limits, while still redacting", () => {
+    const padding = Object.fromEntries(Array.from({ length: 105 }, (_, i) => [`excluded${i}`, "x".repeat(2000)]))
+    const event = auditEvent({
+      path: "test",
+      auth,
+      option: { capture: "full", fields: ["id", "token"] },
+      rawInput: { ...padding, id: 7, token: "secret" },
+      note: {},
+      result: ok(),
+    })
+    expect(event?.input).toEqual({ id: 7, token: "(hidden)" })
+  })
+
+  it.each(["scalar", 42, true, null, ["secret"]])("enforces the allowlist for unsupported input %j", (rawInput) => {
+    const options = { path: "test", auth, rawInput, note: {}, result: ok() }
+    expect(auditEvent({ ...options, option: { capture: "full", fields: ["id"] } })?.input).toEqual({})
+    expect(auditEvent({ ...options, option: full })?.input).toEqual(auditJson(rawInput))
+    expect(
+      auditEvent({
+        ...options,
+        option: { capture: "full", fields: ["id"] },
+        result: { ok: false, error: new TRPCError({ code: "FORBIDDEN" }) },
+      })?.input
+    ).toBeNull()
+  })
+
   it("prefers the target the handler names, and gives the option's the result", () => {
     const option = {
       capture: "full",

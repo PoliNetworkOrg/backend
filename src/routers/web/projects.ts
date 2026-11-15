@@ -92,19 +92,25 @@ export default createTRPCRouter({
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
 
-      const [before] = await DB.select().from(PROJECTS).where(eq(PROJECTS.id, input.id)).limit(1)
-      const [res] = await DB.update(PROJECTS)
-        .set({
-          title,
-          descriptionIt,
-          descriptionEn,
-          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
-          link,
-          category,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(PROJECTS.id, input.id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(PROJECTS).where(eq(PROJECTS.id, input.id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(PROJECTS)
+          .set({
+            title,
+            descriptionIt,
+            descriptionEn,
+            ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
+            link,
+            category,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(PROJECTS.id, input.id))
+          .returning()
+
+        return { before, res }
+      })
 
       ctx.audit.set({
         target: { type: "web.project", id: input.id, label: res?.title ?? before?.title },

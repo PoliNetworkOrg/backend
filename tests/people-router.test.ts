@@ -1,7 +1,10 @@
 import type { Actor } from "@polinetwork/auth-kit"
-import { beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 import type { Context } from "@/trpc"
 import { harness, master, permissions, profile } from "./people-fixtures"
+
+const events = vi.hoisted(() => ({ write: vi.fn() }))
+vi.mock("@/audit/store", () => ({ writeAuditEvent: events.write }))
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -49,6 +52,20 @@ describe("People tRPC contract", () => {
       r.createCaller(context(permissions, undefined, ["backend:public:read"])).me.get()
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
   })
+  it("uses the validated mutation target when extra ids are stripped", async () => {
+    const h = harness()
+    await h.seed()
+    const person = await h.service.createPerson(master, profile())
+    events.write.mockClear()
+    await makeRouter(h.service)
+      .createCaller(context())
+      .persons.setNote({
+        id: person.id,
+        personId: "P-9999",
+        note: "Updated",
+      } as never)
+    expect(events.write).toHaveBeenCalledWith(expect.objectContaining({ targetId: person.id }))
+  })
   it("validates profiles before reaching People", async () => {
     const h = harness()
     await h.seed()
@@ -67,7 +84,15 @@ describe("People tRPC contract", () => {
     const caller = makeRouter(h.service).createCaller(context([], actor))
     await expect(caller.me.get()).rejects.toMatchObject({ code: "FORBIDDEN" })
     expect(await caller.me.invite({ token })).toMatchObject({ name: "Luca Verdi" })
+    events.write.mockClear()
     await caller.me.acceptInvite({ token })
+    expect(events.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetType: "people.person",
+        targetId: "P-0003",
+        input: null,
+      })
+    )
     expect(h.state().persons["P-0003"].accountSub).toBe("newcomer")
   })
   it("mounts every People procedure with a dashboard policy", () => {

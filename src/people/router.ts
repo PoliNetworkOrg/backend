@@ -8,19 +8,10 @@ import { requireGeneral } from "./model"
 import type { PeopleService } from "./service"
 import type { Viewer } from "./types"
 
-/**
- * The person a People call is about: the input's `personId` or `id`, else the created record's. The raw input is not
- * validated yet, so only a valid People id is taken from it.
- */
-const personTarget: AuditTargetOf = ({ input, data }) => {
-  for (const value of [input, data]) {
-    if (value === null || typeof value !== "object") continue
-    for (const key of ["personId", "id"]) {
-      const id = C.personIdSchema.safeParse((value as Record<string, unknown>)[key])
-      if (id.success) return { type: "people.person", id: id.data }
-    }
-  }
-  return { type: "people.person", id: null }
+/** Handler targets use validated fields; creation can resolve its id from the result. */
+const personTarget: AuditTargetOf = ({ data }) => {
+  const id = C.personIdSchema.safeParse(data && typeof data === "object" ? (data as { id?: unknown }).id : undefined)
+  return { type: "people.person", id: id.success ? id.data : null }
 }
 
 /**
@@ -73,28 +64,44 @@ export function createPeopleRouter(people: PeopleService) {
         .input(C.createPersonInputSchema)
         .output(C.createdSchema)
         .mutation(({ ctx, input }) => people.createPerson(ctx.viewer, input)),
-      update: write
-        .input(C.updatePersonInputSchema)
-        .mutation(({ ctx, input }) => people.updatePerson(ctx.viewer, input)),
-      setNote: write.input(C.setNoteInputSchema).mutation(({ ctx, input }) => people.setNote(ctx.viewer, input)),
+      update: write.input(C.updatePersonInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.id } })
+        return people.updatePerson(ctx.viewer, input)
+      }),
+      setNote: write.input(C.setNoteInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.id } })
+        return people.setNote(ctx.viewer, input)
+      }),
     }),
     admins: createTRPCRouter({
       list: read.output(C.adminSummarySchema.array()).query(({ ctx }) => people.listAdmins(ctx.viewer)),
-      assign: write.input(C.assignAdminInputSchema).mutation(({ ctx, input }) => people.assignAdmin(ctx.viewer, input)),
-      end: write.input(C.endAssignmentInputSchema).mutation(({ ctx, input }) => people.endAdmin(ctx.viewer, input)),
-      setCapoOfReference: write
-        .input(C.capoRefInputSchema)
-        .mutation(({ ctx, input }) => people.setCapoOfReference(ctx.viewer, input)),
+      assign: write.input(C.assignAdminInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.assignAdmin(ctx.viewer, input)
+      }),
+      end: write.input(C.endAssignmentInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.endAdmin(ctx.viewer, input)
+      }),
+      setCapoOfReference: write.input(C.capoRefInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.setCapoOfReference(ctx.viewer, input)
+      }),
     }),
     capos: createTRPCRouter({
       list: read.output(C.capoSummarySchema.array()).query(({ ctx }) => people.listCapos(ctx.viewer)),
-      appoint: appoint
-        .input(C.appointCapoInputSchema)
-        .mutation(({ ctx, input }) => people.appointCapo(ctx.viewer, input)),
-      setScope: appoint
-        .input(C.capoScopeInputSchema)
-        .mutation(({ ctx, input }) => people.setCapoScope(ctx.viewer, input)),
-      end: appoint.input(C.endAssignmentInputSchema).mutation(({ ctx, input }) => people.endCapo(ctx.viewer, input)),
+      appoint: appoint.input(C.appointCapoInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.appointCapo(ctx.viewer, input)
+      }),
+      setScope: appoint.input(C.capoScopeInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.setCapoScope(ctx.viewer, input)
+      }),
+      end: appoint.input(C.endAssignmentInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.endCapo(ctx.viewer, input)
+      }),
     }),
     teams: createTRPCRouter({
       list: user.output(C.teamSummarySchema.array()).query(({ ctx }) => people.listTeams(ctx.viewer)),
@@ -102,32 +109,43 @@ export function createPeopleRouter(people: PeopleService) {
         .input(C.teamCandidatesInputSchema)
         .output(C.teamCandidateSchema.array())
         .query(({ ctx, input }) => people.listTeamCandidates(ctx.viewer, input)),
-      addMember: user
-        .input(C.addTeamMemberInputSchema)
-        .mutation(({ ctx, input }) => people.addTeamMember(ctx.viewer, input)),
-      updateFields: user
-        .input(C.teamFieldsInputSchema)
-        .mutation(({ ctx, input }) => people.updateTeamFields(ctx.viewer, input)),
-      endMembership: user
-        .input(C.endTeamInputSchema)
-        .mutation(({ ctx, input }) => people.endTeamMembership(ctx.viewer, input)),
+      addMember: user.input(C.addTeamMemberInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.addTeamMember(ctx.viewer, input)
+      }),
+      updateFields: user.input(C.teamFieldsInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.updateTeamFields(ctx.viewer, input)
+      }),
+      endMembership: user.input(C.endTeamInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.endTeamMembership(ctx.viewer, input)
+      }),
     }),
     linking: createTRPCRouter({
       invites: read.output(C.inviteSchema.array()).query(({ ctx }) => people.listInvites(ctx.viewer)),
       recent: read.output(C.recentLinkSchema.array()).query(({ ctx }) => people.listRecentLinks(ctx.viewer)),
       // People writers, or the Lead of one of the person's teams: the service decides.
-      sendInvite: user.input(C.personRefInputSchema).mutation(({ ctx, input }) => people.sendInvite(ctx.viewer, input)),
-      revokeInvite: user
-        .input(C.personRefInputSchema)
-        .mutation(({ ctx, input }) => people.revokeInvite(ctx.viewer, input)),
+      sendInvite: user.input(C.personRefInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.sendInvite(ctx.viewer, input)
+      }),
+      revokeInvite: user.input(C.personRefInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.revokeInvite(ctx.viewer, input)
+      }),
       searchAccounts: link
         .input(C.searchAccountsInputSchema)
         .output(C.accountMatchSchema.array())
         .query(({ ctx, input }) => people.searchAccounts(ctx.viewer, input)),
-      link: link.input(C.linkAccountInputSchema).mutation(({ ctx, input }) => people.linkAccount(ctx.viewer, input)),
-      unlink: link
-        .input(C.unlinkAccountInputSchema)
-        .mutation(({ ctx, input }) => people.unlinkAccount(ctx.viewer, input)),
+      link: link.input(C.linkAccountInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.linkAccount(ctx.viewer, input)
+      }),
+      unlink: link.input(C.unlinkAccountInputSchema).mutation(({ ctx, input }) => {
+        ctx.audit.set({ target: { type: "people.person", id: input.personId } })
+        return people.unlinkAccount(ctx.viewer, input)
+      }),
     }),
     capo: createTRPCRouter({
       get: self.output(C.capoAreaSchema).query(({ ctx }) => people.getCapoArea(ctx.viewer)),
@@ -140,9 +158,10 @@ export function createPeopleRouter(people: PeopleService) {
         .input(C.inviteTokenInputSchema)
         .output(C.invitePreviewSchema)
         .query(({ ctx, input }) => people.previewInvite(ctx.viewer, input)),
-      acceptInvite: user
-        .input(C.inviteTokenInputSchema)
-        .mutation(({ ctx, input }) => people.acceptInvite(ctx.viewer, input)),
+      acceptInvite: user.input(C.inviteTokenInputSchema).mutation(async ({ ctx, input }) => {
+        const personId = await people.acceptInvite(ctx.viewer, input)
+        ctx.audit.set({ target: { type: "people.person", id: personId } })
+      }),
     }),
   })
 }
