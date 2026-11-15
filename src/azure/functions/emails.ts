@@ -10,6 +10,8 @@ export type EmailAttachment = { filename: string; content: Uint8Array; contentTy
 /** Where replies go instead of the sender's mailbox. */
 export type EmailOptions = {
   replyTo?: { name: string; address: string }
+  /** Another mailbox than AZURE_EMAIL_SENDER; the app needs Mail.Send on it too. */
+  from?: string
   throwOnError?: boolean
   messageId?: string
 }
@@ -22,12 +24,13 @@ export async function sendEmail(
   options: EmailOptions = {}
 ) {
   const { html, text, inlineImages } = await renderEmail(component)
-  const sender = encodeURIComponent(env.AZURE_EMAIL_SENDER)
+  const senderAddress = options.from ?? env.AZURE_EMAIL_SENDER
+  const sender = encodeURIComponent(senderAddress)
 
   // To send multipart emails (both HTML and plain text) with Microsoft Graph API,
   // we need to send raw MIME content.
   const mail = new MailComposer({
-    from: { name: "PoliNetwork APS", address: env.AZURE_EMAIL_SENDER },
+    from: { name: "PoliNetwork APS", address: senderAddress },
     to,
     replyTo: options.replyTo,
     subject,

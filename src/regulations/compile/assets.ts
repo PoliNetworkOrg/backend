@@ -54,22 +54,34 @@ export async function readDocument(
   repoRoot: string,
   layout: DocumentLayout
 ): Promise<{ sources: Record<string, string>; assets: AssetBundle }> {
-  const docRoot = join(repoRoot, layout.dir)
+  return readDocumentWith(
+    {
+      list: (dir) => listTree(join(repoRoot, dir)),
+      read: async (path) => new Uint8Array(await readFile(join(repoRoot, path))),
+    },
+    layout
+  )
+}
+
+/** The same split over any repository reader (a checkout, or GitHub). Paths are relative to the repository root. */
+export async function readDocumentWith(
+  repo: { list: (dir: string) => Promise<string[]>; read: (path: string) => Promise<Uint8Array> },
+  layout: DocumentLayout
+): Promise<{ sources: Record<string, string>; assets: AssetBundle }> {
   const outputs = new Set([...Object.values(layout.outputs), layout.entry.replace(/\.tex$/, ".pdf")])
   const sources: Record<string, string> = {}
   const files: Record<string, string> = {}
-  for (const path of await listTree(docRoot)) {
+  for (const path of await repo.list(layout.dir)) {
     if (layout.sources.some((glob) => matchesGlob(path, glob))) {
-      sources[path] = await readFile(join(docRoot, path), "utf8")
+      sources[path] = new TextDecoder().decode(await repo.read(`${layout.dir}/${path}`))
       continue
     }
     if (BUILD_ARTIFACT.test(path) || outputs.has(path) || path.endsWith(".tex") || path === "latexmkrc") continue
-    files[path] = (await readFile(join(docRoot, path))).toString("base64")
+    files[path] = Buffer.from(await repo.read(`${layout.dir}/${path}`)).toString("base64")
   }
-  for (const path of await listTree(join(repoRoot, layout.shared))) {
-    if (!path.endsWith(".cls") && !path.endsWith(".sty")) continue
-    if (path.includes("/")) continue
-    files[`shared/${path}`] = (await readFile(join(repoRoot, layout.shared, path))).toString("base64")
+  for (const path of await repo.list(layout.shared)) {
+    if ((!path.endsWith(".cls") && !path.endsWith(".sty")) || path.includes("/")) continue
+    files[`shared/${path}`] = Buffer.from(await repo.read(`${layout.shared}/${path}`)).toString("base64")
   }
   return { sources, assets: { version: 1, files } }
 }

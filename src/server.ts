@@ -12,15 +12,20 @@ import { agentRoutes } from "./esign/agent-routes"
 import { authenticateRequest, idp, startIdp, stopIdp } from "./idp"
 import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
+import { publicRoutes } from "./public"
 import { redis } from "./redis"
 import { appRouter } from "./routers"
 import { limitRequestBody, withRequestBodyLimit } from "./serve-options"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
+import { registerTelegram } from "./websocket/registry"
 
 export const WSS = new WebSocketServer({
   authenticate: (token) => authenticateSocket(token, idp?.verify ?? null, env.OAUTH_BOT_CLIENT_ID),
 })
+registerTelegram(WSS)
 const app = new Hono()
+// The only routes reachable from outside the cluster (`/public/...`, see src/public): checked before everything else.
+app.use("*", publicRoutes.guard)
 
 const server = Bun.serve({
   port: env.PORT,

@@ -129,7 +129,7 @@ const RRI: ProcedureConfig = {
       severity: "info",
       from: "notification",
       states: ["emanata"],
-      kinds: ["modifica", "rettifica"],
+      kinds: ["modifica"],
     },
   ],
 }
