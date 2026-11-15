@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -9,8 +9,10 @@ Object.assign(process.env, {
   LOG_LEVEL: "silent",
 })
 let parse: typeof import("@/regulations/config").parseRegulationsConfig
+let logger: typeof import("@/logger").logger
 beforeAll(async () => {
   parse = (await import("@/regulations/config")).parseRegulationsConfig
+  logger = (await import("@/logger")).logger
 })
 
 describe("regulations settings", () => {
@@ -35,6 +37,33 @@ describe("regulations settings", () => {
     expect(config.REGULATIONS_EMAIL_TO).toBe("soci@polinetwork.org")
     expect(config.REGULATIONS_GITHUB_BASE).toBe("main")
     expect(config.REGULATIONS_COLLAB_PUBLIC_URL).toBe("wss://collab.polinetwork.org")
+  })
+
+  it("read REGULATIONS_EMAIL_CC as a trimmed list of addresses, none when unset or empty", () => {
+    expect(
+      parse({ REGULATIONS_EMAIL_CC: " direttivo@polinetwork.org, probiviri@polinetwork.org ,," }).REGULATIONS_EMAIL_CC
+    ).toEqual(["direttivo@polinetwork.org", "probiviri@polinetwork.org"])
+    expect(parse({ REGULATIONS_EMAIL_CC: "probiviri@polinetwork.org" }).REGULATIONS_EMAIL_CC).toEqual([
+      "probiviri@polinetwork.org",
+    ])
+    expect(parse({ REGULATIONS_EMAIL_CC: "" }).REGULATIONS_EMAIL_CC).toEqual([])
+    expect(parse({ REGULATIONS_EMAIL_CC: " , " }).REGULATIONS_EMAIL_CC).toEqual([])
+    expect(parse({}).REGULATIONS_EMAIL_CC).toEqual([])
+  })
+
+  it("ignore a malformed REGULATIONS_EMAIL_CC entirely, logging its name but never its value", () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => undefined as never)
+    const config = parse({ REGULATIONS_EMAIL_CC: "direttivo@polinetwork.org;probiviri@polinetwork.org" })
+    expect(config.REGULATIONS_EMAIL_CC).toEqual([])
+    const call = error.mock.calls.find(
+      ([fields]) => (fields as { variable?: string }).variable === "REGULATIONS_EMAIL_CC"
+    )
+    expect(call).toBeDefined()
+    expect(JSON.stringify(call)).not.toContain("probiviri")
+    expect(parse({ REGULATIONS_EMAIL_CC: "direttivo@polinetwork.org, not-an-address" }).REGULATIONS_EMAIL_CC).toEqual(
+      []
+    )
+    error.mockRestore()
   })
 
   it("parse what polinetwork-cd sets", () => {

@@ -134,7 +134,7 @@ try {
     releaseDelayMs: 100,
     buildRelease: async () => [{ name: "sample.pdf", content: official }],
   })
-  const emails: { to: string; kind: string; replyTo?: string; attachments: number }[] = []
+  const emails: { to: string; cc?: string[]; kind: string; replyTo?: string; attachments: number }[] = []
   const posts: { files: string[]; text: string }[] = []
   let botUp = false
   const keys: string[] = []
@@ -146,6 +146,7 @@ try {
       attachmentNames.push(input.attachments.map((a) => a.filename))
       emails.push({
         to: input.to,
+        cc: input.cc,
         kind: "emanazione",
         replyTo: input.replyTo?.address,
         attachments: input.attachments.length,
@@ -172,6 +173,8 @@ try {
     config: {
       baseBranch: "main",
       emailTo: "soci@example.org",
+      // soci@ itself is dropped from CC.
+      emailCc: ["direttivo@example.org", "probiviri@example.org", "soci@example.org"],
       replyTo: "direttivo@example.org",
       direttivoEmail: "direttivo@example.org",
       telegram: { chatId: -100123, topicId: 7 },
@@ -259,8 +262,23 @@ try {
   )
 
   assert.deepEqual(emails, [
-    { to: "soci@example.org", kind: "emanazione", replyTo: "direttivo@example.org", attachments: 2 },
+    {
+      to: "soci@example.org",
+      cc: ["direttivo@example.org", "probiviri@example.org"],
+      kind: "emanazione",
+      replyTo: "direttivo@example.org",
+      attachments: 2,
+    },
   ])
+  // The record names everyone the notice went to, CC included; the step says so too.
+  const [emailRow] = (await db.select().from(notifications).where(eq(notifications.draftId, a.id))).filter(
+    (n) => n.channel === "email"
+  )
+  assert.deepEqual(emailRow.recipients, ["soci@example.org", "direttivo@example.org", "probiviri@example.org"])
+  assert.equal(
+    (await emanation.get(pres, a.id)).steps.find((s) => s.key === "email")?.detail,
+    "soci@example.org (CC: direttivo@example.org, probiviri@example.org)"
+  )
   botUp = true
   const resumed = await emanation.retry(pres, a.id)
   assert.equal(resumed.status, "done")
