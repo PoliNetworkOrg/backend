@@ -20,9 +20,10 @@ export type TransitionRule = {
    * - `freeze`: the text is frozen (sent to approval) and the LLM diff generated;
    * - `reopen`: back to editing;
    * - `approve`: the delibera is recorded;
+   * - `withdraw`: the approval is set aside (its delibera stays in history), and the text can be edited again;
    * - `emanate`: not a plain transition: "Emana e notifica" runs the emanation, which ends in this state.
    */
-  effect: "freeze" | "reopen" | "approve" | "emanate"
+  effect: "freeze" | "reopen" | "approve" | "withdraw" | "emanate"
 }
 
 export type DeadlineRule = {
@@ -80,6 +81,17 @@ const RRI: ProcedureConfig = {
       who: "manage",
       requires: ["delibera"],
       effect: "approve",
+    },
+    {
+      // A draft approved before another version was emanated can't be emanated any more (it would undo that
+      // version): it goes back to bozza, merges the version in force, and runs the procedure again.
+      from: "approvata",
+      to: "bozza",
+      label: "Riporta in bozza (annulla l'approvazione)",
+      kinds: ["modifica"],
+      who: "manage",
+      requires: [],
+      effect: "withdraw",
     },
     {
       from: "approvata",

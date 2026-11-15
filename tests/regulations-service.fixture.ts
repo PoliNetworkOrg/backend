@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { schema } from "@/db/schema"
-import { drafts, ydocs } from "@/db/schema/regulations"
+import { delibere, drafts, ydocs } from "@/db/schema/regulations"
 import type { CollabControl } from "@/regulations/collab/internal-client"
 import { createYjsPersistence } from "@/regulations/collab/persistence"
 import { decodeFiles, encodeFiles } from "@/regulations/collab/ydoc"
@@ -317,6 +317,47 @@ try {
   assert.equal((await service.getDraft(pres, a.id)).deadlines[0].overdue, true)
   assert.ok(broadcasts.includes("state"))
   checked.push("the approval records the delibera, and the 3-day emanation deadline turns overdue")
+
+  // Back from approvata to bozza (regulations:manage): the delibera stops counting but stays in history.
+  const withdrawRule = (await service.getDraft(pres, a.id)).can.transitions.find((t) => t.to === "bozza")
+  assert.deepEqual(withdrawRule, {
+    to: "bozza",
+    label: "Riporta in bozza (annulla l'approvazione)",
+    requires: [],
+    blockedBy: null,
+  })
+  assert.equal(
+    (await service.getDraft(dir, a.id)).can.transitions.some((t) => t.to === "bozza"),
+    false
+  )
+  await rejects(service.transition(dir, { draftId: a.id, to: "bozza" }), "FORBIDDEN")
+  const withdrawn = await service.transition(pres, { draftId: a.id, to: "bozza" })
+  assert.deepEqual(
+    [withdrawn.state, withdrawn.delibera, withdrawn.approvedAt, withdrawn.deadlines],
+    ["bozza", null, null, []]
+  )
+  assert.equal((await service.getDraft(editor, a.id)).can.edit, true)
+  const kept = await db.select().from(delibere).where(eq(delibere.draftId, a.id))
+  assert.equal(kept.length, 1)
+  assert.ok(kept[0].withdrawnAt)
+  assert.equal(kept[0].withdrawnBy?.id, "presidente")
+  assert.ok(
+    (await service.listSnapshots(dir, a.id)).some(
+      (x) => x.name === "Approvazione annullata (delibera del Consiglio Direttivo del 09/11/2026)"
+    )
+  )
+  // It runs the procedure again; the new delibera is the current one.
+  await service.transition(dir, { draftId: a.id, to: "in_approvazione" })
+  const reapproved = await service.transition(pres, {
+    draftId: a.id,
+    to: "approvata",
+    delibera: { body: "assemblea", date: "2026-11-12" },
+  })
+  assert.equal(reapproved.delibera?.kind === "approvazione" && reapproved.delibera.body, "assemblea")
+  assert.equal((await db.select().from(delibere).where(eq(delibere.draftId, a.id))).length, 2)
+  checked.push(
+    "an approved draft can go back to bozza: editable again, its delibera kept as history, then approved anew"
+  )
 
   // Deleghe and rettifica.
   await rejects(service.createDelega(dir, { userId: "delegato" }), "FORBIDDEN")

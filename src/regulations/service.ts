@@ -185,7 +185,10 @@ export function createRegulationsService(deps: RegulationsDeps) {
   async function versionSummary(row: typeof versions.$inferSelect): Promise<C.VersionSummary> {
     let delibera: C.Delibera | null = null
     if (row.draftId) {
-      const [d] = await db.select().from(delibere).where(eq(delibere.draftId, row.draftId))
+      const [d] = await db
+        .select()
+        .from(delibere)
+        .where(and(eq(delibere.draftId, row.draftId), isNull(delibere.withdrawnAt)))
       if (d) delibera = deliberaView(d)
     }
     return {
@@ -281,7 +284,10 @@ export function createRegulationsService(deps: RegulationsDeps) {
   async function draftView(viewer: Viewer, draft: DraftRow, role: C.DraftRole): Promise<C.Draft> {
     const document = await loadDocument(draft.documentKey)
     const config = procedureOf(document.procedure)
-    const [deliberaRow] = await db.select().from(delibere).where(eq(delibere.draftId, draft.id))
+    const [deliberaRow] = await db
+      .select()
+      .from(delibere)
+      .where(and(eq(delibere.draftId, draft.id), isNull(delibere.withdrawnAt)))
     const emanation = await emanationOf(draft.id)
     const diffStatus = await diffStatusOf(draft.id)
     const rectify = (await rectifyRight(viewer, draft.documentKey)) !== null
@@ -691,27 +697,16 @@ export function createRegulationsService(deps: RegulationsDeps) {
       if (input.delibera.date > new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Rome" }).format(at))
         fail("BAD_REQUEST", "La data della delibera non può essere nel futuro.")
       await db.transaction(async (tx) => {
-        await tx
-          .insert(delibere)
-          .values({
-            draftId: draft.id,
-            kind: "approvazione",
-            body: input.delibera?.body,
-            date: input.delibera?.date as string,
-            verbaleUrl: input.delibera?.verbaleUrl ?? null,
-            recordedBy: viewer.person,
-            recordedAt: at,
-          })
-          .onConflictDoUpdate({
-            target: delibere.draftId,
-            set: {
-              body: input.delibera?.body,
-              date: input.delibera?.date,
-              verbaleUrl: input.delibera?.verbaleUrl ?? null,
-              recordedBy: viewer.person,
-              recordedAt: at,
-            },
-          })
+        await tx.insert(delibere).values({
+          id: nanoid(16),
+          draftId: draft.id,
+          kind: "approvazione",
+          body: input.delibera?.body,
+          date: input.delibera?.date as string,
+          verbaleUrl: input.delibera?.verbaleUrl ?? null,
+          recordedBy: viewer.person,
+          recordedAt: at,
+        })
         await tx
           .update(drafts)
           .set({ state: rule.to, approvedAt: at, stateChangedAt: at, updatedAt: at })
@@ -721,6 +716,34 @@ export function createRegulationsService(deps: RegulationsDeps) {
         draftId: draft.id,
         kind: "state",
         name: stateLabel,
+        files: draft.frozenFiles ?? (await currentFiles(draft)),
+        by: viewer.person,
+      })
+    } else if (rule.effect === "withdraw") {
+      // The delibera stops counting but stays in history; the frozen text becomes editable again.
+      const [current] = await db
+        .select()
+        .from(delibere)
+        .where(and(eq(delibere.draftId, draft.id), isNull(delibere.withdrawnAt)))
+      await db.transaction(async (tx) => {
+        if (current)
+          await tx
+            .update(delibere)
+            .set({ withdrawnAt: at, withdrawnBy: viewer.person })
+            .where(eq(delibere.id, current.id))
+        await tx
+          .update(drafts)
+          .set({ state: rule.to, frozenFiles: null, approvedAt: null, stateChangedAt: at, updatedAt: at })
+          .where(eq(drafts.id, draft.id))
+      })
+      await deps.collab?.reopen(draft.id)
+      const approved = current
+        ? ` (delibera ${current.body === "assemblea" ? "dell'Assemblea" : "del Consiglio Direttivo"} del ${day(current.date).split("-").reverse().join("/")})`
+        : ""
+      await saveSnapshot(db, {
+        draftId: draft.id,
+        kind: "state",
+        name: `Approvazione annullata${approved}`,
         files: draft.frozenFiles ?? (await currentFiles(draft)),
         by: viewer.person,
       })
