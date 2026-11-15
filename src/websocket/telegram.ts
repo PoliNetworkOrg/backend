@@ -23,7 +23,8 @@ export type PostRegulation = {
     /** `YYYY-MM-DD`, 10 days from notification; null for a rettifica. */
     oppositionDeadline: string | null
     tag: string
-    releaseUrl: string
+    /** The dashboard's view of the changes, for people with dashboard access only; null when not configured. */
+    dashboardUrl: string | null
   }
   /**
    * Base64 in the JSON payload: binary attachments (Uint8Array) don't reach the bot through this server's engine

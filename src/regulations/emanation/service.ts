@@ -12,6 +12,7 @@ import {
   notifications,
   versions,
 } from "@/db/schema/regulations"
+import { attachedLine } from "@/emails/templates/regulation-emanated"
 import type { CollabControl } from "../collab/internal-client"
 import { saveSnapshot } from "../collab/persistence"
 import { sourceHash } from "../compile/protocol"
@@ -36,8 +37,8 @@ export type EmanationNotifier = {
       documentTitle: string
       deliberaLine: string
       tag: string
-      releaseUrl: string
-      webUrl: string | null
+      attached: { official: string | null; differences: string | null }
+      dashboardUrl: string | null
       categories: { title: string; summary: string }[]
       oppositionDeadline: string | null
     }
@@ -55,7 +56,7 @@ export type EmanationNotifier = {
       expiresOn: string | null
       note: string | null
       actor: string
-      rettifica?: { documentTitle: string; tag: string; releaseUrl: string } | null
+      rettifica?: { documentTitle: string; tag: string; dashboardUrl: string | null } | null
     }
   }): Promise<void>
   telegram(payload: {
@@ -71,7 +72,7 @@ export type EmanationNotifier = {
       deliberaDate: string
       oppositionDeadline: string | null
       tag: string
-      releaseUrl: string
+      dashboardUrl: string | null
     }
     files: { filename: string; contentType: string; base64: string }[]
   }): Promise<{ messageIds: number[] }>
@@ -453,15 +454,31 @@ export function createEmanationService(deps: {
     return { draft, document, version, official, differences, categories: diffRow?.categories ?? [] }
   }
 
+  /** The new official text first, then the differences: whichever exist. */
+  function noticeFiles(
+    officialName: string,
+    tag: string,
+    official: { content: Uint8Array } | undefined,
+    differences: { content: Uint8Array } | undefined
+  ) {
+    return [
+      ...(official ? [{ filename: officialName, content: official.content }] : []),
+      ...(differences ? [{ filename: `differenze-${tag}.pdf`, content: differences.content }] : []),
+    ]
+  }
+
   function oppositionDeadline(kind: C.DraftKind) {
     return kind === "modifica" ? todayInItaly(deadlineAt(todayInItaly(now()), 10)) : null
   }
 
   async function stepEmail(e: Row): Promise<Outcome> {
-    const { draft, document, version, differences, categories } = await filesForNotice(e)
+    const { draft, document, official, differences, categories } = await filesForNotice(e)
     const delibera = (await deliberaOf(draft.id)) as typeof delibere.$inferSelect
     const tag = e.tag as string
     const deadline = oppositionDeadline(draft.kind)
+    const dashboardUrl = config.webUrl(draft.id, document.key)
+    // Self-contained: the Soci can't open the private repository or the dashboard, so both PDFs are attached.
+    const attachments = noticeFiles(document.outputs.pdf, tag, official, differences)
     await sendOnce(
       db,
       {
@@ -482,14 +499,19 @@ export function createEmanationService(deps: {
             documentTitle: document.title,
             deliberaLine: deliberaLine(delibera),
             tag,
-            releaseUrl: version?.releaseUrl ?? "",
-            webUrl: config.webUrl(draft.id, document.key),
+            attached: {
+              official: official ? document.outputs.pdf : null,
+              differences: differences ? `differenze-${tag}.pdf` : null,
+            },
+            dashboardUrl,
             categories: categories.map(({ title, summary }) => ({ title, summary })),
             oppositionDeadline: deadline ? italianDate(deadline) : null,
           },
-          attachments: differences
-            ? [{ filename: `differenze-${tag}.pdf`, content: differences.content, contentType: "application/pdf" }]
-            : [],
+          attachments: attachments.map((f) => ({
+            filename: f.filename,
+            content: f.content,
+            contentType: "application/pdf",
+          })),
         }),
       now
     )
@@ -523,7 +545,7 @@ export function createEmanationService(deps: {
                 expiresOn: null,
                 note: null,
                 actor: delibera.recordedBy.name,
-                rettifica: { documentTitle: document.title, tag, releaseUrl: version?.releaseUrl ?? "" },
+                rettifica: { documentTitle: document.title, tag, dashboardUrl },
               },
             }),
           now
@@ -542,15 +564,25 @@ export function createEmanationService(deps: {
       })
       return "skip"
     }
-    const { draft, document, version, official, differences } = await filesForNotice(e)
+    const { draft, document, official, differences } = await filesForNotice(e)
     const delibera = (await deliberaOf(draft.id)) as typeof delibere.$inferSelect
     const tag = e.tag as string
     const deadline = oppositionDeadline(draft.kind)
+    const dashboardUrl = config.webUrl(draft.id, document.key)
+    const files = noticeFiles(document.outputs.pdf, tag, official, differences)
+    const attachedText = attachedLine({
+      official: official ? document.outputs.pdf : null,
+      differences: differences ? `differenze-${tag}.pdf` : null,
+    })
     const text = [
       `📙 <b>${telegramEscape(document.title)}</b>: nuova versione <code>${telegramEscape(tag)}</code>`,
       telegramEscape(`${deliberaLine(delibera)}.`),
       deadline ? telegramEscape(`Pareri contrari e ricorsi entro il ${italianDate(deadline)}.`) : null,
-      `<a href="${telegramEscape(version?.releaseUrl ?? "")}">Testo ufficiale</a> · in allegato anche le differenze (senza valore ufficiale).`,
+      // Only what is really attached; no repository link (it is private), the dashboard link as a labelled extra.
+      attachedText ? telegramEscape(attachedText) : null,
+      dashboardUrl
+        ? `Per chi ha accesso alla dashboard: <a href="${telegramEscape(dashboardUrl)}">le modifiche</a>.`
+        : null,
     ]
       .filter(Boolean)
       .join("\n")
@@ -578,28 +610,13 @@ export function createEmanationService(deps: {
             deliberaDate: dateOf(delibera),
             oppositionDeadline: deadline,
             tag,
-            releaseUrl: version?.releaseUrl ?? "",
+            dashboardUrl,
           },
-          files: [
-            ...(official
-              ? [
-                  {
-                    filename: document.outputs.pdf,
-                    contentType: "application/pdf",
-                    base64: Buffer.from(official.content).toString("base64"),
-                  },
-                ]
-              : []),
-            ...(differences
-              ? [
-                  {
-                    filename: `differenze-${tag}.pdf`,
-                    contentType: "application/pdf",
-                    base64: Buffer.from(differences.content).toString("base64"),
-                  },
-                ]
-              : []),
-          ],
+          files: files.map((f) => ({
+            filename: f.filename,
+            contentType: "application/pdf",
+            base64: Buffer.from(f.content).toString("base64"),
+          })),
         }))
       },
       now

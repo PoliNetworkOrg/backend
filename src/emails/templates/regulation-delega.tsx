@@ -26,7 +26,7 @@ export type RegulationDelegaProps = {
   note: string | null
   actor: string
   /** For `used`. */
-  rettifica?: { documentTitle: string; tag: string; releaseUrl: string } | null
+  rettifica?: { documentTitle: string; tag: string; dashboardUrl: string | null } | null
 }
 
 export function delegaSubject(p: RegulationDelegaProps) {
@@ -47,7 +47,8 @@ const RegulationDelegaEmail: EmailTemplate<RegulationDelegaProps> = (p) => (
             {p.change === "used" && p.rettifica ? (
               <Text>
                 {p.grantee} ha emanato una rettifica di «{p.rettifica.documentTitle}» ({p.rettifica.tag}) su delega del
-                Segretario: {p.rettifica.releaseUrl}. La responsabilità resta del Segretario delegante.
+                Segretario. La responsabilità resta del Segretario delegante.
+                {p.rettifica.dashboardUrl ? ` Le modifiche sono nella dashboard: ${p.rettifica.dashboardUrl}` : ""}
               </Text>
             ) : (
               <Text>

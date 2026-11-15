@@ -138,8 +138,12 @@ try {
   const posts: { files: string[]; text: string }[] = []
   let botUp = false
   const keys: string[] = []
+  const emailProps: Parameters<EmanationNotifier["email"]>[0]["props"][] = []
+  const attachmentNames: string[][] = []
   const notifier: EmanationNotifier = {
     email: async (input) => {
+      emailProps.push(input.props)
+      attachmentNames.push(input.attachments.map((a) => a.filename))
       emails.push({
         to: input.to,
         kind: "emanazione",
@@ -255,7 +259,7 @@ try {
   )
 
   assert.deepEqual(emails, [
-    { to: "soci@example.org", kind: "emanazione", replyTo: "direttivo@example.org", attachments: 1 },
+    { to: "soci@example.org", kind: "emanazione", replyTo: "direttivo@example.org", attachments: 2 },
   ])
   botUp = true
   const resumed = await emanation.retry(pres, a.id)
@@ -270,6 +274,20 @@ try {
   )
   assert.equal(keys[0], telegramRow.id)
   assert.ok(posts[0].text.includes("Pareri contrari e ricorsi entro il 20/11/2026"))
+  // Self-contained for the Soci: both PDFs attached and named, no repository link, the dashboard only as an extra.
+  assert.deepEqual(attachmentNames[0], ["sample.pdf", "differenze-sample-v2026.11.09.pdf"])
+  assert.deepEqual(emailProps[0].attached, { official: "sample.pdf", differences: "differenze-sample-v2026.11.09.pdf" })
+  assert.equal(emailProps[0].dashboardUrl, `https://admin.example.org/regolamenti/${a.id}`)
+  assert.ok(emailProps[0].categories.length > 0)
+  assert.ok(!JSON.stringify(emailProps[0]).includes("github.com"))
+  assert.ok(!posts[0].text.includes("github.com"))
+  assert.ok(!posts[0].text.includes('href=""'))
+  assert.ok(posts[0].text.includes("In allegato il testo ufficiale (sample.pdf) e il documento delle differenze"))
+  assert.ok(
+    posts[0].text.includes(
+      `Per chi ha accesso alla dashboard: <a href="https://admin.example.org/regolamenti/${a.id}">`
+    )
+  )
   // Resuming didn't send the email again, and the records are the proof.
   assert.equal(emails.length, 1)
   const records = await db.select().from(notifications).where(eq(notifications.draftId, a.id))

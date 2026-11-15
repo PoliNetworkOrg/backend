@@ -48,7 +48,7 @@ try {
       deliberaDate: "2026-11-20",
       oppositionDeadline: "2026-11-30",
       tag: "rri-v2026.11.20",
-      releaseUrl: "https://example.org",
+      dashboardUrl: null,
     },
     // About the size of the official PDF plus the differences.
     files: [
