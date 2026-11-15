@@ -274,6 +274,13 @@
       "when": 1794708800126,
       "tag": "0038_regulations",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794708980775,
+      "tag": "0039_webhook_deliveries",
+      "breakpoints": true
     }
   ]
 }

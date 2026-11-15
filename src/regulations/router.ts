@@ -5,6 +5,7 @@ import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
 import type { DiffService } from "./diff/service"
 import type { Directory } from "./directory"
+import type { EmanationService } from "./emanation/service"
 import { fail, type RegulationsService, type Viewer } from "./service"
 
 /**
@@ -15,9 +16,10 @@ import { fail, type RegulationsService, type Viewer } from "./service"
 export function createRegulationsRouter(
   service: RegulationsService,
   directory: Directory,
-  extras: { diff?: DiffService | null } = {}
+  extras: { diff?: DiffService | null; emanation?: EmanationService | null } = {}
 ) {
   const diff = () => extras.diff ?? fail("PRECONDITION_FAILED", "Le differenze non sono configurate.")
+  const emanation = () => extras.emanation ?? fail("PRECONDITION_FAILED", "L'emanazione non è configurata.")
   const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
     if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
     const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
@@ -181,6 +183,20 @@ export function createRegulationsRouter(
         .input(draftRef)
         .output(C.binaryFileSchema)
         .query(({ ctx, input }) => diff().pdf(ctx.viewer, input.draftId)),
+    }),
+    emanation: createTRPCRouter({
+      get: user
+        .input(draftRef)
+        .output(C.emanationSchema)
+        .query(({ ctx, input }) => emanation().get(ctx.viewer, input.draftId)),
+      start: user
+        .input(draftRef)
+        .output(C.emanationSchema)
+        .mutation(({ ctx, input }) => emanation().start(ctx.viewer, input.draftId)),
+      retry: user
+        .input(draftRef)
+        .output(C.emanationSchema)
+        .mutation(({ ctx, input }) => emanation().retry(ctx.viewer, input.draftId)),
     }),
     deleghe: createTRPCRouter({
       list: user.output(C.delegaSchema.array()).query(({ ctx }) => service.listDeleghe(ctx.viewer)),

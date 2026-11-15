@@ -4,6 +4,7 @@ import { MESSAGES_RETENTION_DAYS } from "./constants"
 import { DB, SCHEMA } from "./db"
 import { env } from "./env"
 import { logger } from "./logger"
+import { regulationsConfig } from "./regulations/config"
 import { endedMeasures } from "./utils/audit-log"
 
 export function cron() {
@@ -21,6 +22,24 @@ export function cron() {
       await esign.sweep()
     } catch (err) {
       logger.error(err, "[CRON] esign sweep")
+    }
+  })
+
+  // Regulations: the GitHub webhook (/public/webhooks/github) drives emanations; this reconciles missed deliveries.
+  new Cron("* * * * * *", { protect: true, interval: regulationsConfig.REGULATIONS_RECONCILE_SECONDS }, async () => {
+    try {
+      const { regulationsEmanation } = await import("./regulations")
+      await regulationsEmanation?.tick()
+    } catch (err) {
+      logger.error(err, "[CRON] regulations emanation")
+    }
+  })
+  new Cron("0 41 4 * * *", async () => {
+    try {
+      const { pruneWebhookDeliveries } = await import("./public/github-webhook")
+      await pruneWebhookDeliveries(DB)
+    } catch (err) {
+      logger.error(err, "[CRON] webhook deliveries")
     }
   })
 
