@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm"
 import { DB } from "@/db"
 import { blobs, versions } from "@/db/schema/regulations"
+import { env } from "@/env"
 import { idp } from "@/idp"
 import { logger } from "@/logger"
 import { createCollabControl } from "./collab/internal-client"
@@ -8,9 +9,11 @@ import { createWorkerClient } from "./compile/client"
 import { type AssetBundle, sourceHash } from "./compile/protocol"
 import { regulationsConfig as config } from "./config"
 import { sha256 } from "./db"
+import { createDiffService } from "./diff/service"
+import { anthropicSummarizer, type DiffSummarizer, fakeSummarizer } from "./diff/summarizer"
 import { createDirectory } from "./directory"
 import { localLegalSource } from "./legal-source"
-import { createRegulationsService } from "./service"
+import { createRegulationsService, type RegulationsHooks } from "./service"
 
 export const regulationsDirectory = createDirectory(idp?.directory ?? null)
 
@@ -32,6 +35,25 @@ const collab =
     : null
 if (!collab) logger.warn("[REGULATIONS] The collab service is not configured: drafts can't be edited live")
 
+function summarizer(): DiffSummarizer | null {
+  const provider = config.REGULATIONS_LLM_PROVIDER ?? (env.NODE_ENV === "production" ? null : "fake")
+  if (provider === "fake") return fakeSummarizer()
+  if (provider === "anthropic") {
+    const apiKey = config.REGULATIONS_LLM_API_KEY
+    if (!apiKey || !config.REGULATIONS_LLM_MODEL) {
+      logger.error(
+        "[REGULATIONS] REGULATIONS_LLM_PROVIDER=anthropic needs REGULATIONS_LLM_API_KEY and REGULATIONS_LLM_MODEL"
+      )
+      return null
+    }
+    return anthropicSummarizer({ apiKey, model: config.REGULATIONS_LLM_MODEL, effort: config.REGULATIONS_LLM_EFFORT })
+  }
+  logger.warn("[REGULATIONS] No LLM provider: differences are generated without categories")
+  return null
+}
+
+const hooks: RegulationsHooks = {}
+
 export const regulations = createRegulationsService({
   db: DB,
   directory: regulationsDirectory,
@@ -50,4 +72,19 @@ export const regulations = createRegulationsService({
         return content
       }
     : undefined,
+  hooks,
 })
+
+export const regulationsDiff = createDiffService({
+  db: DB,
+  regulations,
+  summarizer: summarizer(),
+  onError: (err, draftId) => logger.error({ err, draftId }, "[REGULATIONS] diff generation failed"),
+})
+
+hooks.sentToApproval = async (draftId, by) => {
+  // The transition already happened: a failure here shows as a failed diff, which can be regenerated.
+  await regulationsDiff
+    .generate(draftId, by)
+    .catch((err) => logger.error({ err, draftId }, "[REGULATIONS] diff not started"))
+}
