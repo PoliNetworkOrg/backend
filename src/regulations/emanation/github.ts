@@ -49,6 +49,37 @@ export type LegalGitHub = {
 
 const status = (e: unknown) => (e as { status?: number }).status
 
+/**
+ * Don't let Octokit parse the body: it decodes any response whose content type ends in `charset=utf-8` as text, and
+ * GitHub sends raw file contents as `application/vnd.github.raw+json; charset=utf-8` even for fonts and images, so a
+ * binary file came back as a lossy UTF-8 string. With this, `data` is the response's body stream (null when empty).
+ */
+const RAW_BODY = { parseSuccessResponseBody: false } as const
+
+/** The exact bytes of a response requested with RAW_BODY. */
+async function bodyBytes(data: unknown): Promise<Uint8Array> {
+  if (data == null) return new Uint8Array()
+  return new Uint8Array(await new Response(data as ReadableStream<Uint8Array>).arrayBuffer())
+}
+
+/** A file's exact bytes at `ref`, or null when it doesn't exist. Raw contents work up to 100 MB. */
+export async function readRepoFile(
+  o: Octokit,
+  file: { owner: string; repo: string; path: string; ref: string }
+): Promise<Uint8Array | null> {
+  try {
+    const { data } = await o.request("GET /repos/{owner}/{repo}/contents/{path}", {
+      ...file,
+      headers: { accept: "application/vnd.github.raw+json" },
+      request: RAW_BODY,
+    })
+    return await bodyBytes(data)
+  } catch (e) {
+    if (status(e) === 404) return null
+    throw e
+  }
+}
+
 export function githubAppClient(options: {
   appId: string
   privateKey: string
@@ -274,30 +305,16 @@ export function githubAppClient(options: {
         repo,
         asset_id: assetId,
         headers: { accept: "application/octet-stream" },
+        request: RAW_BODY,
       })
-      return new Uint8Array(data as unknown as ArrayBuffer)
+      return bodyBytes(data)
     },
     async readText(path, ref) {
       const bytes = await this.readBytes(path, ref)
       return bytes ? new TextDecoder().decode(bytes) : null
     },
     async readBytes(path, ref) {
-      const o = await gh()
-      try {
-        const { data } = await o.request("GET /repos/{owner}/{repo}/contents/{path}", {
-          owner,
-          repo,
-          path,
-          ref,
-          headers: { accept: "application/vnd.github.raw+json" },
-        })
-        return typeof data === "string"
-          ? new TextEncoder().encode(data)
-          : new Uint8Array(data as unknown as ArrayBuffer)
-      } catch (e) {
-        if (status(e) === 404) return null
-        throw e
-      }
+      return readRepoFile(await gh(), { owner, repo, path, ref })
     },
     async listFiles(dir, ref) {
       const o = await gh()

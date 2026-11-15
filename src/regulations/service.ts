@@ -20,7 +20,7 @@ import type { CollabControl } from "./collab/internal-client"
 import { createYjsPersistence, saveSnapshot } from "./collab/persistence"
 import { issueTicket } from "./collab/tickets"
 import { decodeFiles, encodeFiles } from "./collab/ydoc"
-import { bundleHash, sourceHash } from "./compile/protocol"
+import { type AssetBundle, bundleHash, sourceHash } from "./compile/protocol"
 import { readCompilePdf, readCompileStatus } from "./compile/store-pg"
 import type * as C from "./contract"
 import { REGULATION_PERMISSIONS as P } from "./contract"
@@ -522,15 +522,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
         .values({ key: doc.key, ...values })
         .onConflictDoUpdate({ target: documents.key, set: values })
       const { sources, assets } = await deps.legal.readDocument(doc, manifest.shared)
-      const assetsHash = await bundleHash(assets)
-      await db
-        .insert(blobs)
-        .values({
-          hash: assetsHash,
-          contentType: "application/json",
-          content: new TextEncoder().encode(JSON.stringify(assets)),
-        })
-        .onConflictDoNothing()
+      const assetsHash = await storeAssets(assets)
       const latest = await latestVersion(doc.key)
       if (!latest) {
         await db.insert(versions).values({
@@ -547,10 +539,53 @@ export function createRegulationsService(deps: RegulationsDeps) {
         imported.push(doc.key)
       } else if (latest.assetsBlob !== assetsHash) {
         // Fonts or the shared class changed in the repository: compile with the new ones.
-        await db.update(versions).set({ assetsBlob: assetsHash }).where(eq(versions.id, latest.id))
+        await switchAssets(latest, assetsHash)
       }
     }
     return { documents: manifest.documents.filter((d) => d.procedure).map((d) => d.key), imported }
+  }
+
+  /**
+   * Points a version at other assets. An imported version's PDF is only ever compiled here from its sources and
+   * assets, so it's dropped and compiled again on the next download; an emanated version keeps its release's PDF.
+   */
+  async function switchAssets(version: typeof versions.$inferSelect, assetsHash: string) {
+    await db
+      .update(versions)
+      .set(version.tag === null ? { assetsBlob: assetsHash, pdfBlob: null } : { assetsBlob: assetsHash })
+      .where(eq(versions.id, version.id))
+  }
+
+  async function storeAssets(assets: AssetBundle): Promise<string> {
+    const hash = await bundleHash(assets)
+    await db
+      .insert(blobs)
+      .values({ hash, contentType: "application/json", content: new TextEncoder().encode(JSON.stringify(assets)) })
+      .onConflictDoNothing()
+    return hash
+  }
+
+  /**
+   * What `syncDocuments` does to the assets, without importing anything: for each document already imported, read the
+   * fonts and shared files at the repository's head and point its latest version at them when they differ. Run at
+   * boot, so a version whose stored assets are wrong (fonts once read as UTF-8 text) compiles again after a deploy.
+   */
+  async function refreshAssets(): Promise<{ updated: string[] }> {
+    if (!deps.legal) return { updated: [] }
+    const manifest = await deps.legal.manifest()
+    await deps.legal.head()
+    const updated: string[] = []
+    for (const doc of manifest.documents) {
+      if (!doc.procedure) continue
+      const latest = await latestVersion(doc.key)
+      if (!latest) continue
+      const { assets } = await deps.legal.readDocument(doc, manifest.shared)
+      const assetsHash = await storeAssets(assets)
+      if (latest.assetsBlob === assetsHash) continue
+      await switchAssets(latest, assetsHash)
+      updated.push(doc.key)
+    }
+    return { updated }
   }
 
   async function versionPdf(viewer: Viewer, versionId: string): Promise<C.BinaryFile> {
@@ -1212,6 +1247,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
       return documentView(await loadDocument(key))
     },
     syncDocuments,
+    refreshAssets,
     listVersions: async (viewer: Viewer, documentKey: string) => {
       requirePermission(viewer, P.read, "Serve il permesso regulations:read.")
       const rows = await db

@@ -144,6 +144,20 @@ export const regulations = createRegulationsService({
   hooks,
 })
 
+// At boot, point each document's latest version at the repository's current fonts and shared files when they differ:
+// a version imported while fonts were read as UTF-8 text compiles again without anyone pressing "sync". In the
+// background, so it never delays or stops the boot.
+if (env.NODE_ENV !== "test")
+  setTimeout(() => {
+    regulations
+      .refreshAssets()
+      .then(({ updated }) => {
+        if (updated.length)
+          logger.warn({ documents: updated }, "[REGULATIONS] assets refreshed from the legal repository")
+      })
+      .catch((err) => logger.error({ err }, "[REGULATIONS] could not refresh the assets from the legal repository"))
+  }, 5_000)
+
 export const regulationsDiff = createDiffService({
   db: DB,
   regulations,

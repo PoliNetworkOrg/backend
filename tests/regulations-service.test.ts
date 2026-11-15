@@ -15,7 +15,7 @@ it.skipIf(!process.env.SEED_TEST_DB_PORT)(
         .split("\n")
         .findLast((line) => line.startsWith('{"checked"')) ?? "{}"
     )
-    expect(result.checked).toHaveLength(12)
+    expect(result.checked).toHaveLength(13)
   },
   95_000
 )
