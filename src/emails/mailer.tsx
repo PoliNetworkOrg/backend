@@ -46,6 +46,7 @@ async function devSendMail(
   const res = await transporter.sendMail({
     from: options.from,
     to,
+    cc: options.cc?.length ? options.cc : undefined,
     replyTo: options.replyTo,
     subject,
     html,
@@ -189,7 +190,7 @@ async function sendRegulationsMail(
 }
 
 export async function sendRegulationEmanatedEmail(
-  input: { to: string; from?: string; replyTo?: { name: string; address: string }; messageId: string },
+  input: { to: string; cc?: string[]; from?: string; replyTo?: { name: string; address: string }; messageId: string },
   props: RegulationEmanatedProps,
   attachments: EmailAttachment[]
 ) {
@@ -198,7 +199,7 @@ export async function sendRegulationEmanatedEmail(
     makeSubject(`${props.documentTitle}: nuova versione ${props.tag}`),
     <RegulationEmanatedEmail {...props} />,
     attachments,
-    { from: input.from, replyTo: input.replyTo, messageId: input.messageId }
+    { from: input.from, cc: input.cc, replyTo: input.replyTo, messageId: input.messageId }
   )
 }
 

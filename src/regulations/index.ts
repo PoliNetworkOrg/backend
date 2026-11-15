@@ -168,6 +168,7 @@ export const regulationsEmanation: EmanationService | null = createEmanationServ
   config: {
     baseBranch: config.REGULATIONS_GITHUB_BASE,
     emailTo: config.REGULATIONS_EMAIL_TO,
+    emailCc: config.REGULATIONS_EMAIL_CC,
     emailFrom: config.REGULATIONS_EMAIL_SENDER,
     replyTo: config.REGULATIONS_EMAIL_REPLY_TO,
     direttivoEmail: config.REGULATIONS_DIRETTIVO_EMAIL,

@@ -12,6 +12,8 @@ export type EmailOptions = {
   replyTo?: { name: string; address: string }
   /** Another mailbox than AZURE_EMAIL_SENDER; the app needs Mail.Send on it too. */
   from?: string
+  /** Carbon copy, as the `Cc` header of the MIME message (Graph takes the recipients from it). */
+  cc?: string[]
   throwOnError?: boolean
   messageId?: string
 }
@@ -32,6 +34,7 @@ export async function sendEmail(
   const mail = new MailComposer({
     from: { name: "PoliNetwork APS", address: senderAddress },
     to,
+    cc: options.cc?.length ? options.cc : undefined,
     replyTo: options.replyTo,
     subject,
     text,
@@ -52,7 +55,7 @@ export async function sendEmail(
   try {
     const client = getAzureClient()
     await client.api(`/users/${sender}/sendMail`).header("Content-Type", "text/plain").post(base64Encoded)
-    logger.info({ subject, to }, "[Azure Graph API] Email sent")
+    logger.info({ subject, to, cc: options.cc }, "[Azure Graph API] Email sent")
 
     return true
   } catch (error) {

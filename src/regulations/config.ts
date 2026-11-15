@@ -55,6 +55,22 @@ const fields = {
   REGULATIONS_EMAIL_SENDER: z.email().optional(),
   REGULATIONS_EMAIL_TO: z.email().default("soci@polinetwork.org"),
   REGULATIONS_EMAIL_REPLY_TO: z.email().default("direttivo@polinetwork.org"),
+  /**
+   * Also in CC on the Soci's notice of an emanation (the RRI requires notifying the Collegio dei Probiviri too), e.g.
+   * `direttivo@polinetwork.org,probiviri@polinetwork.org`. Comma-separated; none when unset.
+   */
+  REGULATIONS_EMAIL_CC: z
+    .string()
+    .optional()
+    .transform((v) => [
+      ...new Set(
+        (v ?? "")
+          .split(",")
+          .map((a) => a.trim())
+          .filter(Boolean)
+      ),
+    ])
+    .pipe(z.array(z.email())),
   REGULATIONS_DIRETTIVO_EMAIL: z.email().default("direttivo@polinetwork.org"),
   REGULATIONS_TELEGRAM_CHAT_ID: z.coerce.number().int().optional(),
   REGULATIONS_TELEGRAM_TOPIC_ID: z.coerce.number().int().optional(),

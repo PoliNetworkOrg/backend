@@ -30,6 +30,8 @@ import { sendOnce, telegramEscape } from "./notify"
 export type EmanationNotifier = {
   email(input: {
     to: string
+    /** Empty for none. */
+    cc: string[]
     from?: string
     replyTo?: { name: string; address: string }
     messageId: string
@@ -82,6 +84,8 @@ export type EmanationConfig = {
   baseBranch: string
   /** soci@polinetwork.org */
   emailTo: string
+  /** In CC on the Soci's notice (direttivo@, probiviri@); not on the deleghe emails. */
+  emailCc?: string[]
   /** The sender mailbox, when not the default one (still to be decided). */
   emailFrom?: string
   /** direttivo@polinetwork.org */
@@ -479,19 +483,22 @@ export function createEmanationService(deps: {
     const dashboardUrl = config.webUrl(draft.id, document.key)
     // Self-contained: the Soci can't open the private repository or the dashboard, so both PDFs are attached.
     const attachments = noticeFiles(document.outputs.pdf, tag, official, differences)
+    const cc = (config.emailCc ?? []).filter((a) => a !== config.emailTo)
     await sendOnce(
       db,
       {
         key: `emanation:${draft.id}:email`,
         channel: "email",
         kind: "emanazione",
-        recipients: [config.emailTo],
+        // Everyone it went to, CC included, so the send stays provable.
+        recipients: [config.emailTo, ...cc],
         subject: `${document.title}: nuova versione ${tag}`,
         draftId: draft.id,
       },
       () =>
         deps.notifier.email({
           to: config.emailTo,
+          cc,
           from: config.emailFrom,
           replyTo: { name: "Consiglio Direttivo di PoliNetwork", address: config.replyTo },
           messageId: `<regolamenti-${draft.id}@polinetwork.org>`,
@@ -551,7 +558,11 @@ export function createEmanationService(deps: {
           now
         )
     }
-    await setStep(e.draftId, "email", { state: "done", at: now().toISOString(), detail: config.emailTo })
+    await setStep(e.draftId, "email", {
+      state: "done",
+      at: now().toISOString(),
+      detail: cc.length ? `${config.emailTo} (CC: ${cc.join(", ")})` : config.emailTo,
+    })
     return "done"
   }
 
