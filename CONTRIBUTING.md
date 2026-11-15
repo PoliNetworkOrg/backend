@@ -81,10 +81,31 @@ OAUTH_BACKEND_CLIENT_ID=
 OAUTH_BACKEND_PRIVATE_JWK=
 ```
 
-Restart `bun dev`. The backend now verifies tokens issued by your local Auth and pulls its access snapshot every
-30 seconds, so a permission given in Auth applies here within that time (at once if Auth has `OAUTH_BACKEND_EVENTS_URL`
-set). To call it with a real user, run the [admin dashboard](https://github.com/PoliNetworkOrg/admin/blob/main/CONTRIBUTING.md)
-and sign in there.
+Stop `bun dev` and start it again: its automatic restart does not read `.env` again. The backend now verifies tokens
+issued by your local Auth and pulls its access snapshot every 30 seconds, so a permission given in Auth applies here
+within that time (at once if Auth has `OAUTH_BACKEND_EVENTS_URL` set). To call it with a real user, run the
+[admin dashboard](https://github.com/PoliNetworkOrg/admin/blob/main/CONTRIBUTING.md) and sign in there.
+
+### Or use the stand-in for Auth
+
+When your work doesn't touch Auth itself, `scripts/regulations/dev-idp.ts` can take its place on
+http://localhost:4300. It serves the keys and the access snapshot for a fixed set of accounts and gives out tokens for
+them, so you register nothing:
+
+```sh
+bun scripts/regulations/dev-idp.ts serve        # keep it running
+bun scripts/regulations/dev-idp.ts env >> .env  # once: the IdP variables pointing at it
+bun run regulations:token dev-admin             # a bearer token for dev-admin, valid 2 hours
+```
+
+Restart `bun dev` as above, then send the token as `Authorization: Bearer <token>`, or give it to the dashboard's agent
+mode ([admin guide](https://github.com/PoliNetworkOrg/admin/blob/main/CONTRIBUTING.md#agent-mode-with-backend-data)).
+
+The accounts are in `scripts/regulations/dev-accounts.json`, and [`docs/regulations-dev.md`](docs/regulations-dev.md)
+lists their permissions. They were made for the regulations editor, so they hold few others: `dev-admin` has only
+`admin:access`, `people:read` and `tg:users:read`. For other permissions, point `DEV_IDP_ACCOUNTS` at your own file in
+the same format when you start the stand-in. It checks no client credentials and refuses to run with
+`NODE_ENV=production`: never point a deployed backend at it.
 
 ## Everyday commands
 
