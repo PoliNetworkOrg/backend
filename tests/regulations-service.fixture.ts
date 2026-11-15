@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { schema } from "@/db/schema"
-import { delibere, drafts, ydocs } from "@/db/schema/regulations"
+import { blobs, delibere, drafts, versions, ydocs } from "@/db/schema/regulations"
 import type { CollabControl } from "@/regulations/collab/internal-client"
 import { createYjsPersistence } from "@/regulations/collab/persistence"
 import { decodeFiles, encodeFiles } from "@/regulations/collab/ydoc"
@@ -157,6 +157,41 @@ try {
   assert.equal(doc.procedure.states.length, 4)
   await rejects(service.listDocuments(editor), "FORBIDDEN")
   checked.push("documents and the first version are imported from legal.json, once")
+
+  // A version whose stored assets are wrong (fonts once read from GitHub as UTF-8 text) heals at the next boot.
+  {
+    const [imported] = await db.select().from(versions).where(eq(versions.documentKey, "sample"))
+    const good = imported.assetsBlob as string
+    const junk = (hash: string, type: string) =>
+      db.insert(blobs).values({ hash, contentType: type, content: new Uint8Array([0xef, 0xbf, 0xbd]) })
+    await junk("corrupted-assets", "application/json")
+    await junk("stale-pdf", "application/pdf")
+    const corrupt = () =>
+      db
+        .update(versions)
+        .set({ assetsBlob: "corrupted-assets", pdfBlob: "stale-pdf" })
+        .where(eq(versions.id, imported.id))
+    const row = async () => (await db.select().from(versions).where(eq(versions.id, imported.id)))[0]
+    await corrupt()
+    assert.deepEqual(await service.refreshAssets(), { updated: ["sample"] })
+    // The imported version compiles again from the repository's assets; its PDF was compiled here, so it's dropped.
+    assert.equal((await row()).assetsBlob, good)
+    assert.equal((await row()).pdfBlob, null)
+    assert.deepEqual(await service.refreshAssets(), { updated: [] })
+    // An emanated version keeps its release's official PDF.
+    await db.update(versions).set({ tag: "sample-v2026.01.01" }).where(eq(versions.id, imported.id))
+    await corrupt()
+    assert.deepEqual(await service.refreshAssets(), { updated: ["sample"] })
+    assert.equal((await row()).assetsBlob, good)
+    assert.equal((await row()).pdfBlob, "stale-pdf")
+    await db.update(versions).set({ tag: null, pdfBlob: null }).where(eq(versions.id, imported.id))
+    // documents.sync repairs the same way.
+    await corrupt()
+    await service.syncDocuments(seg)
+    assert.equal((await row()).assetsBlob, good)
+    assert.equal((await row()).pdfBlob, null)
+  }
+  checked.push("stored assets that differ from the repository's are replaced at boot and on sync, dropping a stale PDF")
 
   const versionId = doc.latestVersion?.id as string
   await rejects(
