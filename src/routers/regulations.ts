@@ -1,4 +1,4 @@
-import { regulations, regulationsDirectory } from "@/regulations"
+import { regulations, regulationsDiff, regulationsDirectory } from "@/regulations"
 import { createRegulationsRouter } from "@/regulations/router"
 
-export const regulationsRouter = createRegulationsRouter(regulations, regulationsDirectory)
+export const regulationsRouter = createRegulationsRouter(regulations, regulationsDirectory, { diff: regulationsDiff })

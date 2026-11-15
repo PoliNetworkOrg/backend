@@ -21,6 +21,15 @@ const fields = {
   REGULATIONS_WORKER_SECRET: z.string().min(1).optional(),
   /** A local clone of PoliNetworkOrg/legal to import documents from (development); otherwise the GitHub App. */
   REGULATIONS_LEGAL_DIR: z.string().min(1).optional(),
+
+  /**
+   * The LLM that groups the differences by theme: `anthropic`, or `fake` (deterministic; the default outside
+   * production). The model is configuration, never hardcoded.
+   */
+  REGULATIONS_LLM_PROVIDER: z.enum(["anthropic", "fake"]).optional(),
+  REGULATIONS_LLM_MODEL: z.string().min(1).optional(),
+  REGULATIONS_LLM_API_KEY: z.string().min(1).optional(),
+  REGULATIONS_LLM_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
 }
 
 type Config = { [K in keyof typeof fields]: z.output<(typeof fields)[K]> }
