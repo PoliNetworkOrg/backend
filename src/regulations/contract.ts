@@ -643,3 +643,14 @@ export const createDelegaInputSchema = z.object({
   note: z.string().trim().max(500).nullish(),
 })
 export const delegaRefInputSchema = z.object({ delegaId: z.string().min(1) })
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Input types (parsed)
+// ---------------------------------------------------------------------------------------------------------------------
+
+export type CreateDraftInput = z.output<typeof createDraftInputSchema>
+export type TransitionInput = z.output<typeof transitionInputSchema>
+export type CreateCommentInput = z.output<typeof createCommentInputSchema>
+export type MergeSource = z.output<typeof mergeSourceSchema>
+export type ApplyMergeInput = z.output<typeof applyMergeInputSchema>
+export type CreateDelegaInput = z.output<typeof createDelegaInputSchema>
