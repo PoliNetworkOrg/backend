@@ -61,12 +61,12 @@ const SecretSantaConfirmationEmail: EmailTemplate<SecretSantaConfirmationMailDat
               Secret Santa.
             </Text>
             <Text className="my-4 text-center text-[16px] leading-[26px]" style={santaParagraph}>
-              Gli abbinamenti sono stati aggiornati. Se pensi ci sia un errore, o hai bisogno di qualsiasi cosa,
-              scrivici su Telegram a{" "}
+              Gli abbinamenti sono stati aggiornati. Se pensi che ci sia un errore o hai bisogno di aiuto, scrivi su
+              Telegram a{" "}
               <Link href="https://t.me/bia3ia" style={telegramLink}>
                 @bia3ia
               </Link>{" "}
-              o{" "}
+              o a{" "}
               <Link href="https://t.me/viganogabriele" style={telegramLink}>
                 @viganogabriele
               </Link>
