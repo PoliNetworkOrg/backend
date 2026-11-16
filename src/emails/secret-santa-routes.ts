@@ -11,12 +11,18 @@ const base = z.object({
 })
 const schema = z.discriminatedUnion("kind", [
   base.extend({ kind: z.literal("draw"), exchange: z.string().max(200), budget: z.string().max(60) }),
-  base.extend({
-    kind: z.literal("reassigned"),
-    withdrawnName: z.string().min(1).max(200),
-    hasNewMatch: z.boolean(),
-    reason: z.enum(["withdrawn", "unconfirmed", "admin"]).optional(),
-  }),
+  base
+    .extend({
+      kind: z.literal("reassigned"),
+      // Empty only for organizer corrections, whose email never names anyone (e.g. a readmitted person).
+      withdrawnName: z.string().max(200),
+      hasNewMatch: z.boolean(),
+      reason: z.enum(["withdrawn", "unconfirmed", "admin"]).optional(),
+    })
+    .refine((mail) => mail.reason === "admin" || mail.withdrawnName.length > 0, {
+      message: "withdrawnName is required unless the change was made by the organizers",
+      path: ["withdrawnName"],
+    }),
   base.extend({ kind: z.literal("confirmation-reminder"), closesAt: z.number().int().positive() }),
   base.extend({ kind: z.literal("removed"), closesAt: z.number().int().positive() }),
 ])
@@ -41,7 +47,10 @@ export function secretSantaEmailRoutes({
     const expected = Buffer.from(`Bearer ${token}`)
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
       return c.json({ error: "Unauthorized" }, 401)
-    const parsed = schema.safeParse(await c.req.json().catch(() => null))
+    const body: unknown = await c.req.json().catch((error: unknown) => error)
+    // Without Content-Length, bodyLimit only fails while the body is read: report it as such, not as bad JSON.
+    if (body instanceof Error && body.name === "BodyLimitError") return c.json({ error: "Payload Too Large" }, 413)
+    const parsed = schema.safeParse(body instanceof Error ? null : body)
     if (!parsed.success) return c.json({ error: "Invalid Secret Santa email" }, 400)
     const url = new URL(parsed.data.url)
     if (url.origin !== new URL(publicUrl).origin || url.pathname !== "/secret-santa" || url.username || url.password)

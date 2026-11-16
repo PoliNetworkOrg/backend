@@ -58,7 +58,12 @@ describe("Secret Santa mail endpoint", () => {
         })
       ).status
     ).toBe(502)
-    expect((await app.request("/", { method: "POST", body: "x".repeat(13 * 1024) })).status).toBe(413)
+    const oversized = await app.request("/", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...request, name: "x".repeat(13 * 1024) }),
+    })
+    expect(oversized.status).toBe(413)
   })
 })
 
@@ -136,5 +141,36 @@ describe("Secret Santa confirmation emails", () => {
     expect(text).toContain("@viganogabriele")
     expect(html).toContain('href="https://t.me/bia3ia"')
     expect(html).toContain('href="https://t.me/viganogabriele"')
+  })
+})
+
+describe("Secret Santa reassignment requests", () => {
+  const reassigned = {
+    kind: "reassigned",
+    id: "santa:reassign:person:1",
+    to: "person@example.test",
+    name: "Ada",
+    url,
+    hasNewMatch: true,
+  } as const
+  const post = async (body: unknown) => {
+    const send = vi.fn(async (_mail: SecretSantaEmailRequest) => {})
+    const app = secretSantaEmailRoutes({ token, publicUrl: "https://live.example", send })
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    return { status: res.status, send }
+  }
+  it("accepts an organizer correction without a name, as Live sends for readmitted people", async () => {
+    const { status, send } = await post({ ...reassigned, withdrawnName: "", reason: "admin" })
+    expect(status).toBe(204)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+  it("still requires the name of whoever left for withdrawals and missed confirmations", async () => {
+    expect((await post({ ...reassigned, withdrawnName: "" })).status).toBe(400)
+    expect((await post({ ...reassigned, withdrawnName: "", reason: "unconfirmed" })).status).toBe(400)
+    expect((await post({ ...reassigned, withdrawnName: "Bea", reason: "withdrawn" })).status).toBe(204)
   })
 })
