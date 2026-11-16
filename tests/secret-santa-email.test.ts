@@ -120,3 +120,21 @@ describe("Secret Santa email rendering", () => {
     expect(mail.html).not.toContain("raw.githubusercontent.com")
   })
 })
+
+describe("Secret Santa confirmation emails", () => {
+  const data = { name: "Mario", url, closesAt: Date.parse("2026-12-10T23:00:00Z") }
+  it("only addresses people who still have to confirm in the reminder", async () => {
+    const { text } = await renderEmail(createElement(Confirmation, { ...data, kind: "confirmation-reminder" }))
+    expect(text).toContain("Ho preso il regalo")
+    expect(text).toContain("10 dicembre 2026")
+    expect(text).not.toContain("Se hai già confermato")
+  })
+  it("tells removed people why and how to reach the organizers on Telegram", async () => {
+    const { html, text } = await renderEmail(createElement(Confirmation, { ...data, kind: "removed" }))
+    expect(text).toContain("sei stato rimosso")
+    expect(text).toContain("@bia3ia")
+    expect(text).toContain("@viganogabriele")
+    expect(html).toContain('href="https://t.me/bia3ia"')
+    expect(html).toContain('href="https://t.me/viganogabriele"')
+  })
+})

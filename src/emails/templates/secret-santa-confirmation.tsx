@@ -1,4 +1,4 @@
-import { Heading, Section, Text } from "@react-email/components"
+import { Heading, Link, Section, Text } from "@react-email/components"
 import {
   GoldButton,
   SANTA,
@@ -20,6 +20,12 @@ export const secretSantaConfirmationSubject = (data: SecretSantaConfirmationMail
     ? `${data.name}, la tua partecipazione al Secret Santa è terminata`
     : `${data.name}, conferma il regalo entro mezzanotte`
 
+const telegramLink = { color: SANTA.blue, fontWeight: 700, textDecoration: "underline" }
+
+/**
+ * To participants who have not confirmed the gift: the last reminder (only to those still unconfirmed) and, after the
+ * deadline, the removal notice with the organizers' Telegram contacts.
+ */
 const SecretSantaConfirmationEmail: EmailTemplate<SecretSantaConfirmationMailData> = (data) => {
   const removed = data.kind === "removed"
   const day = new Date(data.closesAt - 1).toLocaleDateString("it-IT", {
@@ -55,8 +61,16 @@ const SecretSantaConfirmationEmail: EmailTemplate<SecretSantaConfirmationMailDat
               Secret Santa.
             </Text>
             <Text className="my-4 text-center text-[16px] leading-[26px]" style={santaParagraph}>
-              Gli abbinamenti sono stati aggiornati. Se pensi ci sia un errore, contatta gli organizzatori prima di
-              consegnare il regalo.
+              Gli abbinamenti sono stati aggiornati. Se pensi ci sia un errore, o hai bisogno di qualsiasi cosa,
+              scrivici su Telegram a{" "}
+              <Link href="https://t.me/bia3ia" style={telegramLink}>
+                @bia3ia
+              </Link>{" "}
+              o{" "}
+              <Link href="https://t.me/viganogabriele" style={telegramLink}>
+                @viganogabriele
+              </Link>
+              .
             </Text>
           </>
         ) : (
@@ -67,8 +81,7 @@ const SecretSantaConfirmationEmail: EmailTemplate<SecretSantaConfirmationMailDat
             </Text>
             <Text className="my-4 text-center text-[16px] leading-[26px]" style={santaParagraph}>
               Hai tempo fino alla <strong style={santaBold}>mezzanotte del {day}, ora italiana</strong>. Dopo il
-              termine, chi non ha confermato verrà rimosso e gli abbinamenti saranno aggiornati. Se hai già confermato,
-              non serve fare altro.
+              termine, chi non ha confermato verrà rimosso e gli abbinamenti saranno aggiornati.
             </Text>
           </>
         )}
