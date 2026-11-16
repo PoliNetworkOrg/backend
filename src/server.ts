@@ -6,6 +6,8 @@ import "./azure/blob"
 import { TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
+import { sendSecretSantaEmail } from "./emails/mailer"
+import { secretSantaEmailRoutes } from "./emails/secret-santa-routes"
 import { env } from "./env"
 import { esign } from "./esign"
 import { agentRoutes } from "./esign/agent-routes"
@@ -56,6 +58,10 @@ app.use(
 )
 
 app.get("/", (c) => c.text("hi"))
+app.route(
+  "/internal/secret-santa/emails",
+  secretSantaEmailRoutes({ token: env.LIVE_MAILER_TOKEN, publicUrl: env.LIVE_PUBLIC_URL, send: sendSecretSantaEmail })
+)
 
 app.route("/esign/agent", agentRoutes(esign))
 
