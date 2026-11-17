@@ -190,7 +190,12 @@ export const esignRouter = createTRPCRouter({
 
   requests: createTRPCRouter({
     create: user
-      .meta(audit.full({ fields: ["title", "documentId", "ordered", "output"] }))
+      .meta(
+        // Only the declared parts of `output`: the raw input is recorded, so extra keys a caller sends would be kept.
+        audit.full({
+          fields: ["title", "documentId", "ordered", "output.driveId", "output.folderId", "output.fileName"],
+        })
+      )
       .input(
         z.object({
           title: z.string().trim().min(1).max(200),

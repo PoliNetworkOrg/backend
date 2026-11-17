@@ -180,6 +180,21 @@ describe("auditEvent", () => {
     expect(event?.input).toEqual({ userId: "u1", assocNumber: 7 })
   })
 
+  it("keeps only the declared fields of a nested object, and keeps it null", () => {
+    const option = { capture: "full", fields: ["title", "output.driveId", "output.fileName"] } as const
+    const options = { path: "esign.requests.create", option, auth, note: {}, result: ok() }
+    const event = auditEvent({
+      ...options,
+      rawInput: { title: "T", output: { driveId: "d", fileName: "f.pdf", extra: "x".repeat(500) }, email: {} },
+    })
+    expect(event?.input).toEqual({ title: "T", output: { driveId: "d", fileName: "f.pdf" } })
+    expect(auditEvent({ ...options, rawInput: { title: "T", output: null } })?.input).toEqual({
+      title: "T",
+      output: null,
+    })
+    expect(auditEvent({ ...options, rawInput: { output: "not an object" } })?.input).toEqual({})
+  })
+
   it("selects fields before object and total size limits, while still redacting", () => {
     const padding = Object.fromEntries(Array.from({ length: 105 }, (_, i) => [`excluded${i}`, "x".repeat(2000)]))
     const event = auditEvent({

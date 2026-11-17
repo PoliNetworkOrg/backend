@@ -69,7 +69,7 @@ without one, like its policy:
 
 - `.meta(audit.full())`: also the input, the reason and the states before and after that the handler adds with
   `ctx.audit.set(...)`. `fields` keeps only those fields of the input, for inputs that carry personal data or free
-  text not worth keeping.
+  text not worth keeping; a dotted field (`output.driveId`) keeps one field of a nested object.
 - `.meta(audit.minimal({ target }))`: only the actor, the action, the target and the outcome, for areas that keep their
   own history behind their own permissions. People records each change in the person's activity history, and the
   Libro Soci in `soci_activity`.

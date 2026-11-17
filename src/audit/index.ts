@@ -159,13 +159,33 @@ function outcomeOf(result: Result): { outcome: TAuditOutcome; error: string | nu
   return error === null ? { outcome: AUDIT_OUTCOME.SUCCESS, error: null } : { outcome: AUDIT_OUTCOME.FAILURE, error }
 }
 
-/** Select declared input fields before redaction and size limits are applied. */
+/**
+ * Select declared input fields before redaction and size limits are applied. A dotted field (`output.driveId`) keeps
+ * only that field of a nested object, and a null object stays null.
+ */
 function onlyFields(input: unknown, fields: readonly string[] | undefined): unknown {
   if (!fields) return input
   if (input instanceof FormData || input instanceof Map) input = Object.fromEntries(input.entries())
   if (input === null || typeof input !== "object" || Array.isArray(input)) return {}
   const record = input as Record<string, unknown>
-  return Object.fromEntries(fields.flatMap((field) => (Object.hasOwn(record, field) ? [[field, record[field]]] : [])))
+  const nested = new Map<string, string[]>()
+  const picked: Record<string, unknown> = {}
+  for (const field of fields) {
+    const dot = field.indexOf(".")
+    if (dot === -1) {
+      if (Object.hasOwn(record, field)) picked[field] = record[field]
+      continue
+    }
+    const head = field.slice(0, dot)
+    nested.set(head, [...(nested.get(head) ?? []), field.slice(dot + 1)])
+  }
+  for (const [head, rest] of nested) {
+    if (!Object.hasOwn(record, head)) continue
+    const value = record[head]
+    if (value === null) picked[head] = null
+    else if (typeof value === "object" && !Array.isArray(value)) picked[head] = onlyFields(value, rest)
+  }
+  return picked
 }
 
 /**

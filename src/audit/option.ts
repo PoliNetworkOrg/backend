@@ -26,7 +26,7 @@ export type AuditOption =
   | { capture: "minimal"; target?: AuditTargetOf; action?: string }
   /**
    * Also the input, the states the handler adds and the reason. `fields` keeps only those fields of the input, for
-   * inputs that carry personal data or free text not worth keeping.
+   * inputs that carry personal data or free text not worth keeping; `"output.driveId"` keeps one field of a nested object.
    */
   | { capture: "full"; fields?: readonly string[]; target?: AuditTargetOf; action?: string }
 
