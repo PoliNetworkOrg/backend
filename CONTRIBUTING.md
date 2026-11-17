@@ -93,9 +93,9 @@ http://localhost:4300. It serves the keys and the access snapshot for a fixed se
 them, so you register nothing:
 
 ```sh
-bun scripts/regulations/dev-idp.ts serve        # keep it running
 bun scripts/regulations/dev-idp.ts env >> .env  # once: the IdP variables pointing at it
 bun run regulations:token dev-admin             # a bearer token for dev-admin, valid 2 hours
+bun scripts/regulations/dev-idp.ts serve        # keeps running: leave this terminal open
 ```
 
 Restart `bun dev` as above, then send the token as `Authorization: Bearer <token>`, or give it to the dashboard's agent
