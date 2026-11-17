@@ -239,3 +239,19 @@ export async function sendRegulationDelegaEmail(
     messageId: input.messageId,
   })
 }
+
+export async function sendAssociationEmail(mail: { id: string; to: string; subject: string; text: string }) {
+  return sendEmail(
+    mail.to,
+    makeSubject(mail.subject),
+    <div>
+      <h1>{mail.subject}</h1>
+      <p style={{ whiteSpace: "pre-line" }}>{mail.text}</p>
+    </div>,
+    [],
+    {
+      throwOnError: true,
+      messageId: `<association-${mail.id}@polinetwork.org>`,
+    }
+  )
+}

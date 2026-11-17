@@ -1,3 +1,4 @@
+import * as associationPortal from "./association-portal"
 import * as associations from "./associations"
 import * as documents from "./documents"
 import * as faqs from "./faqs"
@@ -9,6 +10,7 @@ import * as test from "./test"
 
 export const schema = {
   ...associations,
+  ...associationPortal,
   ...test,
   ...faqs,
   ...freshman,

@@ -43,6 +43,14 @@ export function cron() {
     }
   })
 
+  new Cron("0 * * * * *", { protect: true }, async () => {
+    try {
+      const { deliverAssociationMail } = await import("./associations")
+      await deliverAssociationMail()
+    } catch (error) {
+      logger.error(error, "[CRON] Association mail outbox")
+    }
+  })
   logger.info("[CRON] scheduled")
   new Cron("0 * * * * *", async () => {
     try {
