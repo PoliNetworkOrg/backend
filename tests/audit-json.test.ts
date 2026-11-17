@@ -42,7 +42,18 @@ describe("auditJson", () => {
     expect(copy["(more)"]).toBe("3 more fields")
 
     const large = Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`k${i}`, "x".repeat(2000)]))
-    expect(auditJson(large)).toMatch(/^\(\d+ characters, too large to keep\)$/)
+    expect(auditJson(large)).toMatch(/^\(\d+ bytes, too large to keep\)$/)
+  })
+
+  it("measures the size of a copy in UTF-8 bytes, not characters", () => {
+    // 20 strings of 2,000 characters: about 40 KB of ASCII, about 120 KB in three-byte characters.
+    const of = (char: string) => Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`k${i}`, char.repeat(2000)]))
+    expect(auditJson(of("x"))).toEqual(of("x"))
+    expect(auditJson(of("€"))).toMatch(/^\(\d+ bytes, too large to keep\)$/)
+  })
+
+  it("keeps a regulation's documentKey, which is an identifier and not a secret", () => {
+    expect(auditJson({ documentKey: "statuto", apiKey: "2" })).toEqual({ documentKey: "statuto", apiKey: "(hidden)" })
   })
 
   it("hides whole secret names and camelCase secret suffixes only", () => {
@@ -193,6 +204,18 @@ describe("auditEvent", () => {
       output: null,
     })
     expect(auditEvent({ ...options, rawInput: { output: "not an object" } })?.input).toEqual({})
+  })
+
+  it("keeps only scalar values of the declared fields, dropping objects and arrays", () => {
+    const event = auditEvent({
+      path: "test",
+      auth,
+      option: { capture: "full", fields: ["id", "from", "tags", "from.kind", "from.id", "gone"] },
+      rawInput: { id: 1, from: { kind: "draft", id: "d1", extra: "x" }, tags: ["a"], gone: null },
+      note: {},
+      result: ok(),
+    })
+    expect(event?.input).toEqual({ id: 1, from: { kind: "draft", id: "d1" }, gone: null })
   })
 
   it("selects fields before object and total size limits, while still redacting", () => {

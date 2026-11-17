@@ -53,10 +53,13 @@ export function auditRecorder() {
 
 /** Field names that hold secrets: whole names, or the last word of a camelCase name (`idempotencyKey`). */
 const SECRET_KEY = /^(pass(word)?|passwd|secret|token|ticket|otp|code|key)$|(Pass(word)?|Secret|Token|Ticket|Otp|Key)$/
+/** Names that end like a secret but hold a public identifier, such as a regulation's `documentKey`. */
+const NOT_SECRET = new Set(["documentKey"])
+const isSecret = (key: string) => SECRET_KEY.test(key) && !NOT_SECRET.has(key)
 const MAX_STRING = 2000
 const MAX_ITEMS = 100
 const MAX_DEPTH = 8
-/** A copy longer than this, as JSON, is replaced by a note of its size. */
+/** A copy larger than this many bytes, as UTF-8 JSON, is replaced by a note of its size. */
 const MAX_JSON = 64 * 1024
 
 function copyOf(value: unknown, depth: number): AuditJson {
@@ -82,7 +85,7 @@ function copyOf(value: unknown, depth: number): AuditJson {
     const entries = Object.entries(value).filter(([, item]) => item !== undefined && typeof item !== "function")
     const copy: { [key: string]: AuditJson } = {}
     for (const [key, item] of entries.slice(0, MAX_ITEMS))
-      copy[key] = SECRET_KEY.test(key) ? "(hidden)" : copyOf(item, depth + 1)
+      copy[key] = isSecret(key) ? "(hidden)" : copyOf(item, depth + 1)
     if (entries.length > MAX_ITEMS) copy["(more)"] = `${entries.length - MAX_ITEMS} more fields`
     return copy
   }
@@ -95,8 +98,8 @@ function copyOf(value: unknown, depth: number): AuditJson {
  */
 export function auditJson(value: unknown): AuditJson {
   const copy = copyOf(value, 0)
-  const size = JSON.stringify(copy)?.length ?? 0
-  return size > MAX_JSON ? `(${size} characters, too large to keep)` : copy
+  const size = Buffer.byteLength(JSON.stringify(copy) ?? "", "utf8")
+  return size > MAX_JSON ? `(${size} bytes, too large to keep)` : copy
 }
 
 /** The caller from the verified token; null without one, so such calls are not recorded. */
@@ -159,9 +162,13 @@ function outcomeOf(result: Result): { outcome: TAuditOutcome; error: string | nu
   return error === null ? { outcome: AUDIT_OUTCOME.SUCCESS, error: null } : { outcome: AUDIT_OUTCOME.FAILURE, error }
 }
 
+/** Whether an allowlisted field holds a value that is kept as it is: objects and arrays could carry anything. */
+const isScalar = (value: unknown) =>
+  value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+
 /**
- * Select declared input fields before redaction and size limits are applied. A dotted field (`output.driveId`) keeps
- * only that field of a nested object, and a null object stays null.
+ * Select declared input fields before redaction and size limits are applied. Only scalar values are kept; a dotted
+ * field (`output.driveId`) reaches into a nested object, and a null object stays null.
  */
 function onlyFields(input: unknown, fields: readonly string[] | undefined): unknown {
   if (!fields) return input
@@ -173,7 +180,7 @@ function onlyFields(input: unknown, fields: readonly string[] | undefined): unkn
   for (const field of fields) {
     const dot = field.indexOf(".")
     if (dot === -1) {
-      if (Object.hasOwn(record, field)) picked[field] = record[field]
+      if (Object.hasOwn(record, field) && isScalar(record[field])) picked[field] = record[field]
       continue
     }
     const head = field.slice(0, dot)
