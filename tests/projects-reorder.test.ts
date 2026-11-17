@@ -4,6 +4,7 @@ import { auditRecorder } from "@/audit"
 const state = vi.hoisted(() => ({
   projects: { id: Symbol("id"), title: Symbol("title"), order: Symbol("order") },
   rows: [] as { id: number; title: string; order: number }[],
+  calls: [] as string[],
 }))
 vi.mock("drizzle-orm", async (importOriginal) => ({
   ...(await importOriginal<typeof import("drizzle-orm")>()),
@@ -14,9 +15,13 @@ vi.mock("@/azure/blob", () => ({ uploadBlob: vi.fn() }))
 vi.mock("@/utils/web", () => ({ getImageExtension: vi.fn() }))
 vi.mock("@/db", () => {
   const tx = {
+    execute: async () => {
+      state.calls.push("lock")
+    },
     select: (fields: Record<string, unknown>) => ({
       from: () => ({
         orderBy: async () =>
+          state.calls.push("select") &&
           [...state.rows]
             .sort((a, b) => a.order - b.order)
             .map((row) => Object.fromEntries(Object.keys(fields).map((key) => [key, row[key as keyof typeof row]]))),
@@ -58,6 +63,7 @@ const reorder = router.reorderProjects as unknown as {
   }) => Promise<unknown>
 }
 beforeEach(() => {
+  state.calls = []
   state.rows = [
     { id: 1, title: "One", order: 5 },
     { id: 2, title: "Two", order: 5 },
@@ -92,4 +98,9 @@ it("retains the audit when a matching row already has the requested order", asyn
   await reorder.handler({ input: { projectIds: [1] }, ctx: { audit: audit.recorder } })
   expect(audit.skipped()).toBe(false)
   expect(audit.note.before).toEqual(audit.note.after)
+})
+it("locks the projects before reading the order it replaces", async () => {
+  const audit = auditRecorder()
+  await reorder.handler({ input: { projectIds: [2, 1] }, ctx: { audit: audit.recorder } })
+  expect(state.calls).toEqual(["lock", "select", "select"])
 })

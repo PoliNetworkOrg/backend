@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm"
+import { asc, eq, sql } from "drizzle-orm"
 import z from "zod"
 import { audit } from "@/audit/option"
 import { uploadBlob } from "@/azure/blob"
@@ -139,6 +139,8 @@ export default createTRPCRouter({
             .select({ id: PROJECTS.id, title: PROJECTS.title, order: PROJECTS.order })
             .from(PROJECTS)
             .orderBy(asc(PROJECTS.order))
+        // Serialize reorders before reading, so each one's `before` is the order the previous one committed.
+        await tx.execute(sql`LOCK TABLE ${PROJECTS} IN SHARE ROW EXCLUSIVE MODE`)
         const before = await order()
         const updated = await Promise.all(
           input.projectIds.map((id, index) =>
