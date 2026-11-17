@@ -6,6 +6,7 @@ import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import type { FeeMailKind, SociMail } from "@/soci/types"
 import { renderEmail } from "./render"
+import type { SecretSantaEmailRequest } from "./secret-santa-routes"
 import BirthdayEmail, { birthdaySubject } from "./templates/birthday"
 import FeeConfirmedEmail, { feeConfirmedSubject } from "./templates/fee-confirmed"
 import FeeOpeningEmail, { feeOpeningSubject } from "./templates/fee-opening"
@@ -15,11 +16,37 @@ import MemberNumberChanged, { memberNumberChangedSubject } from "./templates/mem
 import RegulationDelegaEmail, { delegaSubject, type RegulationDelegaProps } from "./templates/regulation-delega"
 import RegulationEmanatedEmail, { type RegulationEmanatedProps } from "./templates/regulation-emanated"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
+import SecretSantaEmail, { secretSantaSubject } from "./templates/secret-santa"
+import SecretSantaConfirmationEmail, { secretSantaConfirmationSubject } from "./templates/secret-santa-confirmation"
+import SecretSantaReassignedEmail, { secretSantaReassignedSubject } from "./templates/secret-santa-reassigned"
 import SignatureRequestEmail, { signatureRequestSubject } from "./templates/signature-request"
 import SignedDocumentEmail, { type SignedDocumentProps } from "./templates/signed-document"
 import Welcome, { welcomeSubject } from "./templates/welcome"
 
 const makeSubject = (subject: string) => (env.NODE_ENV === "development" ? `[DEV] ${subject}` : subject)
+
+export async function sendSecretSantaEmail(mail: SecretSantaEmailRequest) {
+  let subject: string
+  let component: JSX.Element
+  if (mail.kind === "draw") {
+    subject = secretSantaSubject(mail)
+    component = <SecretSantaEmail {...mail} />
+  } else if (mail.kind === "reassigned") {
+    subject = secretSantaReassignedSubject(mail)
+    component = <SecretSantaReassignedEmail {...mail} />
+  } else {
+    subject = secretSantaConfirmationSubject(mail)
+    component = <SecretSantaConfirmationEmail {...mail} />
+  }
+  if (env.NODE_ENV === "development" && env.USE_DEV_MAILER) {
+    await devSendMail(mail.to, makeSubject(subject), component)
+  } else {
+    await azureSendEmail(mail.to, makeSubject(subject), component, [], {
+      throwOnError: true,
+      messageId: `<secret-santa-${Buffer.from(mail.id).toString("base64url")}@polinetwork.org>`,
+    })
+  }
+}
 
 async function createDevTransport() {
   const account = await createTestAccount()
