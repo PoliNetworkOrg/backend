@@ -1,3 +1,5 @@
+import { associationIdentity, associationPortal } from "@/associations"
+import { createAssociationRouter } from "@/associations/router"
 import { createTRPCRouter } from "@/trpc"
 import { azureRouter } from "./azure"
 import { esignRouter } from "./esign"
@@ -16,6 +18,7 @@ import { webRouter } from "./web"
  * All routers added in /api/routers should be manually added here.
  */
 export const appRouter = createTRPCRouter({
+  associationPortal: createAssociationRouter(associationPortal, associationIdentity),
   azure: azureRouter,
   esign: esignRouter,
   groups: groupsRouter,

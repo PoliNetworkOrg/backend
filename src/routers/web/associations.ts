@@ -1,19 +1,9 @@
-import { asc, eq } from "drizzle-orm"
+import { TRPCError } from "@trpc/server"
 import z from "zod"
-import { uploadBlob } from "@/azure/blob"
-import { DB, SCHEMA } from "@/db"
-import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
+import { associationStore } from "@/associations"
+import { httpUrl, linkSchema } from "@/associations/contract"
 import { dashboard, publicData } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
-import { getImageExtension } from "@/utils/web"
-
-const ASSOCIATIONS = SCHEMA.WEB.associations
-
-const logoFileSchema = z
-  .file()
-  .mime(["image/png", "image/jpeg", "image/svg+xml"])
-  .min(1)
-  .max(1024 * 1024)
 
 const associationLinksSchema = z.object({
   email: z.email().nullable(),
@@ -28,13 +18,6 @@ const associationLinksSchema = z.object({
   spotify: z.url().nullable(),
 })
 
-const associationFormSchema = z.object({
-  name: z.string(),
-  descriptionIt: z.string(),
-  descriptionEn: z.string(),
-  logo: logoFileSchema.optional(),
-})
-
 const associationSchema = z.object({
   id: z.number(),
   name: z.string(),
@@ -42,142 +25,62 @@ const associationSchema = z.object({
   descriptionEn: z.string(),
   logo: z.string().nullable(),
   links: associationLinksSchema,
+  extraLinks: z.array(linkSchema).optional(),
 })
-
-function formatAssociation(association: typeof ASSOCIATIONS.$inferSelect): z.infer<typeof associationSchema> {
-  return {
-    id: association.id,
-    name: association.name,
-    descriptionIt: association.descriptionIt,
-    descriptionEn: association.descriptionEn,
-    logo: association.logo,
-    links: {
-      email: association.email,
-      website: association.website,
-      facebook: association.facebook,
-      instagram: association.instagram,
-      tiktok: association.tiktok,
-      x: association.x,
-      youtube: association.youtube,
-      telegram: association.telegram,
-      linkedin: association.linkedin,
-      spotify: association.spotify,
-    },
-  }
-}
 
 export default createTRPCRouter({
   getAllAssociations: policy(publicData)
     .output(z.array(associationSchema))
     .query(async () => {
-      const associations = await DB.select().from(ASSOCIATIONS).orderBy(asc(ASSOCIATIONS.id))
-
-      return associations.map(formatAssociation)
+      const records = await associationStore.published()
+      return records
+        .filter((r) => r.status !== "archived" && r.legacyId !== null)
+        .sort((a, b) => (a.legacyId ?? 0) - (b.legacyId ?? 0))
+        .map((r) => {
+          const p = r.published as NonNullable<typeof r.published>
+          // Public output must never fail for the whole list because of one odd stored value.
+          const links = p.links.filter((l) => linkSchema.safeParse(l).success)
+          const first = (key: string) => links.find((l) => l.platform === key)?.url ?? null
+          return {
+            id: r.legacyId as number,
+            name: p.name,
+            descriptionIt: p.descriptionIt,
+            descriptionEn: p.descriptionEn,
+            logo: p.logo && httpUrl.safeParse(p.logo).success ? p.logo : null,
+            links: {
+              email: p.email && z.email().safeParse(p.email).success ? p.email : null,
+              website: first("website"),
+              facebook: first("facebook"),
+              instagram: first("instagram"),
+              tiktok: first("tiktok"),
+              x: first("x"),
+              youtube: first("youtube"),
+              telegram: first("telegram"),
+              linkedin: first("linkedin"),
+              spotify: first("spotify"),
+            },
+            extraLinks: links,
+          }
+        })
     }),
 
   addAssociation: policy(dashboard("web:content:write"))
-    .input(
-      z
-        .instanceof(FormData)
-        .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
-        .pipe(associationFormSchema)
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { name, descriptionIt, descriptionEn, logo } = input
-
-      const uploadedLogo = logo
-        ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
-        : null
-
-      const [res] = await DB.insert(ASSOCIATIONS)
-        .values({
-          name,
-          descriptionIt,
-          descriptionEn,
-          logo: uploadedLogo?.url ?? null,
-          ...createdByColumns(authorOf(ctx.actor)),
-        })
-        .returning()
-
-      return formatAssociation(res)
-    }),
-
+    .input(z.unknown())
+    .mutation(() => retired()),
   editAssociation: policy(dashboard("web:content:write"))
-    .input(
-      z
-        .instanceof(FormData)
-        .transform((fd): Record<string, string | File> => Object.fromEntries(fd.entries()))
-        .pipe(
-          associationFormSchema.extend({
-            id: z.coerce.number<string>(),
-          })
-        )
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { id, name, descriptionIt, descriptionEn, logo } = input
-
-      const uploadedLogo = logo
-        ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
-        : undefined
-
-      const [res] = await DB.update(ASSOCIATIONS)
-        .set({
-          name,
-          descriptionIt,
-          descriptionEn,
-          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(ASSOCIATIONS.id, id))
-        .returning()
-
-      if (!res) return { error: "NOT_FOUND" }
-      return formatAssociation(res)
-    }),
-
+    .input(z.unknown())
+    .mutation(() => retired()),
   editAssociationLinks: policy(dashboard("web:content:write"))
-    .input(
-      z.object({
-        id: z.number(),
-        links: associationLinksSchema,
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { id, links } = input
-      const { email, website, facebook, instagram, tiktok, x, youtube, telegram, linkedin, spotify } = links
-
-      const [res] = await DB.update(ASSOCIATIONS)
-        .set({
-          email,
-          website,
-          facebook,
-          instagram,
-          tiktok,
-          x,
-          youtube,
-          telegram,
-          linkedin,
-          spotify,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(ASSOCIATIONS.id, id))
-        .returning()
-
-      if (!res) return { error: "NOT_FOUND" }
-      return formatAssociation(res)
-    }),
-
+    .input(z.unknown())
+    .mutation(() => retired()),
   deleteAssociation: policy(dashboard("web:content:write"))
-    .input(
-      z.object({
-        id: z.number(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const { id } = input
-      const deleted = await DB.delete(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).returning()
-
-      if (deleted.length === 0) return { error: "NOT_FOUND" }
-      return { error: null }
-    }),
+    .input(z.unknown())
+    .mutation(() => retired()),
 })
+
+function retired(): never {
+  throw new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: "Use the Associations registry to review and publish changes. The legacy editor is retired.",
+  })
+}
