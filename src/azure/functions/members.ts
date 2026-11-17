@@ -4,7 +4,7 @@ import { withRetry } from "@/utils/wait"
 import { getAzureClient } from "../client"
 import { IncompleteMemberError, safeErrorDetail } from "../errors"
 import { MAIL_DOMAIN } from "../mailbox"
-import type { CreatedMember, CreateMemberInput, MemberSummary, ParsedUser, User } from "../types"
+import type { CreatedMember, CreateMemberInput, MemberSummary, ParsedUser, SociGroupMember, User } from "../types"
 
 const GruppoSociID = "1c68dbb8-4ac3-4569-a886-283b5a825cbd"
 const Licenses = {
@@ -159,13 +159,7 @@ export async function createMember({
     await manageLicenses(id, ["OFFICE_365", "POWER_AUTOMATE"], [])
   } catch (error) {
     try {
-      await withRetry(async () => {
-        try {
-          await client.api(`/users/${id}`).delete()
-        } catch (cleanupError) {
-          if ((cleanupError as { statusCode?: number }).statusCode !== 404) throw cleanupError
-        }
-      })
+      await deleteUser(id)
     } catch (cleanupError) {
       logger.error({ error: safeErrorDetail(cleanupError), memberId: id }, "[AZURE] incomplete account cleanup failed")
       throw new IncompleteMemberError(
@@ -183,6 +177,65 @@ export async function createMember({
     id,
     password,
   }
+}
+
+const statusOf = (error: unknown) => (error as { statusCode?: number }).statusCode
+
+export async function getSociMembers(): Promise<SociGroupMember[]> {
+  const client = getAzureClient()
+  const users = await allPages<Partial<SociGroupMember> & { id: string }>(
+    client,
+    await client
+      .api(`/groups/${GruppoSociID}/members/microsoft.graph.user`)
+      .select([...SUMMARY_FIELDS, "surname", "createdDateTime"])
+      .top(999)
+      .get()
+  )
+  return users.map((user) => ({
+    ...toSummary(user),
+    surname: user.surname ?? null,
+    createdDateTime: user.createdDateTime ?? null,
+  }))
+}
+
+export async function addToSoci(userId: string) {
+  const client = getAzureClient()
+  await withRetry(async () => {
+    try {
+      await client.api(`/groups/${GruppoSociID}/members/$ref`).post({
+        "@odata.id": `https://graph.microsoft.com/v1.0/directoryObjects/${encodeURIComponent(userId)}`,
+      })
+    } catch (error) {
+      // Graph refuses to add a member twice.
+      if (statusOf(error) === 400 && /already exist/i.test((error as Error).message ?? "")) return
+      throw error
+    }
+  })
+  logger.info({ userId }, "[Azure Graph API] added to Soci")
+}
+
+export async function removeFromSoci(userId: string) {
+  const client = getAzureClient()
+  await withRetry(async () => {
+    try {
+      await client.api(`/groups/${GruppoSociID}/members/${encodeURIComponent(userId)}/$ref`).delete()
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error
+    }
+  })
+  logger.info({ userId }, "[Azure Graph API] removed from Soci")
+}
+
+export async function deleteUser(userId: string) {
+  const client = getAzureClient()
+  await withRetry(async () => {
+    try {
+      await client.api(`/users/${encodeURIComponent(userId)}`).delete()
+    } catch (error) {
+      if (statusOf(error) !== 404) throw error
+    }
+  })
+  logger.info({ userId }, "[Azure Graph API] user deleted")
 }
 
 export async function changePassword(userId: string) {

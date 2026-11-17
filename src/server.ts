@@ -6,21 +6,28 @@ import "./azure/blob"
 import { TRPC_PATH, WS_PATH } from "./constants"
 import { cron } from "./cron"
 import { DB, SCHEMA } from "./db"
+import { sendSecretSantaEmail } from "./emails/mailer"
+import { secretSantaEmailRoutes } from "./emails/secret-santa-routes"
 import { env } from "./env"
 import { esign } from "./esign"
 import { agentRoutes } from "./esign/agent-routes"
 import { authenticateRequest, idp, startIdp, stopIdp } from "./idp"
 import { authenticateSocket } from "./idp/socket-auth"
 import { logger } from "./logger"
+import { publicRoutes } from "./public"
 import { redis } from "./redis"
 import { appRouter } from "./routers"
 import { limitRequestBody, withRequestBodyLimit } from "./serve-options"
 import { WebSocketServer, engine as wssEngine } from "./websocket"
+import { registerTelegram } from "./websocket/registry"
 
 export const WSS = new WebSocketServer({
   authenticate: (token) => authenticateSocket(token, idp?.verify ?? null, env.OAUTH_BOT_CLIENT_ID),
 })
+registerTelegram(WSS)
 const app = new Hono()
+// The only routes reachable from outside the cluster (`/public/...`, see src/public): checked before everything else.
+app.use("*", publicRoutes.guard)
 
 const server = Bun.serve({
   port: env.PORT,
@@ -52,6 +59,10 @@ app.use(
 )
 
 app.get("/", (c) => c.text("hi"))
+app.route(
+  "/internal/secret-santa/emails",
+  secretSantaEmailRoutes({ token: env.LIVE_MAILER_TOKEN, publicUrl: env.LIVE_PUBLIC_URL, send: sendSecretSantaEmail })
+)
 
 app.route("/esign/agent", agentRoutes(esign))
 

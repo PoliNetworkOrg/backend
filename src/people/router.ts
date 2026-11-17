@@ -8,10 +8,18 @@ import { requireGeneral } from "./model"
 import type { PeopleService } from "./service"
 import type { Viewer } from "./types"
 
-/** Handler targets use validated fields; creation can resolve its id from the result. */
-const personTarget: AuditTargetOf = ({ data }) => {
-  const id = C.personIdSchema.safeParse(data && typeof data === "object" ? (data as { id?: unknown }).id : undefined)
-  return { type: "people.person", id: id.success ? id.data : null }
+/**
+ * The person a call names (`id` or `personId`) or creates, kept only when it is a valid People id: the raw input is not
+ * validated yet. Handlers name the target from their validated input too, which wins over this.
+ */
+const personTarget: AuditTargetOf = ({ input, data }) => {
+  const field = (value: unknown, key: "id" | "personId") =>
+    value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined
+  for (const candidate of [field(input, "id"), field(input, "personId"), field(data, "id")]) {
+    const id = C.personIdSchema.safeParse(candidate)
+    if (id.success) return { type: "people.person", id: id.data }
+  }
+  return { type: "people.person", id: null }
 }
 
 /**

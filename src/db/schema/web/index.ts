@@ -1,4 +1,5 @@
 import * as associations from "./associations"
+import * as documents from "./documents"
 import * as faqs from "./faqs"
 import * as freshman from "./freshman"
 import * as groupLinkReports from "./group-link-reports"
@@ -13,5 +14,6 @@ export const schema = {
   ...freshman,
   ...projects,
   ...guides_matricole,
+  ...documents,
   ...groupLinkReports,
 }

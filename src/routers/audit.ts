@@ -9,7 +9,18 @@ import { createTRPCRouter, policy } from "@/trpc"
 const EVENTS = SCHEMA.COMMON.auditEvents
 
 /** The first segment of an action: where in the ecosystem the change was made. A test keeps it in step with the routers. */
-export const AUDIT_AREAS = ["azure", "esign", "groups", "me", "people", "tg", "wa", "web"] as const
+export const AUDIT_AREAS = [
+  "azure",
+  "esign",
+  "groups",
+  "me",
+  "people",
+  "regulations",
+  "soci",
+  "tg",
+  "wa",
+  "web",
+] as const
 
 const escapeLike = (value: string) => value.replace(/[\\%_]/g, (char) => `\\${char}`)
 
