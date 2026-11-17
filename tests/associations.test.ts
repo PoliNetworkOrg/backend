@@ -181,6 +181,37 @@ describe("Association registry and scoped review", () => {
     expect((await h.service.get(outsider, destinationId)).role).toBeNull()
     expect((await h.service.get(outsider, destinationId)).requests[0].kind).toBe("access")
   })
+  it("requires the submit workflow for profile integrations", async () => {
+    const h = harness()
+    const id = await h.registered()
+    await h.command(owner, id, { action: "save", requestId: null, profile, explanation: "Publish" })
+    const q = (await h.service.get(owner, id)).requests.at(-1)
+    if (!q) throw new Error("Missing proposal")
+    await h.command(owner, id, { action: "submit", requestId: q.id })
+    await h.command(staff, id, { action: "review", requestId: q.id, decision: "changes", reason: "Add details" })
+    await expect(
+      h.command(owner, id, { action: "reply", requestId: q.id, explanation: "Bypass profile workflow" })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await h.command(owner, id, { action: "save", requestId: q.id, profile, explanation: "Details checked" })
+    await h.command(owner, id, { action: "submit", requestId: q.id })
+    expect((await h.service.get(owner, id)).requests.at(-1)?.status).toBe("submitted")
+  })
+  it("does not make a staff draft author a representative on approval", async () => {
+    const h = harness()
+    const { id } = await h.service.create(staff, {
+      profile,
+      explanation: "Internal registry entry",
+      submit: false,
+      commandId: randomUUID(),
+    })
+    const q = (await h.service.get(staff, id)).requests[0]
+    await h.command(staff, id, { action: "submit", requestId: q.id })
+    await h.command(staff, id, { action: "review", requestId: q.id, decision: "approve", reason: "Checked" })
+    const record = await h.service.get(staff, id)
+    expect(record.registered).toBe(true)
+    expect(record.members).toEqual([])
+    expect(record.published).toBe(false)
+  })
   it("validates safe links and bounded inputs", () => {
     expect(
       profileSchema.safeParse({ ...profile, links: [{ platform: "website", label: "X", url: "javascript:alert(1)" }] })

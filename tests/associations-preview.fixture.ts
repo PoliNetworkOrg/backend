@@ -21,13 +21,18 @@ const router = createTRPCRouter({
   }),
   regulations: createTRPCRouter({
     me: createTRPCRouter({
-      get: policy({ user: { scope: "backend:admin" } }).query(() => ({ assignedDrafts: 0, deleghe: 0 })),
+      get: policy({ user: { scope: "backend:admin" } }).query(() => ({
+        assignedDrafts: 0,
+        deleghe: 0,
+        permissions: { read: false, write: false, manage: false, rectify: false },
+        rectifiable: [],
+      })),
     }),
   }),
 })
 Bun.serve({
-  port: 15491,
   hostname: "127.0.0.1",
+  port: 15491,
   fetch(req) {
     return fetchRequestHandler({
       endpoint: "/api/trpc",

@@ -142,9 +142,9 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
     async create(v: Viewer, input: z.infer<typeof createSchema>) {
       const q = request(v, "registration", input.explanation, input.profile)
       q.status = input.submit ? "submitted" : "draft"
-      q.targetSub = v.sub
-      q.targetName = v.name
-      q.accepted = true
+      q.targetSub = v.operator ? null : v.sub
+      q.targetName = v.operator ? null : v.name
+      q.accepted = !v.operator
       const r: Record = {
         id: randomUUID(),
         legacyId: null,
@@ -209,8 +209,8 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
           source.commands.push(key)
           source.revision++
           destination.revision++
-          event(source, v, "Registration redirected", c.reason)
-          event(destination, v, "Access request received from an existing application")
+          event(source, v, "Registration redirected", c.reason, q.id)
+          event(destination, v, "Access request received from an existing application", "", forwarded.id)
           return { id: destination.id }
         })
       }
@@ -246,15 +246,15 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
           q.explanation = c.explanation
           q.updatedAt = new Date().toISOString()
           if (!r.registered) r.profile = c.profile
-          event(r, v, "Draft saved")
+          event(r, v, "Draft saved", "", q.id)
         } else if (c.action === "reply") {
           const q = r.requests.find((q) => q.id === c.requestId)
-          if (!q || q.by !== v.sub || q.status !== "changes")
+          if (!q || q.by !== v.sub || q.status !== "changes" || q.profile !== null)
             fail("FORBIDDEN", "Only the applicant can answer a request for information")
           q.explanation = c.explanation
           q.status = "submitted"
           q.updatedAt = new Date().toISOString()
-          event(r, v, "Requested information supplied")
+          event(r, v, "Requested information supplied", "", q.id)
         } else if (c.action === "submit" || c.action === "withdraw") {
           const q = r.requests.find((q) => q.id === c.requestId)
           if (!q) fail("NOT_FOUND", "Request not found")
@@ -272,7 +272,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
             r.invitations = r.invitations.filter((i) => i.requestId !== q.id)
           }
           q.updatedAt = new Date().toISOString()
-          event(r, v, c.action === "submit" ? "Request submitted" : "Request withdrawn")
+          event(r, v, c.action === "submit" ? "Request submitted" : "Request withdrawn", "", q.id)
         } else if (c.action === "access") {
           if (!r.registered || r.status !== "active" || activeMember(r, v))
             fail("FORBIDDEN", "This association is not available for an access request")
@@ -286,7 +286,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
           q.targetName = v.name
           q.accepted = true
           r.requests.push(q)
-          event(r, v, "Access requested")
+          event(r, v, "Access requested", "", q.id)
         } else if (c.action === "invite" || c.action === "membership") {
           if (!responsible(r, v) || !r.registered) fail("FORBIDDEN", "Only a responsible can propose representatives")
           const q = request(v, "membership", c.explanation)
@@ -322,7 +322,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
             q.remove = c.remove
           }
           r.requests.push(q)
-          event(r, v, "Representative change requested")
+          event(r, v, "Representative change requested", "", q.id)
         } else if (c.action === "review") {
           operator(v)
           const q = r.requests.find((q) => q.id === c.requestId)
@@ -336,7 +336,8 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
               r.profile = q.profile
               r.published = q.profile
             } else {
-              if (!q.accepted || !q.targetSub) fail("BAD_REQUEST", "The invited person must accept before approval")
+              if (q.kind !== "registration" && (!q.accepted || !q.targetSub))
+                fail("BAD_REQUEST", "The invited person must accept before approval")
               if (q.kind === "registration") {
                 if (r.registered) fail("CONFLICT", "Already registered")
                 r.registered = true
@@ -351,10 +352,11 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
                 !r.members.some((m) => m.active && m.role === "responsible" && m.sub !== target.sub)
               )
                 fail("CONFLICT", "Approve a replacement responsible first; use explicit revocation for urgent removal")
-              if (target) {
+              if (q.targetSub && target) {
                 target.role = q.role
                 target.active = !q.remove
-              } else r.members.push({ sub: q.targetSub, name: q.targetName ?? q.targetSub, role: q.role, active: true })
+              } else if (q.targetSub)
+                r.members.push({ sub: q.targetSub, name: q.targetName ?? q.targetSub, role: q.role, active: true })
             }
           }
           q.status = c.decision === "approve" ? "approved" : c.decision === "changes" ? "changes" : "rejected"
@@ -428,7 +430,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
         q.updatedAt = new Date().toISOString()
         r.invitations = r.invitations.filter((candidate) => candidate !== i)
         r.revision++
-        event(r, v, "Invitation accepted; awaiting PoliNetwork")
+        event(r, v, "Invitation accepted; awaiting PoliNetwork", "", q.id)
         return { id: r.id }
       })
     },

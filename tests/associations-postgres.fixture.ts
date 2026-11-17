@@ -31,17 +31,15 @@ try {
   journal.entries = journal.entries.filter((e: { idx: number }) => e.idx < 40)
   await writeFile(journalPath, JSON.stringify(journal))
   await migrate(db, { migrationsFolder: folder })
-  await db
-    .insert(associations)
-    .values(
-      ["One", "Two"].map((name) => ({
-        name,
-        descriptionIt: "Italiano",
-        descriptionEn: "English",
-        createdBySub: "legacy",
-        telegram: "https://t.me/test",
-      }))
-    )
+  await db.insert(associations).values(
+    ["One", "Two"].map((name) => ({
+      name,
+      descriptionIt: "Italiano",
+      descriptionEn: "English",
+      createdBySub: "legacy",
+      telegram: "https://t.me/test",
+    }))
+  )
   await migrate(db, { migrationsFolder: "./drizzle" })
   const store = createAssociationStore(db)
   const service = createAssociationService(store, "https://admin.example.org")
