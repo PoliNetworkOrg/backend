@@ -889,13 +889,10 @@ export function createEsignService(options: ServiceOptions) {
         roles: [...new Set(r.roles.map((k) => k.trim()).filter(Boolean))].sort(),
         permissions: [...new Set(r.permissions.map((k) => k.trim()).filter(Boolean))].sort(),
       })
-      await store.setDriveAccess({
-        driveId,
-        request: clean(rule.request),
-        sign: clean(rule.sign),
-        updatedBySub: caller.sub,
-      })
+      const saved = { request: clean(rule.request), sign: clean(rule.sign) }
+      await store.setDriveAccess({ driveId, ...saved, updatedBySub: caller.sub })
       logger.info({ driveId, by: caller.sub }, "[ESIGN] drive access changed")
+      return saved
     },
 
     /**
@@ -943,6 +940,11 @@ export function createEsignService(options: ServiceOptions) {
             drives: drives.filter((d) => maySign(rules, person.sub, d.id)).map((d) => d.id),
           }
         })
+    },
+
+    /** For the audit log: the request's title, whoever asks. */
+    async requestTitle(id: string) {
+      return (await store.getRequest(id))?.title ?? null
     },
 
     async resetIdentity(sub: string) {

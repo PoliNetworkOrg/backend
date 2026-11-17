@@ -6,3 +6,8 @@ export const MESSAGES_RETENTION_DAYS = 7
 export const MODERATION_RETENTION_MONTHS = 24
 /** How long revocations of permanent measures stay in the moderation audit log; see `endedMeasures`. */
 export const ENDED_MODERATION_RETENTION_DAYS = 1
+/**
+ * Events in the backend audit log (`common_audit_events`) are deleted this many months after they were written. It
+ * matches the moderation records' retention; the privacy policy should state it.
+ */
+export const AUDIT_EVENTS_RETENTION_MONTHS = 24

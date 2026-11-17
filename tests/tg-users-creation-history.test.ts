@@ -32,6 +32,7 @@ vi.mock("@/idp/policies", () => ({
 }))
 vi.mock("@/trpc", () => {
   const procedure = {
+    meta: () => procedure,
     input: () => procedure,
     output: () => procedure,
     query: (handler: unknown) => ({ handler }),

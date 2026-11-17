@@ -57,6 +57,36 @@ The bot's socket.io client authenticates with its service token in `auth.token` 
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
 
+## Audit log
+
+`common_audit_events` records who used which permission to change what through the backend. The tRPC audit middleware
+(`src/audit`) writes one event per mutation: the action (the procedure path), the caller from the token, the target,
+the outcome (`success`, `failure` when an error is thrown or returned, `denied` when the policy refuses the caller), the
+request id shared by the calls of one HTTP request, and when. Calls without a valid token are not recorded.
+
+Every mutation declares how it is recorded in its procedure meta, and a test walks the router so that none ships
+without one, like its policy:
+
+- `.meta(audit.full())`: also the input, the reason and the states before and after that the handler adds with
+  `ctx.audit.set(...)`. `fields` keeps only those fields of the input, for inputs that carry personal data or free
+  text not worth keeping; a dotted field (`output.driveId`) keeps one field of a nested object.
+- `.meta(audit.minimal({ target }))`: only the actor, the action, the target and the outcome, for areas that keep their
+  own history behind their own permissions. People records each change in the person's activity history, and the
+  Libro Soci in `soci_activity`.
+- `.meta(audit.none(why))`: not recorded, e.g. the bot's ingestion, or Telegram moderation, which `tg_audit_log` keeps
+  under its own retention rules.
+
+Handlers call `ctx.audit.skip()` when a call changed nothing. Inputs and states are stored without secrets
+(`password`, `token`, `ticket`, `code`, `*Key`, `*Secret` fields) or file contents, and are cut when too large. Denied
+calls keep no input.
+
+Events are deleted 24 months after they were written (`AUDIT_EVENTS_RETENTION_MONTHS`). Dashboard users with the IdP
+permission `audit:read` read the log with `audit.list`, newest first, paged by `cursor` and filtered by area, outcome,
+target, actor, date or text.
+
+Changes made outside the backend's tRPC procedures are not in the log: directly in Telegram or WhatsApp, the cron jobs,
+the e-signing agent endpoints (each request keeps its own history) and roles and permissions in the IdP.
+
 ## People
 
 The `people` router is the admin dashboard's register of Group Admins, Capo Admins and team members. Each person

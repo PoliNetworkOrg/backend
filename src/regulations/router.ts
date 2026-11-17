@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
@@ -7,6 +8,27 @@ import type { DiffService } from "./diff/service"
 import type { Directory } from "./directory"
 import type { EmanationService } from "./emanation/service"
 import { fail, type RegulationsService, type Viewer } from "./service"
+
+/** The input fields kept in audit events: references to records, states, roles and titles. */
+const AUDITED_FIELDS = [
+  "draftId",
+  "targetDraftId",
+  "snapshotId",
+  "commentId",
+  "delegaId",
+  "documentKey",
+  "userId",
+  "role",
+  "to",
+  "from.kind",
+  "from.id",
+  "source.kind",
+  "source.id",
+  "kind",
+  "title",
+  "name",
+  "expiresAt",
+] as const
 
 /**
  * `regulations.*`: every procedure is open to dashboard users (scope `backend:admin`), and the service checks the
@@ -20,11 +42,15 @@ export function createRegulationsRouter(
 ) {
   const diff = () => extras.diff ?? fail("PRECONDITION_FAILED", "Le differenze non sono configurate.")
   const emanation = () => extras.emanation ?? fail("PRECONDITION_FAILED", "L'emanazione non è configurata.")
-  const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
-    if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
-    const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
-    return next({ ctx: { viewer } })
-  })
+  // Comments, snapshots, deleghe and delibere keep their own authors and text: the audit log keeps only which records a
+  // call names, never comment bodies, quotes, merge resolutions, delibere or notes.
+  const user = policy({ user: { scope: SCOPE.admin } })
+    .meta(audit.full({ fields: AUDITED_FIELDS }))
+    .use(async ({ ctx, next }) => {
+      if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
+      const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
+      return next({ ctx: { viewer } })
+    })
   const draftRef = C.draftRefInputSchema
   const ok = z.void()
 
@@ -103,6 +129,7 @@ export function createRegulationsRouter(
         .mutation(({ ctx, input }) => service.removeAssignment(ctx.viewer, input)),
     }),
     collabTicket: user
+      .meta(audit.none("Hands out a one-minute ticket to connect to the editor; it changes nothing"))
       .input(draftRef)
       .output(C.collabTicketSchema)
       .mutation(({ ctx, input }) => service.collabTicket(ctx.viewer, input.draftId)),
