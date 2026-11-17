@@ -8,7 +8,38 @@ import type { Mail, Record, Store } from "./service"
 export function createAssociationStore(db: typeof DB): Store {
   return {
     async list() {
-      return (await db.select().from(associationRegistry)).map((row) => row.state)
+      return (await db.select().from(associationRegistry).orderBy(associationRegistry.id)).map((row) => row.state)
+    },
+    async get(id) {
+      const [row] = await db.select().from(associationRegistry).where(eq(associationRegistry.id, id))
+      return row?.state ?? null
+    },
+    async byInvitation(hash) {
+      const [row] = await db
+        .select()
+        .from(associationRegistry)
+        .where(sql`${associationRegistry.state}->'invitations' @> ${JSON.stringify([{ hash }])}::jsonb`)
+      return row?.state ?? null
+    },
+    async published() {
+      const rows = await db
+        .select()
+        .from(associationRegistry)
+        .where(
+          sql`(${associationRegistry.state}->>'registered')::boolean AND jsonb_typeof(${associationRegistry.state}->'published') = 'object'`
+        )
+      return rows.map((row) => row.state)
+    },
+    async recentAccessRequests(sub, since) {
+      const [{ count }] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(associationRegistry)
+        .where(
+          sql`EXISTS (SELECT 1 FROM jsonb_array_elements(${associationRegistry.state}->'requests') q
+            WHERE q->>'by' = ${sub} AND q->>'kind' = 'access' AND q->>'createdAt' > ${since})`
+        )
+      // Counts association records holding a recent request, a close lower bound of the requests themselves.
+      return count
     },
     async create(state, commandId, actor) {
       const creationKey = `${actor}:${commandId}`
@@ -20,11 +51,14 @@ export function createAssociationStore(db: typeof DB): Store {
           .from(associationRegistry)
           .where(eq(associationRegistry.creationKey, creationKey))
         if (existing[0]) return existing[0].id
+        // Only open applications count: rejected, withdrawn and redirected ones must not lock a user out for good.
         const [{ count }] = await tx
           .select({ count: sql<number>`count(*)::int` })
           .from(associationRegistry)
           .where(
-            sql`${associationRegistry.state}->>'creator' = ${actor} AND (${associationRegistry.state}->>'registered')::boolean = false`
+            sql`${associationRegistry.state}->>'creator' = ${actor} AND (${associationRegistry.state}->>'registered')::boolean = false AND EXISTS (
+              SELECT 1 FROM jsonb_array_elements(${associationRegistry.state}->'requests') q
+              WHERE q->>'kind' = 'registration' AND q->>'by' = ${actor} AND q->>'status' IN ('draft', 'submitted', 'changes'))`
           )
         if (count >= 10)
           throw new TRPCError({

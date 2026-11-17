@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import z from "zod"
 import { associationStore } from "@/associations"
-import { linkSchema } from "@/associations/contract"
+import { httpUrl, linkSchema } from "@/associations/contract"
 import { dashboard, publicData } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 
@@ -32,20 +32,23 @@ export default createTRPCRouter({
   getAllAssociations: policy(publicData)
     .output(z.array(associationSchema))
     .query(async () => {
-      const records = await associationStore.list()
+      const records = await associationStore.published()
       return records
-        .filter((r) => r.registered && r.published && r.status !== "archived" && r.legacyId !== null)
+        .filter((r) => r.status !== "archived" && r.legacyId !== null)
+        .sort((a, b) => (a.legacyId ?? 0) - (b.legacyId ?? 0))
         .map((r) => {
-          const p = r.published!
-          const first = (key: string) => p.links.find((l) => l.platform === key)?.url ?? null
+          const p = r.published as NonNullable<typeof r.published>
+          // Public output must never fail for the whole list because of one odd stored value.
+          const links = p.links.filter((l) => linkSchema.safeParse(l).success)
+          const first = (key: string) => links.find((l) => l.platform === key)?.url ?? null
           return {
-            id: r.legacyId!,
+            id: r.legacyId as number,
             name: p.name,
             descriptionIt: p.descriptionIt,
             descriptionEn: p.descriptionEn,
-            logo: p.logo,
+            logo: p.logo && httpUrl.safeParse(p.logo).success ? p.logo : null,
             links: {
-              email: p.email || null,
+              email: p.email && z.email().safeParse(p.email).success ? p.email : null,
               website: first("website"),
               facebook: first("facebook"),
               instagram: first("instagram"),
@@ -56,7 +59,7 @@ export default createTRPCRouter({
               linkedin: first("linkedin"),
               spotify: first("spotify"),
             },
-            extraLinks: p.links,
+            extraLinks: links,
           }
         })
     }),

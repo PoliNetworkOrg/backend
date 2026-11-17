@@ -229,4 +229,52 @@ describe("Association registry and scoped review", () => {
       }).success
     ).toBe(false)
   })
+  it("records invited and accepting emails, and revocation cancels pending approvals for that account", async () => {
+    const h = harness()
+    const id = await h.registered()
+    const other = { ...outsider, email: "other@example.org" }
+    await h.command(owner, id, {
+      action: "invite",
+      role: "collaborator",
+      email: "invited@example.org",
+      explanation: "Colleague",
+    })
+    const q = h.rows.get(id)!.requests.at(-1)!
+    await h.service.accept(other, h.mails.at(-1)!.text.match(/token=([\w-]+)/)![1])
+    const stored = h.rows.get(id)!
+    expect(stored.requests.at(-1)!.targetEmail).toBe("other@example.org")
+    expect(stored.events.at(-1)!.detail).toContain("invited@example.org")
+    await h.command(staff, id, { action: "review", requestId: q.id, decision: "approve", reason: "ok" })
+    await h.command(owner, id, {
+      action: "membership",
+      sub: other.sub,
+      role: "responsible",
+      remove: false,
+      explanation: "Promote",
+    })
+    const pending = h.rows.get(id)!.requests.at(-1)!
+    await h.command(staff, id, { action: "revoke", sub: other.sub, reason: "Urgent" })
+    expect(h.rows.get(id)!.requests.find((r) => r.id === pending.id)!.status).toBe("withdrawn")
+    await expect(
+      h.command(staff, id, { action: "review", requestId: pending.id, decision: "approve", reason: "stale" })
+    ).rejects.toMatchObject({ code: "CONFLICT" })
+    expect((await h.service.get(staff, id)).members.find((m) => m.sub === other.sub)!.active).toBe(false)
+  })
+  it("limits access requests per account across associations and bounds stored command keys", async () => {
+    const h = harness()
+    const a = await h.registered()
+    for (let i = 0; i < 205; i++) await h.command(staff, a, { action: "note", note: String(i) })
+    expect(h.rows.get(a)!.commands.length).toBeLessThanOrEqual(200)
+    const ids = [a]
+    for (let i = 0; i < 20; i++) ids.push(await h.registered())
+    let failure: unknown
+    for (const id of ids) {
+      try {
+        await h.command(outsider, id, { action: "access", explanation: "please" })
+      } catch (error) {
+        failure = error
+      }
+    }
+    expect(failure).toMatchObject({ code: "TOO_MANY_REQUESTS" })
+  })
 })

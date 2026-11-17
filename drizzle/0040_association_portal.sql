@@ -24,10 +24,14 @@ SELECT rid, jsonb_build_object(
 FROM web_associations a
 CROSS JOIN LATERAL (SELECT gen_random_uuid() AS rid WHERE a.id IS NOT NULL) ids
 CROSS JOIN LATERAL (SELECT jsonb_build_object(
-  'name', a.name, 'acronym', '', 'descriptionIt', a.description_it, 'descriptionEn', a.description_en,
-  'logo', a.logo, 'email', coalesce(a.email, ''),
-  'links', coalesce((SELECT jsonb_agg(jsonb_build_object('platform', key, 'label', key, 'url', value))
-    FROM jsonb_each_text(jsonb_build_object('website', a.website, 'facebook', a.facebook, 'instagram', a.instagram,
-      'tiktok', a.tiktok, 'x', a.x, 'youtube', a.youtube, 'telegram', a.telegram, 'linkedin', a.linkedin, 'spotify', a.spotify))
-    WHERE value IS NOT NULL AND value <> ''), '[]'::jsonb)
+  -- Legacy values are normalised to what the registry contract accepts: only http(s) links and logos, valid emails.
+  'name', left(coalesce(nullif(btrim(a.name), ''), 'Association'), 200), 'acronym', '',
+  'descriptionIt', left(a.description_it, 20000), 'descriptionEn', left(a.description_en, 20000),
+  'logo', CASE WHEN a.logo ~* '^https?://[^[:space:]]+$' AND length(a.logo) <= 2048 THEN to_jsonb(a.logo) ELSE 'null'::jsonb END,
+  'email', CASE WHEN a.email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' AND length(a.email) <= 320 THEN a.email ELSE '' END,
+  'links', coalesce((SELECT jsonb_agg(jsonb_build_object('platform', v.k, 'label', v.k, 'url', v.u) ORDER BY v.ord)
+    FROM (VALUES (1, 'website', a.website), (2, 'facebook', a.facebook), (3, 'instagram', a.instagram),
+      (4, 'tiktok', a.tiktok), (5, 'x', a.x), (6, 'youtube', a.youtube), (7, 'telegram', a.telegram),
+      (8, 'linkedin', a.linkedin), (9, 'spotify', a.spotify)) AS v(ord, k, u)
+    WHERE v.u ~* '^https?://[^[:space:]]+$' AND length(v.u) <= 2048), '[]'::jsonb)
 ) AS profile) profiles;

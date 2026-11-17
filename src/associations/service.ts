@@ -24,6 +24,10 @@ export type Record = {
 export type Mail = { id: string; to: string; subject: string; text: string }
 export type Store = {
   list(): Promise<Record[]>
+  get(id: string): Promise<Record | null>
+  byInvitation(hash: string): Promise<Record | null>
+  published(): Promise<Record[]>
+  recentAccessRequests(sub: string, since: string): Promise<number>
   create(record: Record, commandId: string, actor: string): Promise<string>
   transfer<T>(from: string, to: string, operation: (source: Record, destination: Record) => T): Promise<T>
   change<T>(id: string, operation: (record: Record, mail: Mail[]) => T): Promise<T>
@@ -34,6 +38,7 @@ function fail(
 ): never {
   throw new TRPCError({ code, message })
 }
+const MAX_COMMAND_KEYS = 200
 const hash = (token: string) => createHash("sha256").update(token).digest("hex")
 const activeMember = (r: Record, v: Viewer) => r.members.find((m) => m.sub === v.sub && m.active)
 const accessible = (r: Record, v: Viewer) =>
@@ -63,6 +68,7 @@ function request(v: Viewer, kind: Request["kind"], explanation: string, profile:
     profile,
     targetSub: null,
     targetName: null,
+    targetEmail: "",
     role: "responsible",
     email: v.email ?? "",
     remove: false,
@@ -135,7 +141,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
         .map((r) => ({ id: r.id, name: r.profile.name, revision: r.revision }))
     },
     async get(v: Viewer, id: string) {
-      const r = (await store.list()).find((r) => r.id === id)
+      const r = await store.get(id)
       if (!r) return fail("NOT_FOUND", "Association not found")
       return present(r, v)
     },
@@ -213,6 +219,11 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
           event(destination, v, "Access request received from an existing application", "", forwarded.id)
           return { id: destination.id }
         })
+      }
+      if (c.action === "access" && !v.operator) {
+        const since = new Date(Date.now() - 86400000).toISOString()
+        if ((await store.recentAccessRequests(v.sub, since)) >= 20)
+          fail("TOO_MANY_REQUESTS", "Too many access requests today. Contact PoliNetwork.")
       }
       return store.change(c.id, (r, mail) => {
         // Recheck authorization before idempotency: a former representative cannot reuse commands to read the record.
@@ -391,25 +402,37 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
           const member = r.members.find((m) => m.sub === (c.action === "leave" ? v.sub : c.sub) && m.active)
           if (!member) fail("NOT_FOUND", "Active representative not found")
           member.active = false
+          // A pending approval must not silently bring a removed representative back.
+          for (const pending of r.requests)
+            if (
+              pending.targetSub === member.sub &&
+              (pending.kind === "membership" || pending.kind === "access") &&
+              ["submitted", "changes"].includes(pending.status)
+            ) {
+              pending.status = "withdrawn"
+              pending.response = "Representative removed"
+              pending.updatedAt = new Date().toISOString()
+              r.invitations = r.invitations.filter((i) => i.requestId !== pending.id)
+            }
           event(r, v, c.action === "leave" ? "Representative left" : "Representative revoked", c.reason)
         }
         r.commands.push(commandKey)
+        // Retries only matter for a short window; keep the aggregate from growing without bound.
+        if (r.commands.length > MAX_COMMAND_KEYS) r.commands.splice(0, r.commands.length - MAX_COMMAND_KEYS)
         r.revision++
         return { id: r.id }
       })
     },
     async invitation(token: string) {
-      const r = (await store.list()).find((r) =>
-        r.invitations.some((i) => i.hash === hash(token) && i.expiresAt > new Date().toISOString())
-      )
-      const i = r?.invitations.find((i) => i.hash === hash(token))
+      const r = await store.byInvitation(hash(token))
+      const i = r?.invitations.find((i) => i.hash === hash(token) && i.expiresAt > new Date().toISOString())
       const q = r?.requests.find((q) => q.id === i?.requestId)
       if (!r || !i || !q || !["submitted", "changes"].includes(q.status) || r.status !== "active")
         fail("NOT_FOUND", "Invitation expired or revoked")
       return { associationName: r.profile.name, role: q.role, expiresAt: i.expiresAt }
     },
     async accept(v: Viewer, token: string) {
-      const r = (await store.list()).find((r) => r.invitations.some((i) => i.hash === hash(token)))
+      const r = await store.byInvitation(hash(token))
       if (!r) fail("NOT_FOUND", "Invitation expired or revoked")
       return store.change(r.id, (r) => {
         const i = r.invitations.find((i) => i.hash === hash(token))
@@ -430,7 +453,14 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
         q.updatedAt = new Date().toISOString()
         r.invitations = r.invitations.filter((candidate) => candidate !== i)
         r.revision++
-        event(r, v, "Invitation accepted; awaiting PoliNetwork", "", q.id)
+        q.targetEmail = v.email ?? ""
+        event(
+          r,
+          v,
+          "Invitation accepted; awaiting PoliNetwork",
+          `Invited address: ${q.email}; accepting account: ${v.email ?? "unknown"}`,
+          q.id
+        )
         return { id: r.id }
       })
     },

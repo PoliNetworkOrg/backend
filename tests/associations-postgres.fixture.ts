@@ -32,12 +32,21 @@ try {
   await writeFile(journalPath, JSON.stringify(journal))
   await migrate(db, { migrationsFolder: folder })
   await db.insert(associations).values(
-    ["One", "Two"].map((name) => ({
+    ["One", "Two", "Messy"].map((name) => ({
       name,
       descriptionIt: "Italiano",
       descriptionEn: "English",
       createdBySub: "legacy",
       telegram: "https://t.me/test",
+      ...(name === "Messy"
+        ? {
+            telegram: "t.me/foo",
+            website: "ftp://x.org",
+            email: "nope",
+            logo: "/relative.png",
+            facebook: "https://fb.com/x",
+          }
+        : {}),
     }))
   )
   await migrate(db, { migrationsFolder: "./drizzle" })
@@ -46,8 +55,19 @@ try {
   const staff = { sub: "staff", name: "Staff", operator: true }
   const user = { sub: "new", name: "New", operator: false }
   const migrated = await store.list()
-  assert.equal(migrated.length, 2)
-  assert.equal(new Set(migrated.map((r) => r.id)).size, 2)
+  assert.equal(migrated.length, 3)
+  assert.equal(new Set(migrated.map((r) => r.id)).size, 3)
+  const messy = migrated.find((r) => r.profile.name === "Messy")!
+  assert.equal(messy.profile.logo, null)
+  assert.equal(messy.profile.email, "")
+  assert.deepEqual(
+    messy.profile.links.map((l) => l.url),
+    ["https://fb.com/x"]
+  )
+  assert((await service.get(staff, messy.id)).profile.links.length === 1)
+  assert.deepEqual((await store.published()).map((r) => r.legacyId).sort(), [1, 2, 3])
+  assert((await store.byInvitation("missing")) === null)
+  assert.equal(await store.recentAccessRequests("nobody", new Date(0).toISOString()), 0)
   assert(migrated.every((r) => r.published && r.members.length === 0 && r.legacyId))
   const profile = {
     name: "New",
@@ -107,7 +127,7 @@ try {
     decision: "approve",
     reason: "Approved",
   })
-  assert.equal((await db.select().from(associations)).length, 3)
+  assert.equal((await db.select().from(associations)).length, 4)
   // A new service instance sees persisted publication, roles and history.
   const restarted = createAssociationService(createAssociationStore(db), "https://admin.example.org")
   const persisted = await restarted.get(user, a.id)
@@ -121,7 +141,7 @@ try {
     reason: "Hide",
   })
   assert.equal((await restarted.get(user, a.id)).published, false)
-  assert.equal((await db.select().from(associationRegistry)).length, 3)
+  assert.equal((await db.select().from(associationRegistry)).length, 4)
   console.log(
     JSON.stringify({
       checked: [

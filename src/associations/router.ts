@@ -6,6 +6,15 @@ import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
 import type { createAssociationService } from "./service"
 
+const uploads = new Map<string, number[]>()
+function limitUploads(sub: string) {
+  const now = Date.now()
+  const recent = (uploads.get(sub) ?? []).filter((t) => t > now - 3600_000)
+  if (recent.length >= 20)
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many logo uploads. Try later." })
+  uploads.set(sub, [...recent, now])
+}
+
 export function createAssociationRouter(
   service: ReturnType<typeof createAssociationService>,
   identity: (sub: string) => Promise<{ name: string; email?: string }> = async (sub) => ({ name: sub })
@@ -52,6 +61,7 @@ export function createAssociationRouter(
           )
         )
           throw new TRPCError({ code: "FORBIDDEN" })
+        limitUploads(ctx.viewer.sub)
         const bytes = Buffer.from(await input.file.arrayBuffer())
         const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
         const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255

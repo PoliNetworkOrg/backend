@@ -20,6 +20,14 @@ export function harness() {
   const mails: Mail[] = []
   const store: Store = {
     list: async () => structuredClone([...rows.values()]),
+    get: async (id) => structuredClone(rows.get(id) ?? null),
+    byInvitation: async (hash) =>
+      structuredClone([...rows.values()].find((r) => r.invitations.some((i) => i.hash === hash)) ?? null),
+    published: async () => structuredClone([...rows.values()].filter((r) => r.registered && r.published)),
+    recentAccessRequests: async (sub, since) =>
+      [...rows.values()]
+        .flatMap((r) => r.requests)
+        .filter((q) => q.by === sub && q.kind === "access" && q.createdAt > since).length,
     async create(r, command, actor) {
       const key = `${actor}:${command}`
       if (creation.has(key)) return creation.get(key)!

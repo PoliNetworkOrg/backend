@@ -47,6 +47,7 @@ export const requestSchema = z.object({
   profile: profileSchema.nullable(),
   targetSub: z.string().nullable(),
   targetName: z.string().nullable(),
+  targetEmail: z.string().default(""),
   role: roleSchema,
   email: z.string(),
   remove: z.boolean(),

@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, sql } from "drizzle-orm"
+import { and, eq, isNotNull, isNull, lte, sql } from "drizzle-orm"
 import { DB } from "@/db"
 import { associationMail } from "@/db/schema/web/association-portal"
 import { sendAssociationEmail } from "@/emails/mailer"
@@ -11,41 +11,73 @@ import { createAssociationStore } from "./store-pg"
 export const associationStore = createAssociationStore(DB)
 export const associationPortal = createAssociationService(associationStore, env.ESIGN_DASHBOARD_URL.replace(/\/$/, ""))
 
-/** Durable retries, SKIP LOCKED across replicas. Delivery is at-least-once, with a stable Message-ID. */
+const LEASE_MS = 5 * 60_000
+const MAX_ATTEMPTS = 20
+const RETENTION_MS = 30 * 86_400_000
+
+/**
+ * Durable retries across replicas. A row is leased in a short transaction (nextAttempt pushed forward), then sent
+ * outside any transaction, so no connection or row lock is held during delivery. Delivery is at-least-once, with a
+ * stable Message-ID. Rows that keep failing are scrubbed and closed; delivered rows are purged after a retention period.
+ */
 export async function deliverAssociationMail() {
+  await DB.delete(associationMail).where(
+    and(isNotNull(associationMail.sentAt), lte(associationMail.sentAt, new Date(Date.now() - RETENTION_MS)))
+  )
   for (let n = 0; n < 20; n++) {
-    const done = await DB.transaction(async (tx) => {
-      const [row] = await tx
+    const row = await DB.transaction(async (tx) => {
+      const [claimed] = await tx
         .select()
         .from(associationMail)
         .where(and(isNull(associationMail.sentAt), lte(associationMail.nextAttempt, new Date())))
         .limit(1)
         .for("update", { skipLocked: true })
-      if (!row) return true
-      try {
-        await sendAssociationEmail(row.mail)
-        // Erase the invitation URL from the outbox after delivery; only the hash remains in the registry.
+      if (claimed)
         await tx
           .update(associationMail)
-          .set({ sentAt: new Date(), mail: { ...row.mail, text: "Delivered" } })
+          .set({ nextAttempt: new Date(Date.now() + LEASE_MS) })
+          .where(eq(associationMail.id, claimed.id))
+      return claimed
+    })
+    if (!row) break
+    try {
+      await sendAssociationEmail(row.mail)
+      // Erase the invitation URL from the outbox after delivery; only the hash remains in the registry.
+      await DB.update(associationMail)
+        .set({ sentAt: new Date(), mail: { ...row.mail, text: "Delivered" } })
+        .where(eq(associationMail.id, row.id))
+    } catch (error) {
+      logger.error({ error, mailId: row.id }, "Association notification delivery failed")
+      if (row.attempts + 1 >= MAX_ATTEMPTS)
+        await DB.update(associationMail)
+          .set({ sentAt: new Date(), attempts: row.attempts + 1, mail: { ...row.mail, text: "Undeliverable" } })
           .where(eq(associationMail.id, row.id))
-      } catch (error) {
-        logger.error({ error, mailId: row.id }, "Association notification delivery failed")
-        await tx
-          .update(associationMail)
+      else
+        await DB.update(associationMail)
           .set({
             attempts: sql`${associationMail.attempts} + 1`,
             nextAttempt: new Date(Date.now() + Math.min(3600, 60 * 2 ** Math.min(row.attempts, 6)) * 1000),
           })
           .where(eq(associationMail.id, row.id))
-      }
-      return false
-    })
-    if (done) break
+    }
   }
 }
 
+const IDENTITY_TTL_MS = 60_000
+let directoryCache: { at: number; accounts: { sub: string; name?: string | null; email?: string | null }[] } | null =
+  null
+
 export async function associationIdentity(sub: string) {
-  const account = (await idp?.directory?.())?.find((account) => account.sub === sub)
+  if (!idp?.directory) return { name: sub, email: undefined }
+  if (!directoryCache || Date.now() - directoryCache.at > IDENTITY_TTL_MS) {
+    try {
+      directoryCache = { at: Date.now(), accounts: await idp.directory() }
+    } catch (error) {
+      // A directory outage must not lock every representative out; fall back to stale data or the bare subject.
+      logger.warn({ error }, "Association identity directory unavailable")
+      directoryCache = directoryCache ? { ...directoryCache, at: Date.now() - IDENTITY_TTL_MS + 10_000 } : null
+    }
+  }
+  const account = directoryCache?.accounts.find((account) => account.sub === sub)
   return { name: account?.name ?? sub, email: account?.email ?? undefined }
 }
