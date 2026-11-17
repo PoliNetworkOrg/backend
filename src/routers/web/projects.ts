@@ -139,8 +139,9 @@ export default createTRPCRouter({
             .select({ id: PROJECTS.id, title: PROJECTS.title, order: PROJECTS.order })
             .from(PROJECTS)
             .orderBy(asc(PROJECTS.order))
-        // Serialize reorders before reading, so each one's `before` is the order the previous one committed.
-        await tx.execute(sql`LOCK TABLE ${PROJECTS} IN SHARE ROW EXCLUSIVE MODE`)
+        // Serialize reorders before reading, so each one's `before` is the order the previous one committed. EXCLUSIVE
+        // also waits for edits holding row locks (which would otherwise deadlock with this update); plain reads go on.
+        await tx.execute(sql`LOCK TABLE ${PROJECTS} IN EXCLUSIVE MODE`)
         const before = await order()
         const updated = await Promise.all(
           input.projectIds.map((id, index) =>
