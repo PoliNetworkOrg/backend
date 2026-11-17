@@ -75,7 +75,8 @@ export async function associationIdentity(sub: string) {
     } catch (error) {
       // A directory outage must not lock every representative out; fall back to stale data or the bare subject.
       logger.warn({ error }, "Association identity directory unavailable")
-      directoryCache = directoryCache ? { ...directoryCache, at: Date.now() - IDENTITY_TTL_MS + 10_000 } : null
+      // Retry in 10 seconds, not on every call: each failed lookup can wait for the IdP timeout.
+      directoryCache = { accounts: directoryCache?.accounts ?? [], at: Date.now() - IDENTITY_TTL_MS + 10_000 }
     }
   }
   const account = directoryCache?.accounts.find((account) => account.sub === sub)
