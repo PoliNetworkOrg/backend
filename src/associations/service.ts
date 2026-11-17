@@ -410,7 +410,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
               ["submitted", "changes"].includes(pending.status)
             ) {
               pending.status = "withdrawn"
-              pending.response = "Representative removed"
+              pending.response = "Referente rimosso"
               pending.updatedAt = new Date().toISOString()
               r.invitations = r.invitations.filter((i) => i.requestId !== pending.id)
             }
@@ -458,7 +458,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
           r,
           v,
           "Invitation accepted; awaiting PoliNetwork",
-          `Invited address: ${q.email}; accepting account: ${v.email ?? "unknown"}`,
+          `Indirizzo invitato: ${q.email}; account che ha accettato: ${v.email ?? "sconosciuto"}`,
           q.id
         )
         return { id: r.id }
