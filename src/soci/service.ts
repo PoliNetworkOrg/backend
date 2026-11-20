@@ -40,7 +40,10 @@ type Logger = {
 
 export type SociOptions = {
   store: SociStore
-  directory: Pick<AzureDirectory, "createMember" | "deleteUser" | "findByMail" | "getSociMembers" | "setMemberNumber">
+  directory: Pick<
+    AzureDirectory,
+    "createMember" | "deleteUser" | "findByMail" | "getSociMembers" | "setMemberNumber" | "addToSoci" | "removeFromSoci"
+  >
   /** The Entra-side lock and pending-number cache (`src/azure/member-writes.ts`). */
   writes: {
     serialize: <T>(task: () => Promise<T>) => Promise<T>
@@ -272,6 +275,54 @@ export function createSociService(options: SociOptions) {
     const active = await store.activeByCodiceFiscale(codiceFiscale)
     if (active && active.id !== self)
       fail("CONFLICT", `This codice fiscale belongs to socio ${active.number}, who is still active.`)
+  }
+
+  /** Called under the member-write lock. The record and its history commit together. */
+  async function saveMembership(
+    s: Socio,
+    inSoci: boolean,
+    changes: Pick<Socio, "endedOn" | "endReason" | "endNote" | "accountState">,
+    e: ActivityEntry
+  ) {
+    const group = await sociGroup()
+    if (group === null) fail("INTERNAL_SERVER_ERROR", "Couldn't read the Soci group; no status was saved.")
+    const wasInSoci = group.some((member) => member.id === s.entraObjectId)
+    try {
+      // Always write: a recent group change may not yet appear in Graph's listing.
+      if (inSoci) await directory.addToSoci(s.entraObjectId)
+      else await directory.removeFromSoci(s.entraObjectId)
+    } catch (error) {
+      logger.error(
+        { error: safeErrorDetail(error), by: e.actor, memberId: s.entraObjectId },
+        "[soci] membership not changed"
+      )
+      fail("INTERNAL_SERVER_ERROR", "Microsoft 365 refused the group change; no status was saved.")
+    }
+    try {
+      await store.update(s.id, { ...changes, updatedBy: e.actor, updatedAt: e.at }, e)
+    } catch (error) {
+      logger.error(
+        { error: safeErrorDetail(error), by: e.actor, memberId: s.entraObjectId },
+        "[soci] membership not saved"
+      )
+      if (wasInSoci !== inSoci) {
+        try {
+          if (wasInSoci) await directory.addToSoci(s.entraObjectId)
+          else await directory.removeFromSoci(s.entraObjectId)
+        } catch (error) {
+          logger.error(
+            { error: safeErrorDetail(error), by: e.actor, memberId: s.entraObjectId, wasInSoci },
+            "[soci] membership compensation failed"
+          )
+          fail(
+            "INTERNAL_SERVER_ERROR",
+            "Status wasn't saved and the group couldn't be restored; reconcile Microsoft 365 with the register."
+          )
+        }
+      }
+      fail("INTERNAL_SERVER_ERROR", "Status couldn't be saved; Microsoft 365 keeps its previous group membership.")
+    }
+    logger.info({ by: e.actor, memberId: s.entraObjectId, number: s.number, inSoci }, "[soci] membership changed")
   }
 
   const detailsOf = (d: C.SocioDetails) => ({
@@ -535,6 +586,54 @@ export function createSociService(options: SociOptions) {
           updatedAt: now().toISOString(),
         }
         await store.update(s.id, changes, entry(actor, `Edited ${changed.map((key) => FIELD_LABELS[key]).join(", ")}`))
+      })
+    },
+
+    async end(actor: string, input: C.EndInput): Promise<void> {
+      await writes.serialize(async () => {
+        const s = await find(input.number)
+        if (s.endedOn) fail("CONFLICT", "The socio's status has already ended.")
+        if (s.accountState === "deleted") fail("PRECONDITION_FAILED", "The socio's account has been deleted.")
+        await saveMembership(
+          s,
+          false,
+          {
+            endedOn: input.endedOn,
+            endReason: input.endReason,
+            endNote: input.endNote,
+            accountState: "pending_deletion",
+          },
+          entry(
+            actor,
+            `Membership ended on ${input.endedOn} (${input.endReason})${input.endNote ? `: ${input.endNote}` : ""}`
+          )
+        )
+      })
+    },
+
+    async restore(actor: string, input: C.RestoreInput): Promise<void> {
+      await writes.serialize(async () => {
+        const s = await find(input.number)
+        if (!s.endedOn) fail("CONFLICT", "The socio is already active.")
+        if (s.accountState === "deleted") fail("PRECONDITION_FAILED", "The socio's account has been deleted.")
+        await requireUniqueCodiceFiscale(s.codiceFiscale, s.id)
+        let account: MemberSummary | null
+        try {
+          account = await writes.currentMember(s.entraObjectId)
+        } catch (error) {
+          logger.error(
+            { error: safeErrorDetail(error), by: actor, memberId: s.entraObjectId },
+            "[soci] account not read"
+          )
+          fail("INTERNAL_SERVER_ERROR", "Couldn't read the Microsoft 365 account; no status was saved.")
+        }
+        if (!account) fail("PRECONDITION_FAILED", "The socio's account no longer exists in Microsoft 365.")
+        await saveMembership(
+          s,
+          true,
+          { endedOn: null, endReason: null, endNote: null, accountState: "active" },
+          entry(actor, `Membership restored: ${input.reason}`)
+        )
       })
     },
 

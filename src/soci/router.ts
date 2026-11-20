@@ -59,6 +59,8 @@ export function createSociRouter(soci: SociService) {
         .output(C.numberInputSchema)
         .mutation(({ ctx, input }) => soci.register(ctx.sub, input)),
       update: write.input(C.updateInputSchema).mutation(({ ctx, input }) => soci.update(ctx.sub, input)),
+      end: write.input(C.endInputSchema).mutation(({ ctx, input }) => soci.end(ctx.sub, input)),
+      restore: write.input(C.restoreInputSchema).mutation(({ ctx, input }) => soci.restore(ctx.sub, input)),
       setNumber: write
         .input(C.setNumberInputSchema)
         .output(C.setNumberResultSchema)

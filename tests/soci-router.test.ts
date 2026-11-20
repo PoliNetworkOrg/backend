@@ -1,6 +1,6 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { PDFDocument } from "pdf-lib"
-import { beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 import type { Context } from "@/trpc"
 import { admitInput, harness, registerInput } from "./soci-fixtures"
 
@@ -45,6 +45,8 @@ describe("Soci tRPC contract", () => {
       "members.admit": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "members.register": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "members.update": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
+      "members.end": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
+      "members.restore": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "members.setNumber": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "fees.list": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
       "fees.file": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
@@ -87,6 +89,52 @@ describe("Soci tRPC contract", () => {
 
     await caller.members.admit(input)
     expect((await caller.members.get({ number: 344 })).createdBy).toBe("usr_direttivo")
+  })
+
+  it("requires a signed-in dashboard writer with admin:access for ending and restoring", async () => {
+    const h = harness()
+    const router = makeRouter(h.service)
+    const end = { number: 1002, endedOn: "2026-11-09", endReason: "other" as const }
+    const restore = { number: 1002, reason: "Errore" }
+    const endCall = vi.spyOn(h.service, "end")
+    const restoreCall = vi.spyOn(h.service, "restore")
+    for (const [ctx, code] of [
+      [{}, "UNAUTHORIZED"],
+      [context(["soci:write"]), "FORBIDDEN"],
+      [context(["admin:access", "soci:read"]), "FORBIDDEN"],
+      [context(DIRETTIVO, { kind: "service", client: "bot" }), "FORBIDDEN"],
+      [context(DIRETTIVO, user, []), "FORBIDDEN"],
+    ] as const) {
+      const caller = router.createCaller(ctx)
+      await expect(caller.members.end(end)).rejects.toMatchObject({ code })
+      await expect(caller.members.restore(restore)).rejects.toMatchObject({ code })
+    }
+    expect(endCall).not.toHaveBeenCalled()
+    expect(restoreCall).not.toHaveBeenCalled()
+  })
+
+  it("validates lifecycle inputs and records the token's author on both transitions", async () => {
+    const h = harness()
+    await h.service.register("usr_registrar", registerInput("mock-member-alan"))
+    const caller = makeRouter(h.service).createCaller(context())
+    const end = { number: 1002, endedOn: "2026-11-09", endReason: "resigned" as const }
+    const remove = vi.spyOn(h.directory, "removeFromSoci")
+    const add = vi.spyOn(h.directory, "addToSoci")
+    await expect(caller.members.end({ ...end, endReason: "lapsed" as never })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+    await expect(caller.members.end({ ...end, endedOn: "2026-02-30" })).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await expect(caller.members.restore({ number: 1002, reason: "  " })).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect(remove).not.toHaveBeenCalled()
+    expect(add).not.toHaveBeenCalled()
+
+    await caller.members.end(end)
+    await caller.members.restore({ number: 1002, reason: "  Cessazione registrata per errore  " })
+    const history = await h.store.activity(h.rows[0].id)
+    expect(history.slice(0, 2)).toMatchObject([
+      { actor: user.sub, text: "Membership restored: Cessazione registrata per errore" },
+      { actor: user.sub, text: "Membership ended on 2026-11-09 (resigned)" },
+    ])
   })
 
   it("finds the socio of me.* by the account's Microsoft 365 object ID, and refuses anyone else", async () => {

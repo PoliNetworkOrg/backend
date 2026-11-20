@@ -245,6 +245,19 @@ export const updateInputSchema = z.object({
 })
 export type UpdateInput = z.output<typeof updateInputSchema>
 
+/** Ends membership immediately; `endedOn` is the date recorded in the Libro Soci. */
+export const endInputSchema = z.object({
+  number: memberNumberSchema,
+  endedOn: dateSchema,
+  endReason: z.enum(["resigned", "expelled", "deceased", "other"]),
+  endNote: optional(z.string().trim().max(500)),
+})
+export type EndInput = z.output<typeof endInputSchema>
+
+/** Corrects a mistaken end while the Microsoft 365 account still exists. */
+export const restoreInputSchema = z.object({ number: memberNumberSchema, reason: text(500) })
+export type RestoreInput = z.output<typeof restoreInputSchema>
+
 export const setNumberInputSchema = z.object({
   number: memberNumberSchema,
   newNumber: memberNumberSchema,

@@ -73,11 +73,48 @@ try {
 
   await store.update(
     mario.id,
-    { endedOn: "2026-12-31", endReason: "resigned", updatedBy: "usr_direttivo", updatedAt: at },
+    {
+      endedOn: "2026-12-31",
+      endReason: "resigned",
+      endNote: "Dimissioni",
+      accountState: "pending_deletion",
+      updatedBy: "usr_direttivo",
+      updatedAt: at,
+    },
     entry("Ended")
+  )
+  const ended = await store.byNumber(344)
+  const endedHistory = await store.activity(mario.id)
+  assert.equal(ended?.accountState, "pending_deletion")
+  assert.equal(ended?.endNote, "Dimissioni")
+  const restored = {
+    endedOn: null,
+    endReason: null,
+    endNote: null,
+    accountState: "active" as const,
+    updatedBy: "usr_direttivo",
+    updatedAt: at,
+  }
+  // A failed history insert rolls back the status update as well.
+  await assert.rejects(store.update(mario.id, restored, { ...entry("Restored"), actor: null as never }))
+  assert.deepEqual(await store.byNumber(344), ended)
+  assert.deepEqual(await store.activity(mario.id), endedHistory)
+  await store.update(mario.id, restored, entry("Restored: mistake"))
+  assert.equal((await store.byNumber(344))?.endedOn, null)
+  assert.equal((await store.byNumber(344))?.endNote, null)
+  assert.equal((await store.byNumber(344))?.accountState, "active")
+  assert.equal(await store.numberOwner(344), mario.id)
+  await store.update(
+    mario.id,
+    { ...restored, endedOn: "2026-12-31", endReason: "resigned", accountState: "pending_deletion" },
+    entry("Ended again")
   )
   const readmitted = await store.insert(socio(351, "oid-mario-2", "RSSMRA80A01H501U"), entry("Admitted"))
   assert.equal((await store.activeByCodiceFiscale("RSSMRA80A01H501U"))?.id, readmitted.id)
+  const beforeConflict = await store.activity(mario.id)
+  await assert.rejects(store.update(mario.id, restored, entry("Cannot restore an old admission")))
+  assert.equal((await store.byNumber(344))?.accountState, "pending_deletion")
+  assert.deepEqual(await store.activity(mario.id), beforeConflict)
   await assert.rejects(
     db.insert(members).values({
       ...socio(352, "oid-x", null),
@@ -87,7 +124,7 @@ try {
       updatedAt: new Date(at),
     } as never)
   )
-  checked.push("an ended record frees its code for a re-admission, and an end needs its reason")
+  checked.push("ending and restoring commit with history, and only one admission per codice fiscale can be active")
 
   const blank = {
     fileId: null,
