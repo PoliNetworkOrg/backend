@@ -154,6 +154,28 @@ describe("soci.members.end and restore", () => {
     expect(await h.store.activity(h.rows[0].id)).toHaveLength(3)
   })
 
+  it.each([
+    "end",
+    "restore",
+  ] as const)("restores the latest confirmed membership when a subsequent %s fails with a stale listing", async (action) => {
+    const h = await prepare(action === "end" ? "restore" : "end")
+    const staleGroup = await h.directory.getSociMembers()
+    await h.run()
+    const group = await h.directory.getSociMembers()
+    const before = structuredClone(h.rows)
+    const history = await h.store.activity(h.rows[0].id)
+    vi.spyOn(h.directory, "getSociMembers").mockResolvedValueOnce(staleGroup)
+    vi.spyOn(h.store, "update").mockRejectedValueOnce(new Error("Database unavailable"))
+    const undo = vi.spyOn(h.directory, h.write)
+
+    const result = action === "end" ? h.service.end(ACTOR, end) : h.service.restore(ACTOR, restore)
+    await expect(result).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" })
+    expect(await h.directory.getSociMembers()).toEqual(group)
+    expect(h.rows).toEqual(before)
+    expect(await h.store.activity(h.rows[0].id)).toEqual(history)
+    expect(undo).toHaveBeenCalledExactlyOnceWith(ID)
+  })
+
   it.each(["end", "restore"] as const)("refuses an unknown record for %s", async (action) => {
     const h = harness()
     const result = action === "end" ? h.service.end(ACTOR, end) : h.service.restore(ACTOR, restore)
@@ -222,7 +244,10 @@ describe("soci.members.end and restore", () => {
     const group = await h.directory.getSociMembers()
     vi.spyOn(h.store, "update").mockRejectedValueOnce(new Error("Database unavailable"))
     const undo = vi.spyOn(h.directory, h.undo)
-    await expect(h.run()).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" })
+    // A pre-existing mismatch has no pending write in this service instance.
+    const { service } = harness({ store: h.store, directory: h.directory })
+    const result = action === "end" ? service.end(ACTOR, end) : service.restore(ACTOR, restore)
+    await expect(result).rejects.toMatchObject({ code: "INTERNAL_SERVER_ERROR" })
     expect(await h.directory.getSociMembers()).toEqual(group)
     expect(undo).not.toHaveBeenCalled()
   })

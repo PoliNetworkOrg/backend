@@ -278,6 +278,9 @@ export function createSociService(options: SociOptions) {
       fail("CONFLICT", `This codice fiscale belongs to socio ${active.number}, who is still active.`)
   }
 
+  // Keep confirmed membership writes until Graph's group listing catches up.
+  const pendingMemberships = new Map<string, boolean>()
+
   /** Called under the member-write lock. The record and its history commit together. */
   async function saveMembership(
     s: Socio,
@@ -288,11 +291,14 @@ export function createSociService(options: SociOptions) {
   ) {
     const group = await sociGroup()
     if (group === null) fail("INTERNAL_SERVER_ERROR", "Couldn't read the Soci group; no status was saved.")
-    const wasInSoci = group.some((member) => member.id === s.entraObjectId)
+    const observedInSoci = group.some((member) => member.id === s.entraObjectId)
+    if (pendingMemberships.get(s.entraObjectId) === observedInSoci) pendingMemberships.delete(s.entraObjectId)
+    const wasInSoci = pendingMemberships.get(s.entraObjectId) ?? observedInSoci
     try {
       // Always write: a recent group change may not yet appear in Graph's listing.
       if (inSoci) await directory.addToSoci(s.entraObjectId)
       else await directory.removeFromSoci(s.entraObjectId)
+      pendingMemberships.set(s.entraObjectId, inSoci)
     } catch (error) {
       logger.error(
         { error: safeErrorDetail(error), by: e.actor, memberId: s.entraObjectId },
@@ -311,6 +317,7 @@ export function createSociService(options: SociOptions) {
         try {
           if (wasInSoci) await directory.addToSoci(s.entraObjectId)
           else await directory.removeFromSoci(s.entraObjectId)
+          pendingMemberships.set(s.entraObjectId, wasInSoci)
         } catch (error) {
           logger.error(
             { error: safeErrorDetail(error), by: e.actor, memberId: s.entraObjectId, wasInSoci },
