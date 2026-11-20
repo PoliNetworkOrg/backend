@@ -48,6 +48,9 @@ describe("Soci tRPC contract", () => {
       "members.end": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "members.restore": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
       "members.setNumber": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
+      "lapse.preview": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
+      "accounts.pendingDeletion": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
+      "accounts.delete": { policy: { user: { scope: "backend:admin", permission: "soci:delete" } } },
       "fees.list": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
       "fees.file": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
       "fees.confirm": { policy: { user: { scope: "backend:admin", permission: "soci:write" } } },
@@ -135,6 +138,28 @@ describe("Soci tRPC contract", () => {
       { actor: user.sub, text: "Membership restored: Cessazione registrata per errore" },
       { actor: user.sub, text: "Membership ended on 2026-11-09 (resigned)" },
     ])
+  })
+
+  it("keeps account deletion behind soci:delete and reads behind soci:read", async () => {
+    const h = harness()
+    await h.service.register("usr_registrar", registerInput("mock-member-alan"))
+    await h.service.end(user.sub, { number: 1002, endedOn: "2026-11-09", endReason: "other", endNote: null })
+    const router = makeRouter(h.service)
+    const input = { entraObjectId: "mock-member-alan" }
+    await expect(router.createCaller(context()).accounts.delete(input)).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(router.createCaller(context(["soci:delete"])).accounts.delete(input)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
+    await expect(
+      router.createCaller(context(["admin:access", "soci:delete"])).accounts.pendingDeletion()
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
+    const reader = router.createCaller(context(["admin:access", "soci:read"]))
+    expect(await reader.accounts.pendingDeletion()).toHaveLength(1)
+    expect((await reader.lapse.preview()).enabled).toBe(false)
+    const deleter = router.createCaller(context(["admin:access", "soci:delete"]))
+    await expect(deleter.accounts.delete({ entraObjectId: "" })).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    await deleter.accounts.delete(input)
+    expect((await h.store.activity(h.rows[0].id))[0].actor).toBe(user.sub)
   })
 
   it("finds the socio of me.* by the account's Microsoft 365 object ID, and refuses anyone else", async () => {

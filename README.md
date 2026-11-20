@@ -197,3 +197,22 @@ Signatures are checked against the CIE certification authorities of the Minister
 catalog entries. Selected FAQs/categories must be replaced in Freshman before deleting them from the catalog.
 The development seed also initializes the card slots and selections; `--force` clears those selections before
 replacing the sample FAQ catalog.
+
+### Membership lifecycle
+
+`soci.members.end` and `restore` require `admin:access` and `soci:write`; ending keeps the Microsoft 365 account pending
+deletion. `soci.accounts.pendingDeletion` requires `soci:read`, and `accounts.delete` requires `soci:delete` plus
+`admin:access`. Deletion accepts one object ID and preserves the Libro Soci, numbers, fees and account snapshot.
+
+`SOCI_AUTO_LAPSE` defaults to `false`. Only after the register and payments have been reconciled should it be enabled.
+The Rome daily run ends active records with a registered Due fee whose 31 December deadline has passed. Uploaded,
+Paid and Exempt fees and missing fee rows are protected. It evaluates the most recent 31 December deadline, including
+late rejections after September; unrelated older fee years do not trigger a lapse. End date, history and the Italian
+lapse email are saved together; a directory failure leaves
+the record active for a later retry. Fee mutations and lifecycle changes share the single-instance member-write lock.
+
+`soci.lapse.preview` requires `soci:read` and is read-only even when automatic lapse is disabled. It reports the
+Due fee for the most recent renewal deadline for each active record. During December it evaluates 1 January, for the
+register's advance warning;
+otherwise it evaluates today. The response includes the configured switch and evaluation date. No missing debt is
+inferred from an absent record or fee.

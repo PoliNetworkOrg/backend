@@ -126,6 +126,27 @@ export const sociListSchema = z.object({
 })
 export type SociList = z.infer<typeof sociListSchema>
 
+export const lapsePreviewSchema = z.object({
+  enabled: z.boolean(),
+  /** Today, or 1 January during December's advance warning. */
+  evaluatedOn: z.string(),
+  members: z.array(
+    z.object({
+      number: memberNumberSchema,
+      firstName: z.string(),
+      lastName: z.string(),
+      alias: z.string().nullable(),
+      mailbox: z.string(),
+      year: z.number(),
+      endedOn: z.string(),
+    })
+  ),
+})
+export type LapsePreview = z.infer<typeof lapsePreviewSchema>
+
+export const deleteAccountInputSchema = z.object({ entraObjectId: z.string().min(1).max(128) })
+export type DeleteAccountInput = z.output<typeof deleteAccountInputSchema>
+
 export const activitySchema = z.object({ actor: z.string(), text: z.string(), at: z.string() })
 export type SocioActivity = z.infer<typeof activitySchema>
 

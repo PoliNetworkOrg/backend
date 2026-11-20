@@ -95,6 +95,17 @@ try {
     updatedBy: "usr_direttivo",
     updatedAt: at,
   }
+  const lapseMail = {
+    id: `lapsed:2026:${mario.id}`,
+    to: "mario@example.org",
+    kind: "lapsed" as const,
+    data: { name: "Mario" } as never,
+  }
+  // Even a failure in the outbox insert rolls the status and history back.
+  await assert.rejects(store.update(mario.id, restored, entry("Must roll back"), { ...lapseMail, to: null as never }))
+  assert.deepEqual(await store.byNumber(344), ended)
+  assert.deepEqual(await store.activity(mario.id), endedHistory)
+  assert.equal((await db.select().from(mail)).length, 0)
   // A failed history insert rolls back the status update as well.
   await assert.rejects(store.update(mario.id, restored, { ...entry("Restored"), actor: null as never }))
   assert.deepEqual(await store.byNumber(344), ended)

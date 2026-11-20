@@ -58,10 +58,11 @@ export function memoryStore() {
       for (const f of firstFees) fees.push({ ...structuredClone(f), id: fees.length + 1, memberId: row.id })
       return structuredClone(row)
     },
-    async update(id, changes, entry) {
+    async update(id, changes, entry, outgoing) {
       const row = rows.find((r) => r.id === id) as Socio
       Object.assign(row, structuredClone(changes))
       log(id, entry)
+      if (outgoing) queue(id, outgoing, entry.at)
     },
     async changeNumber(id, number, entry) {
       const owner = numbers.get(number)

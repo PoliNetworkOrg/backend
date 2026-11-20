@@ -76,6 +76,7 @@ export type SociOptions = {
     /** Sends one outbox email, fee or birthday; throws when it can't. */
     send: (mail: SociMail) => Promise<void>
   }
+  autoLapse?: boolean
   now?: () => Date
 }
 
@@ -282,7 +283,8 @@ export function createSociService(options: SociOptions) {
     s: Socio,
     inSoci: boolean,
     changes: Pick<Socio, "endedOn" | "endReason" | "endNote" | "accountState">,
-    e: ActivityEntry
+    e: ActivityEntry,
+    outgoing?: NewMail
   ) {
     const group = await sociGroup()
     if (group === null) fail("INTERNAL_SERVER_ERROR", "Couldn't read the Soci group; no status was saved.")
@@ -299,7 +301,7 @@ export function createSociService(options: SociOptions) {
       fail("INTERNAL_SERVER_ERROR", "Microsoft 365 refused the group change; no status was saved.")
     }
     try {
-      await store.update(s.id, { ...changes, updatedBy: e.actor, updatedAt: e.at }, e)
+      await store.update(s.id, { ...changes, updatedBy: e.actor, updatedAt: e.at }, e, outgoing)
     } catch (error) {
       logger.error(
         { error: safeErrorDetail(error), by: e.actor, memberId: s.entraObjectId },
@@ -336,7 +338,108 @@ export function createSociService(options: SociOptions) {
     phone: d.phone,
   })
 
+  async function lapseCandidates(day: string) {
+    const year = Number(day.slice(0, 4)) - 1
+    const [records, fees] = await Promise.all([store.list(), store.fees({ year })])
+    const due = new Map(fees.filter((fee) => fee.status === "due").map((fee) => [fee.memberId, fee]))
+    return records.flatMap((s) => {
+      const fee = due.get(s.id)
+      return !s.endedOn && s.accountState === "active" && fee && s.admittedOn <= renewalDeadline(fee.year)
+        ? [{ s, fee }]
+        : []
+    })
+  }
+
   return {
+    async lapsePreview(): Promise<C.LapsePreview> {
+      const day = today()
+      const evaluatedOn = day.slice(5, 7) === "12" ? `${Number(day.slice(0, 4)) + 1}-01-01` : day
+      return {
+        enabled: options.autoLapse === true,
+        evaluatedOn,
+        members: (await lapseCandidates(evaluatedOn)).map(({ s, fee }) => ({
+          number: s.number,
+          firstName: s.firstName,
+          lastName: s.lastName,
+          alias: s.alias,
+          mailbox: s.mailbox,
+          year: fee.year,
+          endedOn: renewalDeadline(fee.year),
+        })),
+      }
+    },
+
+    async runLapse(): Promise<{ ended: number; failed: number }> {
+      if (options.autoLapse !== true) return { ended: 0, failed: 0 }
+      const day = today()
+      let ended = 0
+      let failed = 0
+      for (const candidate of await lapseCandidates(day)) {
+        try {
+          await writes.serialize(async () => {
+            const s = await store.byObjectId(candidate.s.entraObjectId)
+            if (!s) return
+            const fee = await feeOf(s, candidate.fee.year)
+            if (s.endedOn || s.accountState !== "active" || fee?.status !== "due") return
+            const endedOn = renewalDeadline(fee.year)
+            if (s.admittedOn > endedOn) return
+            await saveMembership(
+              s,
+              false,
+              { endedOn, endReason: "lapsed", endNote: null, accountState: "pending_deletion" },
+              entry(SYSTEM, `Membership lapsed on ${endedOn}: ${feeYearLabel(fee.year)} fee unpaid`),
+              { id: `lapsed:${fee.year}:${s.id}`, to: s.mailbox, kind: "lapsed", data: mailData(s, fee.year) }
+            )
+            ended++
+          })
+        } catch (error) {
+          failed++
+          logger.error({ error: safeErrorDetail(error), number: candidate.s.number }, "[soci] automatic lapse failed")
+        }
+      }
+      return { ended, failed }
+    },
+
+    async pendingDeletion(): Promise<C.SocioRow[]> {
+      return (await store.list())
+        .filter((s) => s.endedOn !== null && s.accountState === "pending_deletion")
+        .map((s) => row(s, null))
+    },
+
+    async deleteAccount(actor: string, input: C.DeleteAccountInput): Promise<void> {
+      await writes.serialize(async () => {
+        const s = (await store.byObjectId(input.entraObjectId)) ?? fail("NOT_FOUND", "There is no such socio account.")
+        if (!s.endedOn || s.accountState !== "pending_deletion")
+          fail("PRECONDITION_FAILED", "Only an ended socio's pending account can be deleted.")
+        try {
+          await directory.deleteUser(s.entraObjectId)
+        } catch (error) {
+          logger.error(
+            { error: safeErrorDetail(error), by: actor, memberId: s.entraObjectId },
+            "[soci] account not deleted"
+          )
+          fail("INTERNAL_SERVER_ERROR", "Microsoft 365 refused account deletion; try again later.")
+        }
+        const e = entry(actor, `Microsoft 365 account ${s.mailbox} deleted`)
+        try {
+          await store.update(
+            s.id,
+            { accountState: "deleted", accountDeletedOn: today(), updatedBy: actor, updatedAt: e.at },
+            e
+          )
+        } catch (error) {
+          logger.error(
+            { error: safeErrorDetail(error), by: actor, memberId: s.entraObjectId },
+            "[soci] account deletion not saved"
+          )
+          fail(
+            "INTERNAL_SERVER_ERROR",
+            "The account was deleted, but its deletion couldn't be saved; retry to finish the register update."
+          )
+        }
+      })
+    },
+
     async list(): Promise<C.SociList> {
       const [records, group, fees] = await Promise.all([store.list(), sociGroup(), store.fees({ year: currentYear() })])
       const soci = group && new Set(group.map((m) => m.id))
@@ -729,100 +832,106 @@ export function createSociService(options: SociOptions) {
     },
 
     async confirmFee(actor: string, input: C.ReviewInput): Promise<void> {
-      const s = await find(input.number)
-      const fee = await requireFee(s, input.year)
-      if (fee.status !== "uploaded") fail("PRECONDITION_FAILED", "Only an uploaded receipt can be confirmed.")
-      reviewed(fee, input.fileId)
-      const at = now().toISOString()
-      changed(
-        await store.updateFee(
-          { ...fee, fileId: input.fileId },
-          ["uploaded"],
-          {
-            status: "paid",
-            paidOn: fee.transferDate,
-            method: "transfer",
-            note: null,
-            recordedBy: actor,
-            reviewedBy: actor,
-            reviewedAt: at,
-            updatedAt: at,
-          },
-          entry(actor, `Confirmed the ${feeYearLabel(input.year)} fee`),
-          feeMail(
-            s,
-            `confirmed:${input.year}:${s.id}`,
-            "confirmed",
-            mailData(s, input.year, { paidOn: formatItalianDay(fee.transferDate as string) })
+      await writes.serialize(async () => {
+        const s = await find(input.number)
+        const fee = await requireFee(s, input.year)
+        if (fee.status !== "uploaded") fail("PRECONDITION_FAILED", "Only an uploaded receipt can be confirmed.")
+        reviewed(fee, input.fileId)
+        const at = now().toISOString()
+        changed(
+          await store.updateFee(
+            { ...fee, fileId: input.fileId },
+            ["uploaded"],
+            {
+              status: "paid",
+              paidOn: fee.transferDate,
+              method: "transfer",
+              note: null,
+              recordedBy: actor,
+              reviewedBy: actor,
+              reviewedAt: at,
+              updatedAt: at,
+            },
+            entry(actor, `Confirmed the ${feeYearLabel(input.year)} fee`),
+            feeMail(
+              s,
+              `confirmed:${input.year}:${s.id}`,
+              "confirmed",
+              mailData(s, input.year, { paidOn: formatItalianDay(fee.transferDate as string) })
+            )
           )
         )
-      )
-      logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee confirmed")
+        logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee confirmed")
+      })
     },
 
     async rejectFee(actor: string, input: C.RejectInput): Promise<void> {
-      const s = await find(input.number)
-      const fee = await requireFee(s, input.year)
-      if (fee.status !== "uploaded") fail("PRECONDITION_FAILED", "Only an uploaded receipt can be rejected.")
-      reviewed(fee, input.fileId)
-      const at = now().toISOString()
-      changed(
-        await store.updateFee(
-          { ...fee, fileId: input.fileId },
-          ["uploaded"],
-          { status: "due", rejectionReason: input.reason, reviewedBy: actor, reviewedAt: at, updatedAt: at },
-          entry(actor, `Rejected the ${feeYearLabel(input.year)} receipt: ${input.reason}`),
-          feeMail(
-            s,
-            `rejected:${input.year}:${s.id}:${fee.uploadedAt}`,
-            "rejected",
-            mailData(s, input.year, { reason: input.reason })
+      await writes.serialize(async () => {
+        const s = await find(input.number)
+        const fee = await requireFee(s, input.year)
+        if (fee.status !== "uploaded") fail("PRECONDITION_FAILED", "Only an uploaded receipt can be rejected.")
+        reviewed(fee, input.fileId)
+        const at = now().toISOString()
+        changed(
+          await store.updateFee(
+            { ...fee, fileId: input.fileId },
+            ["uploaded"],
+            { status: "due", rejectionReason: input.reason, reviewedBy: actor, reviewedAt: at, updatedAt: at },
+            entry(actor, `Rejected the ${feeYearLabel(input.year)} receipt: ${input.reason}`),
+            feeMail(
+              s,
+              `rejected:${input.year}:${s.id}:${fee.uploadedAt}`,
+              "rejected",
+              mailData(s, input.year, { reason: input.reason })
+            )
           )
         )
-      )
-      logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee rejected")
+        logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee rejected")
+      })
     },
 
     /** Records a payment made outside the dashboard, opening the fee if the year hasn't opened it yet. */
     async markPaid(actor: string, input: C.MarkPaidInput): Promise<void> {
-      const s = await find(input.number)
-      if (input.year > currentYear()) fail("BAD_REQUEST", `The ${feeYearLabel(input.year)} fee year hasn't started.`)
-      if (input.year < feeYearOf(s.admittedOn))
-        fail("BAD_REQUEST", `Socio ${s.number} was admitted after ${feeYearLabel(input.year)}.`)
-      if (input.paidOn > today()) fail("BAD_REQUEST", "The payment date is in the future.")
-      const at = now().toISOString()
-      const payment = {
-        status: "paid" as const,
-        paidOn: input.paidOn,
-        method: input.method,
-        note: input.note,
-        recordedBy: actor,
-        updatedAt: at,
-      }
-      const text = `Marked the ${feeYearLabel(input.year)} fee as paid (${input.method}, ${input.paidOn})`
-      const email = feeMail(
-        s,
-        `confirmed:${input.year}:${s.id}`,
-        "confirmed",
-        mailData(s, input.year, { paidOn: formatItalianDay(input.paidOn) })
-      )
-      const fee = await feeOf(s, input.year)
-      if (!fee) {
-        if (exemptYearFor(s.admittedOn) === input.year)
-          fail("PRECONDITION_FAILED", `The ${feeYearLabel(input.year)} fee is exempt.`)
-        const opened = await store.openFee(
-          s.id,
-          { ...emptyFee, ...payment, year: input.year, amountCents: FEE_CENTS, createdAt: at },
-          entry(actor, text),
-          email
+      await writes.serialize(async () => {
+        const s = await find(input.number)
+        if (input.year > currentYear()) fail("BAD_REQUEST", `The ${feeYearLabel(input.year)} fee year hasn't started.`)
+        if (input.year < feeYearOf(s.admittedOn))
+          fail("BAD_REQUEST", `Socio ${s.number} was admitted after ${feeYearLabel(input.year)}.`)
+        if (input.paidOn > today()) fail("BAD_REQUEST", "The payment date is in the future.")
+        const at = now().toISOString()
+        const payment = {
+          status: "paid" as const,
+          paidOn: input.paidOn,
+          method: input.method,
+          note: input.note,
+          recordedBy: actor,
+          updatedAt: at,
+        }
+        const text = `Marked the ${feeYearLabel(input.year)} fee as paid (${input.method}, ${input.paidOn})`
+        const email = feeMail(
+          s,
+          `confirmed:${input.year}:${s.id}`,
+          "confirmed",
+          mailData(s, input.year, { paidOn: formatItalianDay(input.paidOn) })
         )
-        changed(opened !== null)
-      } else {
-        if (fee.status === "paid") fail("CONFLICT", `The ${feeYearLabel(input.year)} fee is already paid.`)
-        if (fee.status === "exempt") fail("PRECONDITION_FAILED", `The ${feeYearLabel(input.year)} fee is exempt.`)
-        changed(await store.updateFee(fee, ["due", "uploaded"], payment, entry(actor, text), email))
-      }
-      logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee marked as paid")
+        const fee = await feeOf(s, input.year)
+        if (!fee) {
+          if (exemptYearFor(s.admittedOn) === input.year)
+            fail("PRECONDITION_FAILED", `The ${feeYearLabel(input.year)} fee is exempt.`)
+          const opened = await store.openFee(
+            s.id,
+            { ...emptyFee, ...payment, year: input.year, amountCents: FEE_CENTS, createdAt: at },
+            entry(actor, text),
+            email
+          )
+          changed(opened !== null)
+        } else {
+          if (fee.status === "paid") fail("CONFLICT", `The ${feeYearLabel(input.year)} fee is already paid.`)
+          if (fee.status === "exempt") fail("PRECONDITION_FAILED", `The ${feeYearLabel(input.year)} fee is exempt.`)
+          changed(await store.updateFee(fee, ["due", "uploaded"], payment, entry(actor, text), email))
+        }
+        logger.info({ by: actor, number: s.number, year: input.year }, "[soci] fee marked as paid")
+      })
     },
 
     // My area: the signed-in socio, found by their Microsoft 365 object ID.
@@ -867,44 +976,46 @@ export function createSociService(options: SociOptions) {
       file: { name: string; bytes: Uint8Array },
       input: C.ReceiptInput
     ): Promise<void> {
-      const s = await self(entraObjectId)
-      if (s.endedOn) fail("PRECONDITION_FAILED", "Your socio status has ended.")
-      const year = currentYear()
-      const fee =
-        (await feeOf(s, year)) ??
-        fail("PRECONDITION_FAILED", `Your ${feeYearLabel(year)} fee isn't open yet: try again tomorrow.`)
-      if (fee.status === "paid") fail("PRECONDITION_FAILED", `Your ${feeYearLabel(year)} fee is already paid.`)
-      if (fee.status === "exempt") fail("PRECONDITION_FAILED", `You're exempt from the ${feeYearLabel(year)} fee.`)
-      if (input.transferDate > today()) fail("BAD_REQUEST", "The transfer date is in the future.")
-      const contentType = await receiptType(file.bytes)
-      const at = now().toISOString()
-      const fileId = randomUUID()
-      const fileName =
-        file.name
-          .replace(/^.*[\\/]/, "")
-          .split("")
-          .filter((c) => c.charCodeAt(0) >= 32)
-          .join("")
-          .trim()
-          .slice(0, 200) || "receipt"
-      changed(
-        await store.updateFee(
-          fee,
-          ["due", "uploaded"],
-          {
-            status: "uploaded",
-            fileId,
-            transferDate: input.transferDate,
-            declaredCents: input.declaredCents,
-            uploadedAt: at,
-            updatedAt: at,
-          },
-          entry(sub, `Uploaded a transfer receipt for ${feeYearLabel(year)}`),
-          undefined,
-          { id: fileId, memberId: s.id, fileName, contentType, content: file.bytes, uploadedBy: sub, uploadedAt: at }
+      await writes.serialize(async () => {
+        const s = await self(entraObjectId)
+        if (s.endedOn) fail("PRECONDITION_FAILED", "Your socio status has ended.")
+        const year = currentYear()
+        const fee =
+          (await feeOf(s, year)) ??
+          fail("PRECONDITION_FAILED", `Your ${feeYearLabel(year)} fee isn't open yet: try again tomorrow.`)
+        if (fee.status === "paid") fail("PRECONDITION_FAILED", `Your ${feeYearLabel(year)} fee is already paid.`)
+        if (fee.status === "exempt") fail("PRECONDITION_FAILED", `You're exempt from the ${feeYearLabel(year)} fee.`)
+        if (input.transferDate > today()) fail("BAD_REQUEST", "The transfer date is in the future.")
+        const contentType = await receiptType(file.bytes)
+        const at = now().toISOString()
+        const fileId = randomUUID()
+        const fileName =
+          file.name
+            .replace(/^.*[\\/]/, "")
+            .split("")
+            .filter((c) => c.charCodeAt(0) >= 32)
+            .join("")
+            .trim()
+            .slice(0, 200) || "receipt"
+        changed(
+          await store.updateFee(
+            fee,
+            ["due", "uploaded"],
+            {
+              status: "uploaded",
+              fileId,
+              transferDate: input.transferDate,
+              declaredCents: input.declaredCents,
+              uploadedAt: at,
+              updatedAt: at,
+            },
+            entry(sub, `Uploaded a transfer receipt for ${feeYearLabel(year)}`),
+            undefined,
+            { id: fileId, memberId: s.id, fileName, contentType, content: file.bytes, uploadedBy: sub, uploadedAt: at }
+          )
         )
-      )
-      logger.info({ number: s.number, year }, "[soci] receipt uploaded")
+        logger.info({ number: s.number, year }, "[soci] receipt uploaded")
+      })
     },
 
     /** Fills in the socio's own empty fields. Recorded ones only the Direttivo changes. */

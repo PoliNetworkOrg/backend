@@ -64,6 +64,12 @@ export function cron() {
   new Cron("0 0 8 * * *", { timezone: "Europe/Rome" }, async () => {
     try {
       const { soci } = await import("./soci")
+      await soci.runLapse()
+    } catch (err) {
+      logger.error(err, "[CRON] Soci automatic lapse")
+    }
+    try {
+      const { soci } = await import("./soci")
       await soci.runDaily()
     } catch (err) {
       logger.error(err, "[CRON] Soci daily fee run")
