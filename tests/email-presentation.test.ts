@@ -15,6 +15,7 @@ const templates = [
   "fee-reminder",
   "fee-confirmed",
   "fee-rejected",
+  "fee-lapsed",
   "signature-request",
   "request-update",
   "signed-document",

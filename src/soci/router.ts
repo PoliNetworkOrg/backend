@@ -21,6 +21,7 @@ export function createSociRouter(soci: SociService) {
     })
   const read = direttivo("soci:read")
   const write = direttivo("soci:write")
+  const remove = direttivo("soci:delete")
   const me = policy(dashboard("people:self")).use(({ ctx, next }) => {
     if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN", message: "Only for signed-in soci" })
     const entraObjectId = ctx.access?.current()?.bySub(ctx.actor.sub)?.entraObjectId ?? null
@@ -59,10 +60,19 @@ export function createSociRouter(soci: SociService) {
         .output(C.numberInputSchema)
         .mutation(({ ctx, input }) => soci.register(ctx.sub, input)),
       update: write.input(C.updateInputSchema).mutation(({ ctx, input }) => soci.update(ctx.sub, input)),
+      end: write.input(C.endInputSchema).mutation(({ ctx, input }) => soci.end(ctx.sub, input)),
+      restore: write.input(C.restoreInputSchema).mutation(({ ctx, input }) => soci.restore(ctx.sub, input)),
       setNumber: write
         .input(C.setNumberInputSchema)
         .output(C.setNumberResultSchema)
         .mutation(({ ctx, input }) => soci.setNumber(ctx.sub, input)),
+    }),
+    lapse: createTRPCRouter({
+      preview: read.output(C.lapsePreviewSchema).query(() => soci.lapsePreview()),
+    }),
+    accounts: createTRPCRouter({
+      pendingDeletion: read.output(C.socioRowSchema.array()).query(() => soci.pendingDeletion()),
+      delete: remove.input(C.deleteAccountInputSchema).mutation(({ ctx, input }) => soci.deleteAccount(ctx.sub, input)),
     }),
     fees: createTRPCRouter({
       list: read
