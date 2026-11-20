@@ -112,6 +112,50 @@ file) or `soci:write` (admit, register, update, setNumber, confirm, reject, mark
 a time behind an in-process lock (`src/azure/member-writes.ts`), which also remembers numbers Entra's searches don't
 show yet. `azure.members` is read-only: admitting a socio and changing a member number go through `soci.members.*`.
 
+### Local CSV import preview
+
+`scripts/soci-import-preview.ts` normalizes a UTF-8 Libro Soci CSV **locally**, without a database, Microsoft 365,
+environment configuration or emails. It does not start the server, call registration/admission, or offer an apply
+option. Every candidate remains unresolved pending account/register reconciliation and financial review.
+
+Try the synthetic example from the repository root:
+
+```sh
+bun --no-env-file scripts/soci-import-preview.ts \
+  --input scripts/examples/soci-import.synthetic.csv \
+  --mapping scripts/examples/soci-import.mapping.json
+```
+
+The same command is available as `soci:preview`; use `bun --no-env-file --silent run soci:preview` if invoking through
+the package runner to avoid its command echo. Real input, mapping files containing private labels and detailed reports
+belong outside Git worktrees. Do not paste them into issue/PR bodies or console logs.
+
+Copy the example mapping and explicitly configure:
+
+- `delimiter`: comma or semicolon; `dateFormat`: `iso` (`YYYY-MM-DD`) or `italian` (`DD/MM/YYYY`). No guessing.
+- `scope`: `active-only`, `history` (requires mapped end date/reason columns; blank ends mean active), or `unknown`.
+- `columns`: required `number`, `firstName`, `lastName`, `admittedOn`; optional `alias`, `codiceFiscale`, `birthDate`,
+  `birthPlace`, `residence`, `phone`, `endedOn`, `endReason`, `endNote`, `mailbox`, `entraObjectId`. Values are exact
+  header names after trimming. Each source column has one assignment; remaining headers require `ignoredColumns`.
+- `endReasonValues`: optional exact translations, e.g. `{ "dimissioni": "resigned" }`; targets are `lapsed`,
+  `resigned`, `expelled`, `deceased`, `other`. No fuzzy matching.
+- `feeEvidence`: optional `{ "label": "Quota 2025/26", "column": "Quota" }` entries. Text is retained as unreviewed;
+  blanks are unknown. The tool never creates Paid/Due status, payment dates, amounts or account identities.
+
+The console shows counts and at most 100 coded diagnostics with physical source line references and canonical field
+names. Exit codes: **0** preview without blocked rows (still unresolved), **2** blocked rows, **1** configuration,
+structural CSV or file errors. Malformed quoting, missing/duplicate/empty/unmapped headers and invalid UTF-8 stop the
+preview. Invalid records remain blocked in the report, with diagnostics and source line but no normalized candidate.
+Duplicate numbers block every affected row; ended and later admissions sharing a tax code are preserved for review,
+while multiple explicitly active admissions with that code are blocked.
+
+For a full **plaintext report containing personal data**, explicitly add `--out /private/directory/report.json`.
+The directory must exist outside Git worktrees; the file is created exclusively with mode 0600, and existing files
+or symlinks are refused. Protect and delete this report like the source book. Limits: 10 MiB input, 64 KiB mapping,
+50,000 data records, 256 columns and 16,384 characters per cell. UTF-8 BOM, CRLF/LF/CR, quoted cells, escaped quotes
+and embedded newlines are supported; blank physical lines are skipped. Other encodings need a separate local
+conversion. Local snapshot reconciliation and any future application are separate steps.
+
 ### Fees
 
 The rules are hard-coded from the Regolamento Interno (`src/soci/fees.ts`): €5.00 per fee year, 1 September – 31
