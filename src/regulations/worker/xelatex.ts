@@ -18,6 +18,9 @@ export type XelatexOptions = {
   binary?: string
 }
 
+/** Kpathsea path: the workdir, `./shared` and everything below it, then the defaults from texmf.cnf. */
+export const SEARCH_PATH = ".:./shared//:"
+
 const RERUN = /Rerun to get|Label\(s\) may have changed|Please rerun LaTeX|rerunfilecheck Warning/
 const LOG_TAIL = 20_000
 
@@ -63,8 +66,11 @@ export async function runXelatex(dir: string, entry: string, options: XelatexOpt
     openout_any: "p",
     shell_escape: "f",
     max_print_line: "10000",
-    // The class sits next to the entry file; nothing outside the workdir is searched but TeX Live itself.
-    TEXINPUTS: ".:",
+    // The workdir, then the template's shared tree (`shared/`, recursively), then TeX Live's own trees (the trailing
+    // colon): nothing else outside the workdir is searched. Classes load fonts by file name (documents.json contract).
+    TEXINPUTS: SEARCH_PATH,
+    TTFONTS: SEARCH_PATH,
+    OPENTYPEFONTS: SEARCH_PATH,
   }
   const args = [
     options.binary ?? "xelatex",

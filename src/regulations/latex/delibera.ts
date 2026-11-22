@@ -1,7 +1,7 @@
 import type { DeliberaBody, Files } from "../contract"
 
 /**
- * The delibera metadata in the entry file's preamble (legal `docs/grammar.md`):
+ * The delibera metadata in the entry file's preamble (documents repository, `docs/grammar.md`):
  *
  *   \approvazione{direttivo|assemblea}{YYYY-MM-DD}      the last approval
  *   \rettifica[<delegato>]{YYYY-MM-DD}                   a later rectification (optional argument: on a delega)

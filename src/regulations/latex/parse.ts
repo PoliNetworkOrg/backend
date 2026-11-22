@@ -1,7 +1,7 @@
 import type { ValidationIssue } from "../contract"
 
 /**
- * Parser of the regulations grammar (legal repository, `docs/grammar.md`):
+ * Parser of the regulations grammar (documents repository, `docs/grammar.md`):
  *
  *   \regolamento[id=…]{Titolo}
  *   \begin{capo}[id=…]{Titolo} … \end{capo}             (optional grouping, nestable)

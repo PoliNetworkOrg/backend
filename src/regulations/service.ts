@@ -20,16 +20,26 @@ import type { CollabControl } from "./collab/internal-client"
 import { createYjsPersistence, saveSnapshot } from "./collab/persistence"
 import { issueTicket } from "./collab/tickets"
 import { decodeFiles, encodeFiles } from "./collab/ydoc"
+import { sharedAssets } from "./compile/assets"
 import { type AssetBundle, bundleHash, sourceHash } from "./compile/protocol"
 import { readCompilePdf, readCompileStatus } from "./compile/store-pg"
 import type * as C from "./contract"
-import { REGULATION_PERMISSIONS as P } from "./contract"
-import type { RegulationsDb } from "./db"
+import { FINAL_STATES, MAX_UPLOAD_BYTES, OPEN_STATES, REGULATION_PERMISSIONS as P } from "./contract"
+import { type RegulationsDb, type RegulationsTx, sha256 } from "./db"
 import type { Directory } from "./directory"
 import { isEditable } from "./draft-context"
 import { merge3, parseDocument, structureOf } from "./latex"
-import type { LegalSource } from "./legal-source"
-import { deadlineAt, procedureOf, procedureView, type TransitionRule } from "./procedure"
+import { type LegalSource, ManifestError, type ManifestTemplate } from "./legal-source"
+import {
+  deadlineAt,
+  emanateRule,
+  type ProcedureConfig,
+  procedureOf,
+  procedureView,
+  type TransitionRule,
+  todayInItaly,
+} from "./procedure"
+import { fillSkeleton, placementOf, TemplateError } from "./templates"
 
 /** The signed-in dashboard user. */
 export type Viewer = { sub: string; can: (permission: string) => boolean; person: C.PersonRef }
@@ -57,7 +67,7 @@ export type RegulationsDeps = {
   /** Public websocket URL of the collab service, for tickets. */
   collabUrl: string | null
   legal: LegalSource | null
-  /** Compiles a published version's PDF when there is no official one yet. */
+  /** Compiles a published version's PDF when there is no official one yet (and stores it as the version's PDF). */
   compileVersion?: (version: {
     id: string
     entry: string
@@ -69,6 +79,8 @@ export type RegulationsDeps = {
 }
 
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null
+const isFinal = (state: C.StateKey) => (FINAL_STATES as readonly string[]).includes(state)
+const PDF_MAGIC = "%PDF-"
 const day = (value: string | Date) => (value instanceof Date ? value.toISOString().slice(0, 10) : value)
 const ROLE_RANK: Record<C.DraftRole, number> = { viewer: 0, commenter: 1, editor: 2 }
 
@@ -128,6 +140,20 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const [document] = await db.select().from(documents).where(eq(documents.key, key))
     if (!document) fail("NOT_FOUND", "Documento non trovato.")
     return document
+  }
+
+  /** The document's procedure; a read-only one (sola consultazione) has none. */
+  function procedureFor(document: DocumentRow): ProcedureConfig {
+    if (!document.procedure) fail("PRECONDITION_FAILED", "Il documento è in sola consultazione: non si modifica.")
+    return procedureOf(document.procedure)
+  }
+
+  /** Why drafts can't be created for the document, or null. */
+  function notEditableReason(document: DocumentRow): string | null {
+    if (document.status !== "active") return "Il documento è ancora in creazione."
+    if (document.origin === "upload") return "Un PDF caricato non si modifica: carica una nuova versione."
+    if (!document.procedure) return "Il documento è in sola consultazione: non si modifica."
+    return null
   }
 
   /** The draft and the caller's role, at least `min`. Drafts the caller can't see don't exist for them. */
@@ -231,6 +257,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
       documentKey: row.documentKey,
       tag: row.tag,
       label: row.label,
+      origin: row.origin,
       delibera,
       publishedAt: row.publishedAt.toISOString(),
       releaseUrl: row.releaseUrl,
@@ -318,7 +345,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
 
   async function draftView(viewer: Viewer, draft: DraftRow, role: C.DraftRole): Promise<C.Draft> {
     const document = await loadDocument(draft.documentKey)
-    const config = procedureOf(document.procedure)
+    const config = procedureFor(document)
     const [deliberaRow] = await db
       .select()
       .from(delibere)
@@ -330,7 +357,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const other = await inApproval(draft.documentKey, draft.id)
     const versionId = emanation?.versionId ?? null
     // Only drafts still on their way: an emanated one is the latest version itself.
-    const superseded = draft.state === "emanata" || emanation ? null : await supersededReason(draft, viewer)
+    const superseded = isFinal(draft.state) || emanation ? null : await supersededReason(draft, viewer)
 
     const transitions: C.Capabilities["transitions"] = []
     for (const rule of config.transitions) {
@@ -349,21 +376,22 @@ export function createRegulationsService(deps: RegulationsDeps) {
         blockedBy,
       })
     }
-    const emanateRule = config.transitions.find(
-      (r) => r.effect === "emanate" && r.from === draft.state && r.kinds.includes(draft.kind)
-    )
+    const finalRule = emanateRule(config, draft.kind)
+    const emanateNow = finalRule && finalRule.from === draft.state ? finalRule : null
+    const verb = config.key === "documento" ? "pubblicare" : "emanare"
     let emanateBlockedBy: string | null = null
-    if (emanateRule && !emanation && allowed(viewer, emanateRule.who, rectify)) {
+    if (emanateNow && !emanation && allowed(viewer, emanateNow.who, rectify)) {
       if (superseded) emanateBlockedBy = superseded
-      else if (draft.kind === "rettifica" && draft.parses === false)
-        emanateBlockedBy = "Il testo non è valido: correggi gli errori prima di emanare."
-      else if (draft.kind === "modifica" && diffStatus !== "ready")
+      else if (emanateNow.requires.includes("parses") && draft.parses === false)
+        emanateBlockedBy = `Il testo non è valido: correggi gli errori prima di ${verb}.`
+      // The rri procedure's ordinary path needs the LLM differences; rettifiche generate them while emanating.
+      else if (config.key === "rri" && draft.kind === "modifica" && diffStatus !== "ready")
         emanateBlockedBy =
           diffStatus === "pending"
             ? "Le differenze sono ancora in generazione."
             : "Mancano le differenze: generale prima di emanare."
     }
-    const emanate = !!emanateRule && !emanation && allowed(viewer, emanateRule.who, rectify) && !emanateBlockedBy
+    const emanate = !!emanateNow && !emanation && allowed(viewer, emanateNow.who, rectify) && !emanateBlockedBy
 
     const deadlines: C.Deadline[] = []
     for (const rule of config.deadlines) {
@@ -391,8 +419,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
       ...(await summary(draft, role)),
       can: {
         edit: role === "editor" && editable,
-        comment: ROLE_RANK[role] >= ROLE_RANK.commenter && draft.state !== "emanata",
-        assign: viewer.can(P.write) && draft.state !== "emanata",
+        comment: ROLE_RANK[role] >= ROLE_RANK.commenter && !isFinal(draft.state),
+        assign: viewer.can(P.write) && !isFinal(draft.state),
         merge: viewer.can(P.write) && editable,
         transitions,
         approve: transitions.some((t) => t.to === "approvata" && !t.blockedBy),
@@ -400,6 +428,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
         emanateBlockedBy,
         rectify,
         regenerateDiff:
+          config.key === "rri" &&
+          document.storage === "repo" &&
           viewer.can(P.manage) &&
           (diffStatus === "ready" ||
             diffStatus === "failed" ||
@@ -410,7 +440,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
           (viewer.can(P.write) || (draft.kind === "rettifica" && draft.createdBy.id === viewer.sub)) &&
           draft.state === "bozza" &&
           !emanation,
-        rename: role === "editor" && draft.state !== "emanata",
+        rename: role === "editor" && !isFinal(draft.state),
         snapshot: role === "editor",
         restore: role === "editor" && editable,
       },
@@ -447,7 +477,10 @@ export function createRegulationsService(deps: RegulationsDeps) {
       .innerJoin(drafts, eq(drafts.id, assignments.draftId))
       .where(and(eq(assignments.userSub, viewer.sub), isNull(drafts.deletedAt)))
     const held = await activeDeleghe(viewer.sub)
-    const all = await db.select().from(documents).orderBy(asc(documents.key))
+    // Rettifiche exist only in the rri procedure.
+    const all = (await db.select().from(documents).orderBy(asc(documents.key))).filter(
+      (d) => d.procedure === "rri" && d.status === "active"
+    )
     const scope = viewer.can(P.rectify)
       ? all
       : all.filter((d) => held.some((h) => h.documentKey === null || h.documentKey === d.key))
@@ -474,39 +507,95 @@ export function createRegulationsService(deps: RegulationsDeps) {
     }
   }
 
-  async function documentView(row: DocumentRow): Promise<C.DocumentInfo> {
-    const latest = await latestVersion(row.key)
+  async function openDraftCount(documentKey: string) {
     const [{ open }] = await db
       .select({ open: count() })
       .from(drafts)
       .where(
-        and(
-          eq(drafts.documentKey, row.key),
-          isNull(drafts.deletedAt),
-          inArray(drafts.state, ["bozza", "in_approvazione", "approvata"])
-        )
+        and(eq(drafts.documentKey, documentKey), isNull(drafts.deletedAt), inArray(drafts.state, [...OPEN_STATES]))
       )
+    return open
+  }
+
+  function kindOf(row: DocumentRow): C.DocumentKind {
+    if (row.storage === "private") return "privato"
+    if (!row.procedure) return "consultazione"
+    return row.procedure === "rri" || row.template === "regolamento" ? "regolamento" : "generale"
+  }
+
+  async function documentView(row: DocumentRow): Promise<C.DocumentInfo> {
+    const latest = await latestVersion(row.key)
     return {
       key: row.key,
       title: row.title,
+      kind: kindOf(row),
+      storage: row.storage,
+      origin: row.origin,
+      template: row.template,
+      procedureKey: row.procedure,
+      procedure: row.procedure ? procedureView(procedureOf(row.procedure)) : null,
+      editable: notEditableReason(row) === null,
+      status: row.status,
+      creation: row.creation
+        ? {
+            prNumber: row.creation.prNumber,
+            prUrl: row.creation.prUrl,
+            error: row.creation.error,
+            startedAt: row.creation.startedAt,
+            startedBy: row.creation.startedBy,
+          }
+        : null,
       tagPrefix: row.tagPrefix,
-      procedure: procedureView(procedureOf(row.procedure)),
       latestVersion: latest ? await versionSummary(latest) : null,
-      openDrafts: open,
+      openDrafts: await openDraftCount(row.key),
       inApproval: await inApproval(row.key),
     }
   }
 
-  /** Imports legal.json and, for a document without versions, its current sources as the first published version. */
-  async function syncDocuments(viewer: Viewer) {
+  async function manifestOrFail() {
+    if (!deps.legal) fail("PRECONDITION_FAILED", "Il repository dei documenti non è configurato.")
+    try {
+      return await deps.legal.manifest()
+    } catch (error) {
+      if (error instanceof ManifestError) fail("PRECONDITION_FAILED", error.message)
+      throw error
+    }
+  }
+
+  const sameFiles = (a: C.Files, b: C.Files) => {
+    const keys = Object.keys(a).sort()
+    return keys.length === Object.keys(b).length && keys.every((k) => k in b && a[k] === b[k])
+  }
+
+  /**
+   * Imports documents.json: each repository document's row and, for a document without versions, its current sources
+   * as the first version. A read-only document (no procedure) follows the repository: when its sources change, the
+   * head becomes a new version. A private document is never touched (a manifest entry with its key is skipped), and a
+   * document with open drafts keeps its procedure.
+   */
+  async function syncDocuments(viewer: Viewer): Promise<C.SyncResult> {
     requirePermission(viewer, P.manage, "Serve il permesso regulations:manage.")
-    if (!deps.legal) fail("PRECONDITION_FAILED", "Il repository legal non è configurato.")
-    const manifest = await deps.legal.manifest()
-    const head = await deps.legal.head()
-    const imported: string[] = []
+    if (!deps.legal) fail("PRECONDITION_FAILED", "Il repository dei documenti non è configurato.")
+    const legal = deps.legal
+    const head = await legal.head()
+    const manifest = await manifestOrFail()
+    const result: C.SyncResult = { documents: [], imported: [], updated: [], skipped: [] }
     for (const doc of manifest.documents) {
-      if (!doc.procedure) continue
-      procedureOf(doc.procedure)
+      const [existing] = await db.select().from(documents).where(eq(documents.key, doc.key))
+      if (existing?.storage === "private") {
+        result.skipped.push({ key: doc.key, reason: "La chiave è già di un documento privato." })
+        continue
+      }
+      if (existing && existing.procedure !== doc.procedure && (await openDraftCount(doc.key)) > 0) {
+        result.skipped.push({
+          key: doc.key,
+          reason: `Ha bozze aperte: la procedura resta ${existing.procedure ?? "nessuna"} finché non si chiudono.`,
+        })
+        continue
+      }
+      const template = doc.template ? manifest.templates[doc.template] : null
+      const { sources, assets } = await legal.readDocument(doc, template)
+      const assetsHash = await storeAssets(assets)
       const values = {
         title: doc.title,
         dir: doc.dir,
@@ -515,34 +604,45 @@ export function createRegulationsService(deps: RegulationsDeps) {
         outputs: doc.outputs,
         tagPrefix: doc.tagPrefix,
         procedure: doc.procedure,
+        template: doc.template,
+        storage: "repo" as const,
+        origin: "latex" as const,
+        status: "active" as const,
+        creation: null,
         updatedAt: now(),
       }
       await db
         .insert(documents)
         .values({ key: doc.key, ...values })
         .onConflictDoUpdate({ target: documents.key, set: values })
-      const { sources, assets } = await deps.legal.readDocument(doc, manifest.shared)
-      const assetsHash = await storeAssets(assets)
       const latest = await latestVersion(doc.key)
-      if (!latest) {
-        await db.insert(versions).values({
+      const importVersion = async () =>
+        db.insert(versions).values({
           id: nanoid(16),
           documentKey: doc.key,
           tag: null,
           label: head.label,
+          origin: "import",
           files: sources,
           sourceHash: await sourceHash({ entry: doc.entry, files: sources, assets: assetsHash }),
           commitSha: head.sha,
           publishedAt: now(),
           assetsBlob: assetsHash,
         })
-        imported.push(doc.key)
+      if (!latest) {
+        await importVersion()
+        result.imported.push(doc.key)
+      } else if (doc.procedure === null && !sameFiles(latest.files, sources)) {
+        // Edited by hand in the repository: its head is the version in force.
+        await importVersion()
+        result.updated.push(doc.key)
       } else if (latest.assetsBlob !== assetsHash) {
-        // Fonts or the shared class changed in the repository: compile with the new ones.
+        // Fonts or the shared files changed in the repository: compile with the new ones.
         await switchAssets(latest, assetsHash)
       }
+      result.documents.push(doc.key)
     }
-    return { documents: manifest.documents.filter((d) => d.procedure).map((d) => d.key), imported }
+    return result
   }
 
   /**
@@ -566,20 +666,22 @@ export function createRegulationsService(deps: RegulationsDeps) {
   }
 
   /**
-   * What `syncDocuments` does to the assets, without importing anything: for each document already imported, read the
-   * fonts and shared files at the repository's head and point its latest version at them when they differ. Run at
-   * boot, so a version whose stored assets are wrong (fonts once read as UTF-8 text) compiles again after a deploy.
+   * What `syncDocuments` does to the assets, without importing anything: for each repository document already imported,
+   * read its files and its template's shared tree at the repository's head and point its latest version at them when
+   * they differ. Run at boot, so a version whose stored assets are wrong (fonts once read as UTF-8 text, a shared tree
+   * that changed) compiles again after a deploy.
    */
   async function refreshAssets(): Promise<{ updated: string[] }> {
     if (!deps.legal) return { updated: [] }
-    const manifest = await deps.legal.manifest()
     await deps.legal.head()
+    const manifest = await deps.legal.manifest()
     const updated: string[] = []
     for (const doc of manifest.documents) {
-      if (!doc.procedure) continue
+      const [row] = await db.select().from(documents).where(eq(documents.key, doc.key))
+      if (!row || row.storage !== "repo") continue
       const latest = await latestVersion(doc.key)
       if (!latest) continue
-      const { assets } = await deps.legal.readDocument(doc, manifest.shared)
+      const { assets } = await deps.legal.readDocument(doc, doc.template ? manifest.templates[doc.template] : null)
       const assetsHash = await storeAssets(assets)
       if (latest.assetsBlob === assetsHash) continue
       await switchAssets(latest, assetsHash)
@@ -618,7 +720,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
 
   async function createDraft(viewer: Viewer, input: C.CreateDraftInput): Promise<C.Draft> {
     const document = await loadDocument(input.documentKey)
+    const blocked = notEditableReason(document)
+    if (blocked) fail("PRECONDITION_FAILED", blocked)
     if (input.kind === "rettifica") {
+      if (document.procedure !== "rri")
+        fail("BAD_REQUEST", "La rettifica esiste solo per i documenti con la procedura dei regolamenti (RRI).")
       if (!(await rectifyRight(viewer, document.key)))
         fail("FORBIDDEN", "Solo il Segretario o chi ha una sua delega può avviare una rettifica.")
     } else requirePermission(viewer, P.write, "Serve il permesso regulations:write per creare bozze.")
@@ -672,7 +778,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
   async function listDrafts(viewer: Viewer, input: { documentKey?: string; includeClosed: boolean }) {
     const filters = [isNull(drafts.deletedAt)]
     if (input.documentKey) filters.push(eq(drafts.documentKey, input.documentKey))
-    if (!input.includeClosed) filters.push(inArray(drafts.state, ["bozza", "in_approvazione", "approvata"]))
+    if (!input.includeClosed) filters.push(inArray(drafts.state, [...OPEN_STATES]))
     let rows: DraftRow[]
     if (viewer.can(P.read) || viewer.can(P.write))
       rows = await db
@@ -703,7 +809,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
 
   async function renameDraft(viewer: Viewer, input: { draftId: string; title: string }) {
     const { draft } = await access(viewer, input.draftId, "editor")
-    if (draft.state === "emanata") fail("PRECONDITION_FAILED", "Una bozza emanata non si rinomina.")
+    if (isFinal(draft.state)) fail("PRECONDITION_FAILED", "Una bozza emanata o pubblicata non si rinomina.")
     await db.update(drafts).set({ title: input.title, updatedAt: now() }).where(eq(drafts.id, draft.id))
   }
 
@@ -724,16 +830,17 @@ export function createRegulationsService(deps: RegulationsDeps) {
   async function transition(viewer: Viewer, input: C.TransitionInput) {
     const { draft, role } = await access(viewer, input.draftId)
     const document = await loadDocument(draft.documentKey)
-    const rule = procedureOf(document.procedure).transitions.find(
+    const config = procedureFor(document)
+    const rule = config.transitions.find(
       (r) => r.from === draft.state && r.to === input.to && r.kinds.includes(draft.kind)
     )
     if (!rule) fail("BAD_REQUEST", "Passaggio di stato non previsto dalla procedura.")
-    if (rule.effect === "emanate") fail("BAD_REQUEST", "Per emanare usa «Emana e notifica».")
+    if (rule.effect === "emanate") fail("BAD_REQUEST", `Per questo passaggio usa «${rule.label}».`)
     const rectify = (await rectifyRight(viewer, draft.documentKey)) !== null
     if (!allowed(viewer, rule.who, rectify)) fail("FORBIDDEN", "Non hai il permesso per questo passaggio di stato.")
     if (await emanationOf(draft.id)) fail("PRECONDITION_FAILED", "L'emanazione è in corso.")
     const at = now()
-    const stateLabel = procedureOf(document.procedure).states.find((s) => s.key === rule.to)?.label ?? rule.to
+    const stateLabel = config.states.find((s) => s.key === rule.to)?.label ?? rule.to
 
     if (rule.effect === "freeze") {
       const other = await inApproval(draft.documentKey, draft.id)
@@ -859,7 +966,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
   async function setAssignment(viewer: Viewer, input: { draftId: string; userId: string; role: C.DraftRole }) {
     requirePermission(viewer, P.write, "Solo il Direttivo assegna le persone alle bozze.")
     const draft = await loadDraft(input.draftId)
-    if (draft.state === "emanata") fail("PRECONDITION_FAILED", "La bozza è già emanata.")
+    if (isFinal(draft.state)) fail("PRECONDITION_FAILED", "La bozza è già emanata o pubblicata.")
     const user = await directory.find(input.userId)
     if (!user) fail("NOT_FOUND", "Account non trovato tra quelli di PoliNetwork.")
     const values = { user, role: input.role, assignedBy: viewer.person, assignedAt: now() }
@@ -1009,7 +1116,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
 
   async function commentable(viewer: Viewer, draftId: string) {
     const { draft } = await access(viewer, draftId, "commenter")
-    if (draft.state === "emanata") fail("PRECONDITION_FAILED", "Una bozza emanata non si commenta.")
+    if (isFinal(draft.state)) fail("PRECONDITION_FAILED", "Una bozza emanata o pubblicata non si commenta.")
     return draft
   }
 
@@ -1202,7 +1309,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
     if (input.userId === viewer.sub) fail("BAD_REQUEST", "Non puoi delegare te stesso.")
     const grantee = await directory.find(input.userId)
     if (!grantee) fail("NOT_FOUND", "Account non trovato tra quelli di PoliNetwork.")
-    if (input.documentKey) await loadDocument(input.documentKey)
+    if (input.documentKey && (await loadDocument(input.documentKey)).procedure !== "rri")
+      fail(
+        "BAD_REQUEST",
+        "Le deleghe di rettifica valgono solo per i documenti con la procedura dei regolamenti (RRI)."
+      )
     const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null
     if (expiresAt && expiresAt <= now()) fail("BAD_REQUEST", "La scadenza deve essere nel futuro.")
     const id = nanoid(16)
@@ -1230,6 +1341,275 @@ export function createRegulationsService(deps: RegulationsDeps) {
     await deps.hooks?.delegaChanged?.(delegaId, "revoked")
   }
 
+  // ------------------------------------------------------------------------------------------------------------------
+  // New documents: templates, private documents, uploads
+  // ------------------------------------------------------------------------------------------------------------------
+
+  async function listTemplates(viewer: Viewer): Promise<C.TemplateInfo[]> {
+    requirePermission(viewer, P.read, "Serve il permesso regulations:read.")
+    const manifest = await manifestOrFail()
+    return Object.entries(manifest.templates).map(([key, t]) => ({
+      key,
+      title: t.title,
+      directory: `${placementOf(key)}/`,
+    }))
+  }
+
+  /**
+   * The key is free across repository and private documents (a failed creation may be replaced), and a repository
+   * document's tag prefix (`<key>-`) can't be confused with another's: the release workflow tells documents apart by it.
+   */
+  async function checkNewKey(
+    key: string,
+    storage: C.DocumentStorage,
+    manifest: { documents: { key: string; tagPrefix: string }[] } | null
+  ) {
+    const [existing] = await db.select().from(documents).where(eq(documents.key, key))
+    if (existing && !(existing.status === "failed" && storage === "repo"))
+      fail("CONFLICT", "Esiste già un documento con questa chiave.")
+    if (manifest?.documents.some((d) => d.key === key))
+      fail("CONFLICT", "La chiave è già usata nel repository dei documenti.")
+    if (storage !== "repo") return existing ?? null
+    const prefix = `${key}-`
+    const taken = [
+      ...(await db
+        .select({ key: documents.key, tagPrefix: documents.tagPrefix })
+        .from(documents)
+        .where(eq(documents.storage, "repo"))),
+      ...(manifest?.documents ?? []),
+    ].filter((d) => d.key !== key)
+    const clash = taken.find((d) => d.tagPrefix.startsWith(prefix) || prefix.startsWith(d.tagPrefix))
+    if (clash)
+      fail("CONFLICT", `La chiave si confonde con i tag di «${clash.key}» (${clash.tagPrefix}…): scegline un'altra.`)
+    return existing ?? null
+  }
+
+  /**
+   * Reads the template from the repository and fills its skeleton for a new document: the sources, the asset bundle
+   * (the skeleton's other files and the template's whole shared tree, as a sync would read them) and, for a repository
+   * document, the files to commit and its documents.json entry.
+   */
+  async function prepareDocument(viewer: Viewer, input: C.CreateDocumentInput) {
+    requirePermission(viewer, P.manage, "Solo Presidente e Segretario creano documenti.")
+    if (!deps.legal) fail("PRECONDITION_FAILED", "Il repository dei documenti non è configurato.")
+    const head = await deps.legal.head()
+    const manifest = await manifestOrFail()
+    const template = manifest.templates[input.template] as ManifestTemplate | undefined
+    if (!template) fail("BAD_REQUEST", `Il modello «${input.template}» non esiste in documents.json.`)
+    const replaces = await checkNewKey(input.key, input.storage, manifest)
+    const dir = `${placementOf(input.template)}/${input.key}`
+    if (input.storage === "repo" && (await deps.legal.exists(dir)))
+      fail("CONFLICT", `La cartella ${dir}/ esiste già nel repository dei documenti.`)
+    const { skeleton, shared } = await deps.legal.readTemplate(template)
+    let filled: ReturnType<typeof fillSkeleton>
+    try {
+      filled = fillSkeleton(skeleton, { title: input.title, key: input.key, date: todayInItaly(now()) })
+    } catch (error) {
+      if (error instanceof TemplateError) fail("PRECONDITION_FAILED", error.message)
+      throw error
+    }
+    const assets: AssetBundle = {
+      version: 1,
+      files: {
+        ...Object.fromEntries(Object.entries(filled.assets).map(([p, b]) => [p, Buffer.from(b).toString("base64")])),
+        ...sharedAssets(shared),
+      },
+    }
+    const assetsHash = await storeAssets(assets)
+    const entry = {
+      key: input.key,
+      title: input.title,
+      dir,
+      entry: filled.entry,
+      sources: filled.sourceGlobs,
+      outputs: { pdf: `${input.key}.pdf` },
+      tagPrefix: `${input.key}-`,
+      template: input.template,
+      procedure: "documento" as const,
+    }
+    return { head, entry, sources: filled.sources, commit: filled.commit, assetsHash, replaces }
+  }
+
+  const uniqueViolation = (error: unknown) => String((error as { code?: string }).code ?? error).includes("23505")
+
+  /** A private document from a template: copied from the repository now, kept only here, procedure `documento`. */
+  async function createPrivateDocument(viewer: Viewer, input: C.CreateDocumentInput): Promise<C.DocumentInfo> {
+    const prepared = await prepareDocument(viewer, { ...input, storage: "private" })
+    const at = now()
+    try {
+      await db.transaction(async (tx) => {
+        await tx.insert(documents).values({
+          key: input.key,
+          title: input.title,
+          dir: "",
+          entry: prepared.entry.entry,
+          sources: prepared.entry.sources,
+          outputs: prepared.entry.outputs,
+          tagPrefix: prepared.entry.tagPrefix,
+          procedure: "documento",
+          storage: "private",
+          origin: "latex",
+          template: input.template,
+          status: "active",
+          createdAt: at,
+          updatedAt: at,
+        })
+        await tx.insert(versions).values({
+          id: nanoid(16),
+          documentKey: input.key,
+          tag: null,
+          label: "Modello",
+          origin: "template",
+          files: prepared.sources,
+          sourceHash: await sourceHash({
+            entry: prepared.entry.entry,
+            files: prepared.sources,
+            assets: prepared.assetsHash,
+          }),
+          commitSha: prepared.head.sha,
+          publishedAt: at,
+          assetsBlob: prepared.assetsHash,
+        })
+      })
+    } catch (error) {
+      if (uniqueViolation(error)) fail("CONFLICT", "Esiste già un documento con questa chiave.")
+      throw error
+    }
+    return documentView(await loadDocument(input.key))
+  }
+
+  async function readPdf(file: File): Promise<Uint8Array> {
+    if (file.size > MAX_UPLOAD_BYTES) fail("PAYLOAD_TOO_LARGE", "Il PDF supera i 20 MB.")
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (bytes.length > MAX_UPLOAD_BYTES) fail("PAYLOAD_TOO_LARGE", "Il PDF supera i 20 MB.")
+    if (new TextDecoder().decode(bytes.subarray(0, PDF_MAGIC.length)) !== PDF_MAGIC)
+      fail("BAD_REQUEST", "Il file non è un PDF.")
+    return bytes
+  }
+
+  /** `v2026.11.22`, then `v2026.11.22.2`, … for the same day: the label of a version published without a tag. */
+  async function nextLabel(documentKey: string, tx: RegulationsDb | RegulationsTx = db) {
+    const stem = `v${todayInItaly(now()).replace(/-/g, ".")}`
+    const labels = new Set(
+      (await tx.select({ label: versions.label }).from(versions).where(eq(versions.documentKey, documentKey))).map(
+        (v) => v.label
+      )
+    )
+    for (let n = 1; ; n++) {
+      const label = n === 1 ? stem : `${stem}.${n}`
+      if (!labels.has(label)) return label
+    }
+  }
+
+  async function insertUpload(tx: RegulationsTx, documentKey: string, pdf: Uint8Array) {
+    const hash = sha256(pdf)
+    await tx.insert(blobs).values({ hash, contentType: "application/pdf", content: pdf }).onConflictDoNothing()
+    const id = nanoid(16)
+    await tx.insert(versions).values({
+      id,
+      documentKey,
+      tag: null,
+      label: await nextLabel(documentKey, tx),
+      origin: "upload",
+      files: {},
+      sourceHash: hash,
+      publishedAt: now(),
+      pdfBlob: hash,
+    })
+    return id
+  }
+
+  /** A private, read-only document from an uploaded PDF. */
+  async function uploadDocument(viewer: Viewer, input: { key: string; title: string; file: File }) {
+    requirePermission(viewer, P.manage, "Solo Presidente e Segretario caricano documenti.")
+    const pdf = await readPdf(input.file)
+    // The key is unique across private and repository documents: check the manifest when the repository is reachable.
+    const manifest = deps.legal ? await manifestOrFail() : null
+    await checkNewKey(input.key, "private", manifest)
+    const at = now()
+    try {
+      await db.transaction(async (tx) => {
+        await tx.insert(documents).values({
+          key: input.key,
+          title: input.title,
+          dir: "",
+          entry: "",
+          sources: [],
+          outputs: { pdf: `${input.key}.pdf` },
+          tagPrefix: `${input.key}-`,
+          procedure: null,
+          storage: "private",
+          origin: "upload",
+          template: null,
+          status: "active",
+          createdAt: at,
+          updatedAt: at,
+        })
+        await insertUpload(tx, input.key, pdf)
+      })
+    } catch (error) {
+      if (uniqueViolation(error)) fail("CONFLICT", "Esiste già un documento con questa chiave.")
+      throw error
+    }
+    return documentView(await loadDocument(input.key))
+  }
+
+  /** A new version of an uploaded document: a new upload. */
+  async function uploadVersion(viewer: Viewer, input: { documentKey: string; file: File }) {
+    requirePermission(viewer, P.manage, "Solo Presidente e Segretario caricano documenti.")
+    const document = await loadDocument(input.documentKey)
+    if (document.origin !== "upload")
+      fail("BAD_REQUEST", "Si carica una nuova versione solo dei documenti caricati come PDF.")
+    const pdf = await readPdf(input.file)
+    const id = await db.transaction((tx) => insertUpload(tx, document.key, pdf))
+    return versionSummary(await versionRow(id))
+  }
+
+  /**
+   * Publishes a private document's draft in the database (procedure `documento`): the version with its sources, the
+   * assets of its lineage and the compiled PDF. Nothing leaves the backend. The emanation service records it.
+   */
+  async function publishPrivate(draft: DraftRow, files: C.Files): Promise<string> {
+    const document = await loadDocument(draft.documentKey)
+    if (document.storage !== "private") throw new Error(`${document.key} is not a private document`)
+    const assets = (await rootVersion(draft)).assetsBlob
+    const id = nanoid(16)
+    const at = now()
+    await db.insert(versions).values({
+      id,
+      documentKey: document.key,
+      tag: null,
+      label: await nextLabel(document.key),
+      origin: "draft",
+      files,
+      sourceHash: await sourceHash({ entry: document.entry, files, assets: assets ?? "" }),
+      draftId: draft.id,
+      publishedAt: at,
+      assetsBlob: assets,
+    })
+    if (deps.compileVersion && assets) {
+      let pdf: Uint8Array | null
+      try {
+        pdf = await deps.compileVersion({ id, entry: document.entry, files, assets })
+      } catch {
+        await db.delete(versions).where(eq(versions.id, id))
+        fail("PRECONDITION_FAILED", "Il compilatore non è raggiungibile: riprova tra poco.")
+      }
+      if (!pdf) {
+        await db.delete(versions).where(eq(versions.id, id))
+        fail(
+          "PRECONDITION_FAILED",
+          "Il documento non compila: correggi gli errori dell'anteprima prima di pubblicarlo."
+        )
+      }
+    }
+    await db
+      .update(drafts)
+      .set({ state: "pubblicata", frozenFiles: files, emanatedAt: at, stateChangedAt: at, updatedAt: at })
+      .where(eq(drafts.id, draft.id))
+    return id
+  }
+
   return {
     me,
     searchUsers: async (viewer: Viewer, q: string): Promise<C.UserMatch[]> => {
@@ -1248,6 +1628,10 @@ export function createRegulationsService(deps: RegulationsDeps) {
     },
     syncDocuments,
     refreshAssets,
+    listTemplates,
+    createPrivateDocument,
+    uploadDocument,
+    uploadVersion,
     listVersions: async (viewer: Viewer, documentKey: string) => {
       requirePermission(viewer, P.read, "Serve il permesso regulations:read.")
       const rows = await db
@@ -1297,6 +1681,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
       draftView,
       emanationOf,
       supersededReason,
+      procedureFor,
+      prepareDocument,
+      publishPrivate,
+      storeAssets,
+      documentView,
     },
   }
 }

@@ -17,11 +17,15 @@ import {
 import type {
   ArticleChange,
   DeliberaBody,
+  DocumentOrigin,
+  DocumentStorage,
   DraftKind,
   DraftRole,
   Files,
   PersonRef,
+  ProcedureKey,
   StateKey,
+  VersionOrigin,
 } from "@/regulations/contract"
 import { createTable } from "../create-table"
 
@@ -31,24 +35,68 @@ const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
 })
 const at = (name: string) => timestamp(name, { precision: 3, withTimezone: true, mode: "date" })
 
-/** One document from the legal repository's `legal.json` (e.g. the RRI). */
-export const documents = createTable.regulations("documents", {
-  key: text().primaryKey(),
-  title: text().notNull(),
-  /** Directory in the legal repository, e.g. `rri`. */
-  dir: text().notNull(),
-  /** Entry file relative to `dir`, e.g. `RRI.tex`. */
-  entry: text().notNull(),
-  /** Globs (relative to `dir`) of the editable sources. */
-  sources: jsonb().$type<string[]>().notNull(),
-  /** Release asset names, e.g. `{ pdf: "RaccoltaRegolamentiInterni.pdf", markdown: "…md" }`. */
-  outputs: jsonb().$type<Record<string, string>>().notNull(),
-  tagPrefix: text("tag_prefix").notNull(),
-  /** Procedure configuration key (see `regulations/procedure.ts`). */
-  procedure: text().notNull(),
-  createdAt: at("created_at").notNull().defaultNow(),
-  updatedAt: at("updated_at").notNull().defaultNow(),
-})
+/** A repository document created from the dashboard, until its pull request merges (`status` `creating`). */
+export type DocumentCreationJson = {
+  branch: string
+  prNumber: number | null
+  prUrl: string | null
+  error: string | null
+  startedBy: PersonRef
+  startedAt: string
+  /** The sources committed (the skeleton with its placeholders filled): the first version once merged. */
+  sources: Files
+  /** Hash in `regulations_blobs` of the asset bundle committed with them (skeleton files, template shared files). */
+  assetsBlob: string
+}
+
+/**
+ * One document: from the documents repository's `documents.json` (`storage` `repo`, e.g. the RRI), or private (only
+ * here: created from a template, or an uploaded PDF).
+ */
+export const documents = createTable.regulations(
+  "documents",
+  {
+    key: text().primaryKey(),
+    title: text().notNull(),
+    /** Directory in the documents repository, e.g. `rri/latex`; empty for private documents. */
+    dir: text().notNull(),
+    /** Entry file relative to `dir`, e.g. `RRI.tex`; empty for uploads. */
+    entry: text().notNull(),
+    /** Globs (relative to `dir`) of the editable sources. */
+    sources: jsonb().$type<string[]>().notNull(),
+    /** Release asset names, e.g. `{ pdf: "RaccoltaRegolamentiInterni.pdf", markdown: "…md" }`. */
+    outputs: jsonb().$type<Record<string, string>>().notNull(),
+    tagPrefix: text("tag_prefix").notNull(),
+    /** Procedure configuration key (see `regulations/procedure.ts`); `null`: read-only (sola consultazione). */
+    procedure: text().$type<ProcedureKey>(),
+    storage: text().$type<DocumentStorage>().notNull().default("repo"),
+    origin: text().$type<DocumentOrigin>().notNull().default("latex"),
+    /** Template key in `documents.json`, or `null`. */
+    template: text(),
+    status: text().$type<"active" | "creating" | "failed">().notNull().default("active"),
+    creation: jsonb().$type<DocumentCreationJson>(),
+    createdAt: at("created_at").notNull().defaultNow(),
+    updatedAt: at("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "regulations_documents_procedure_check",
+      sql`${t.procedure} is null or ${t.procedure} in ('rri', 'documento')`
+    ),
+    check("regulations_documents_storage_check", sql`${t.storage} in ('repo', 'private')`),
+    check("regulations_documents_origin_check", sql`${t.origin} in ('latex', 'upload')`),
+    check("regulations_documents_status_check", sql`${t.status} in ('active', 'creating', 'failed')`),
+    // Private documents never go through GitHub, so never through a creation pull request.
+    check(
+      "regulations_documents_private_check",
+      sql`${t.storage} = 'repo' or (${t.status} = 'active' and ${t.creation} is null)`
+    ),
+    check(
+      "regulations_documents_upload_check",
+      sql`${t.origin} = 'latex' or (${t.storage} = 'private' and ${t.procedure} is null)`
+    ),
+  ]
+)
 
 /** A published (emanated or imported) version: the full editable sources at that point. */
 export const versions = createTable.regulations(
@@ -60,6 +108,8 @@ export const versions = createTable.regulations(
       .references(() => documents.key),
     tag: text(),
     label: text().notNull(),
+    origin: text().$type<VersionOrigin>().notNull().default("import"),
+    /** The editable sources; empty for an uploaded PDF. */
     files: jsonb().$type<Files>().notNull(),
     sourceHash: text("source_hash").notNull(),
     commitSha: text("commit_sha"),
@@ -78,6 +128,7 @@ export const versions = createTable.regulations(
   (t) => [
     index("regulations_versions_document_idx").on(t.documentKey, t.publishedAt),
     uniqueIndex("regulations_versions_tag_idx").on(t.documentKey, t.tag),
+    check("regulations_versions_origin_check", sql`${t.origin} in ('import', 'draft', 'template', 'upload')`),
   ]
 )
 
@@ -117,7 +168,10 @@ export const drafts = createTable.regulations(
       .on(t.documentKey)
       .where(sql`${t.state} = 'in_approvazione' and ${t.deletedAt} is null`),
     check("regulations_drafts_kind_check", sql`${t.kind} in ('modifica', 'rettifica')`),
-    check("regulations_drafts_state_check", sql`${t.state} in ('bozza', 'in_approvazione', 'approvata', 'emanata')`),
+    check(
+      "regulations_drafts_state_check",
+      sql`${t.state} in ('bozza', 'in_approvazione', 'approvata', 'emanata', 'pubblicata')`
+    ),
     check("regulations_drafts_base_check", sql`(${t.baseVersionId} is null) <> (${t.baseDraftId} is null)`),
   ]
 )
@@ -385,9 +439,10 @@ export const emanations = createTable.regulations(
       .primaryKey()
       .references(() => drafts.id),
     status: text().$type<"running" | "waiting" | "done" | "failed">().notNull(),
-    /** The generated sources, as committed. */
+    /** The generated sources, as committed (or, for a private document, as published). */
     files: jsonb().$type<Files>().notNull(),
     tag: text(),
+    /** Empty for a private document: it never goes to GitHub. */
     branch: text().notNull(),
     prNumber: integer("pr_number"),
     mergeSha: text("merge_sha"),

@@ -14,7 +14,8 @@ import { runXelatex } from "./xelatex"
 
 /**
  * The LaTeX compile worker: a separate service and image (`FROM ghcr.io/polinetworkorg/legal-texlive`), never inside
- * the backend. It keeps a warm workdir per key so `.aux` files survive, runs at most one compile per key (latest
+ * the backend. Assets keep their paths: the template's shared tree is `shared/` next to the entry file, found through
+ * TEXINPUTS, TTFONTS and OPENTYPEFONTS (`./shared//`). It keeps a warm workdir per key so `.aux` files survive, runs at most one compile per key (latest
  * wins) and `WORKER_CONCURRENCY` overall, and has no database and no network egress.
  */
 
@@ -28,8 +29,6 @@ const config = {
   tmpDir: process.env.WORKER_TMP_DIR ?? "/tmp",
   maxWorkdirs: Number(process.env.WORKER_MAX_WORKDIRS ?? 40),
   memoryLimitMb: process.env.WORKER_MEMORY_LIMIT_MB ? Number(process.env.WORKER_MEMORY_LIMIT_MB) : 1024,
-  /** The class from the legal repository's `shared/`, linked next to the entry file. */
-  sharedClass: "polinetwork-regolamento.cls",
 }
 
 const MAX_BODY = 64 * 1024 * 1024
@@ -95,19 +94,27 @@ async function listFiles(dir: string, prefix = ""): Promise<string[]> {
   return out
 }
 
-/** Links the assets into the workdir (once per bundle) and writes the sources that changed. */
+/**
+ * Links the assets into the workdir (once per bundle, removing the links of the previous bundle, so a file dropped from
+ * the template can't linger) and writes the sources that changed.
+ */
 async function prepare(dir: string, request: CompileRequest) {
   await mkdir(dir, { recursive: true })
   const marker = join(dir, ".assets")
+  const linkedList = join(dir, ".assets.json")
   const linked = await readFile(marker, "utf8").catch(() => null)
   if (linked !== request.assets) {
+    const previous: string[] = JSON.parse(await readFile(linkedList, "utf8").catch(() => "[]"))
+    for (const path of previous) await rm(join(dir, path), { force: true })
     const source = assetsDir(request.assets)
-    for (const path of await listFiles(source)) {
-      const target = join(dir, path.startsWith("shared/") ? path.slice("shared/".length) : path)
+    const paths = await listFiles(source)
+    for (const path of paths) {
+      const target = join(dir, path)
       await mkdir(dirname(target), { recursive: true })
       await rm(target, { force: true })
       await symlink(join(source, path), target)
     }
+    await writeFile(linkedList, JSON.stringify(paths))
     await writeFile(marker, request.assets)
   }
   const listPath = join(dir, ".sources.json")

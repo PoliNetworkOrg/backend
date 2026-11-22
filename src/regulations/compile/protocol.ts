@@ -4,7 +4,7 @@
  * uploaded once per bundle hash and cached.
  */
 
-/** Paths relative to the document directory (legal.json `dir`). */
+/** Paths relative to the document directory (documents.json `dir`). */
 export type CompileRequest = {
   /** Warm workdir key: the draft id (`.aux` survives between compiles), or `version:<id>`. */
   key: string
