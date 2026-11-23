@@ -42,6 +42,15 @@ if (env.NODE_ENV === "development") {
   app.use(loggerMiddlware((msg, ...str) => logger.debug(str.length ? { props: str } : undefined, msg)))
 }
 
+// socket.io's engine sets the server's idle timeout to 50 s (twice its ping interval), and Bun closes a request whose
+// response hasn't started by then: the caller sees the socket close ("fetch failed"). Procedures may run longer than
+// that (an import of the whole documents repository, a compile), so tRPC requests get Bun's maximum.
+const TRPC_IDLE_TIMEOUT_SECONDS = 255
+app.use(`${TRPC_PATH}/*`, async (c, next) => {
+  server.timeout(c.req.raw, TRPC_IDLE_TIMEOUT_SECONDS)
+  await next()
+})
+
 app.use(
   `${TRPC_PATH}/*`,
   trpcServer({

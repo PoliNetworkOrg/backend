@@ -66,22 +66,45 @@ export async function readDocument(
   )
 }
 
+/**
+ * Files read at once. Over GitHub every file is a request: one after the other, a sync of the whole repository took
+ * longer than the server's idle timeout.
+ */
+const READ_CONCURRENCY = 8
+
+/** `fn` over `items`, at most `limit` at a time, with the results in the items' order. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const run = async () => {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run))
+  return results
+}
+
 /** The same split over any repository reader (a checkout, or GitHub). */
 export async function readDocumentWith(
   repo: RepoReader,
   layout: DocumentLayout
 ): Promise<{ sources: Record<string, string>; assets: AssetBundle }> {
   const outputs = new Set([...Object.values(layout.outputs), layout.entry.replace(/\.tex$/, ".pdf")])
+  const paths = (await repo.list(layout.dir)).flatMap((path) => {
+    if (layout.sources.some((glob) => matchesGlob(path, glob))) return [{ path, source: true }]
+    if (!isAsset(path) || outputs.has(path) || path.endsWith(".tex")) return []
+    return [{ path, source: false }]
+  })
+  const read = await mapLimit(paths, READ_CONCURRENCY, ({ path }) => repo.read(`${layout.dir}/${path}`))
   const sources: Record<string, string> = {}
   const files: Record<string, string> = {}
-  for (const path of await repo.list(layout.dir)) {
-    if (layout.sources.some((glob) => matchesGlob(path, glob))) {
-      sources[path] = new TextDecoder().decode(await repo.read(`${layout.dir}/${path}`))
-      continue
-    }
-    if (!isAsset(path) || outputs.has(path) || path.endsWith(".tex")) continue
-    files[path] = Buffer.from(await repo.read(`${layout.dir}/${path}`)).toString("base64")
-  }
+  paths.forEach(({ path, source }, i) => {
+    const bytes = read[i]
+    if (source) sources[path] = new TextDecoder().decode(bytes)
+    else files[path] = Buffer.from(bytes).toString("base64")
+  })
   if (layout.shared) Object.assign(files, sharedAssets(await readTreeWith(repo, layout.shared)))
   return { sources, assets: { version: 1, files } }
 }
@@ -92,9 +115,9 @@ export async function readTreeWith(
   dir: string,
   keep: (path: string) => boolean = isAsset
 ): Promise<Record<string, Uint8Array>> {
-  const out: Record<string, Uint8Array> = {}
-  for (const path of await repo.list(dir)) if (keep(path)) out[path] = await repo.read(`${dir}/${path}`)
-  return out
+  const paths = (await repo.list(dir)).filter(keep)
+  const read = await mapLimit(paths, READ_CONCURRENCY, (path) => repo.read(`${dir}/${path}`))
+  return Object.fromEntries(paths.map((path, i) => [path, read[i]]))
 }
 
 /** Not a dot file or inside a dot directory. */
