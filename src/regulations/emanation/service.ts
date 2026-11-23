@@ -16,6 +16,7 @@ import {
 import { attachedLine } from "@/emails/templates/regulation-emanated"
 import type { CollabControl } from "../collab/internal-client"
 import { saveSnapshot } from "../collab/persistence"
+import type { AssetBundle } from "../compile/protocol"
 import { sourceHash } from "../compile/protocol"
 import type * as C from "../contract"
 import { EMANATION_STEPS } from "../contract"
@@ -23,7 +24,7 @@ import { type RegulationsDb, sha256 } from "../db"
 import type { DiffService } from "../diff/service"
 import type { Directory } from "../directory"
 import { applyDelibera, DeliberaMacroMissing, parseDocument } from "../latex"
-import { MANIFEST_PATH } from "../legal-source"
+import { appendDocumentEntry, githubLegalSource, MANIFEST_PATH } from "../legal-source"
 import { deadlineAt, emanateRule, todayInItaly } from "../procedure"
 import { fail, type RegulationsService, type Viewer } from "../service"
 import type { LegalGitHub } from "./github"
@@ -111,6 +112,8 @@ const dateOf = (d: { date: string | Date }) =>
   (d.date as unknown) instanceof Date
     ? (d.date as unknown as Date).toISOString().slice(0, 10)
     : String(d.date).slice(0, 10)
+/** How long a creation may go without a pull request before it counts as failed (the process stopped meanwhile). */
+export const CREATION_GRACE_MS = 5 * 60_000
 const pending = (): EmanationStepJson => ({ state: "pending", url: null, at: null, detail: null })
 
 /**
@@ -301,6 +304,13 @@ export function createEmanationService(deps: {
       throw new Error(`${document.key} is a private document: it never leaves the backend`)
   }
 
+  const skippedNotice = (): EmanationStepJson => ({
+    state: "skipped",
+    url: null,
+    at: now().toISOString(),
+    detail: "Nessuna notifica per questo documento",
+  })
+
   const allSteps = (state: EmanationStepJson["state"], detail: string | null) =>
     Object.fromEntries(
       EMANATION_STEPS.map((k) => [
@@ -326,6 +336,14 @@ export function createEmanationService(deps: {
     const superseded = await supersededReason(draft, viewer)
     if (superseded) fail("PRECONDITION_FAILED", superseded)
     const { files, parses } = await freeze(draft, document.entry)
+    // The frozen text is the claim: a second "Pubblica" while this one runs finds it and refuses, so it can't publish
+    // twice (nor reopen the text under this one).
+    const claimed = await db
+      .update(drafts)
+      .set({ frozenFiles: files, parses, updatedAt: now() })
+      .where(and(eq(drafts.id, draft.id), eq(drafts.state, "bozza"), isNull(drafts.frozenFiles)))
+      .returning({ id: drafts.id })
+    if (!claimed.length) fail("CONFLICT", "La pubblicazione è già in corso.")
     const reopen = async () => {
       await db.update(drafts).set({ frozenFiles: null }).where(eq(drafts.id, draft.id))
       await deps.collab?.reopen(draft.id).catch(() => {})
@@ -334,7 +352,6 @@ export function createEmanationService(deps: {
       await reopen()
       fail("PRECONDITION_FAILED", "Il testo non è valido: correggi gli errori prima di pubblicare.")
     }
-    await db.update(drafts).set({ frozenFiles: files, parses, updatedAt: now() }).where(eq(drafts.id, draft.id))
 
     if (document.storage === "private") {
       let versionId: string
@@ -365,7 +382,11 @@ export function createEmanationService(deps: {
       status: "running",
       files,
       branch: `documenti/${draft.documentKey}-${draft.id}`,
-      steps: allSteps("pending", null),
+      steps: {
+        ...allSteps("pending", null),
+        email: skippedNotice(),
+        telegram: skippedNotice(),
+      },
       startedBy: viewer.person,
       startedAt: now(),
     })
@@ -948,41 +969,47 @@ export function createEmanationService(deps: {
   // New repository documents
   // ------------------------------------------------------------------------------------------------------------------
 
-  /** documents.json at the pull request's base with the new entry appended (never a stale copy of the manifest). */
+  /**
+   * documents.json at the pull request's base with the new entry appended, keeping the file's formatting (never a stale
+   * copy of the manifest).
+   */
   function addToManifest(entry: { key: string }) {
     return (current: string | null) => {
       if (current === null) throw new Error(`${MANIFEST_PATH} non trovato nel repository dei documenti.`)
       const manifest = JSON.parse(current) as { documents?: { key?: string }[] }
-      if (!Array.isArray(manifest.documents)) throw new Error(`${MANIFEST_PATH} non ha l'elenco dei documenti.`)
-      if (manifest.documents.some((d) => d.key === entry.key))
+      if (manifest.documents?.some((d) => d.key === entry.key))
         throw new Error("La chiave è già usata nel repository dei documenti.")
-      manifest.documents.push(entry)
-      return `${JSON.stringify(manifest, null, 2)}\n`
+      return appendDocumentEntry(current, entry)
     }
   }
 
   async function setCreation(key: string, patch: Partial<DocumentCreationJson>, status?: "active" | "failed") {
     const [row] = await db.select().from(documents).where(eq(documents.key, key))
-    if (!row?.creation) return
+    if (!row?.creation || row.status !== "creating") return
     await db
       .update(documents)
       .set({ creation: { ...row.creation, ...patch }, updatedAt: now(), ...(status ? { status } : {}) })
-      .where(eq(documents.key, key))
+      .where(and(eq(documents.key, key), eq(documents.status, "creating")))
   }
 
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+  /** Creations whose pull request this process is opening right now: not failed for lacking one. */
+  const openingPr = new Map<string, Promise<void>>()
 
   /**
    * `documents.create` with storage `repo` (`regulations:manage`): the App opens a pull request adding
    * `<placement>/<key>/` from the template's skeleton and the documents.json entry (procedure `documento`), with
    * auto-merge after CI like an emanation. The document is `creating` until the merge, then its first version is what
-   * was committed. A pull request that is closed, or a commit that fails, leaves it `failed`: the same key may be
-   * created again.
+   * the merge commit holds. A pull request that is closed, a commit that fails, or a creation whose pull request can't
+   * be found after `CREATION_GRACE_MS` leaves it `failed`: the same key may be created again.
    */
   async function createDocument(viewer: Viewer, input: C.CreateDocumentInput): Promise<C.DocumentInfo> {
     if (!viewer.can("regulations:manage")) fail("FORBIDDEN", "Solo Presidente e Segretario creano documenti.")
     if (!deps.github) fail("PRECONDITION_FAILED", "La GitHub App del repository dei documenti non è configurata.")
     const gh = deps.github
+    // A previous creation of this key that never got its pull request (the process stopped before opening it) is
+    // settled first: its pull request is found, or, with no branch to recover, it fails and the key is free again.
+    await advanceCreation(input.key, { replacing: true })
     const prepared = await deps.regulations.internal.prepareDocument(viewer, { ...input, storage: "repo" })
     const { entry } = prepared
     const branch = `documenti/nuovo-${entry.key}-${nanoid(8).replace(/[^A-Za-z0-9]/g, "x")}`
@@ -1023,48 +1050,96 @@ export function createEmanationService(deps: {
         fail("CONFLICT", "Esiste già un documento con questa chiave.")
       throw error
     }
-    try {
-      await gh.commitToBranch({
-        branch,
-        base: config.baseBranch,
-        dir: entry.dir,
-        sourceGlobs: [],
-        files: prepared.commit,
-        edits: [{ path: MANIFEST_PATH, update: addToManifest(entry) }],
-        message: `${entry.key}: nuovo documento «${entry.title}»\n\nCreato dalla dashboard dal modello ${entry.template}.`,
-      })
-      const pr = await gh.openPullRequest({
-        branch,
-        base: config.baseBranch,
-        title: `Nuovo documento: ${entry.title}`,
-        body: [
-          `Crea \`${entry.dir}/\` dal modello \`${entry.template}\` e la sua voce in \`${MANIFEST_PATH}\` (procedura \`documento\`).`,
-          "",
-          `Richiesto da ${viewer.person.name} dalla dashboard dei documenti: si unisce da solo quando la CI passa.`,
-        ].join("\n"),
-      })
-      await gh.enableAutoMerge(pr.number)
-      await setCreation(entry.key, { prNumber: pr.number, prUrl: pr.url })
-      void advanceCreation(entry.key)
-    } catch (error) {
-      deps.onError?.(error, entry.key)
-      await setCreation(entry.key, { error: `La pull request non è stata aperta: ${message(error)}` }, "failed")
-    }
+    const opening = (async () => {
+      try {
+        await gh.commitToBranch({
+          branch,
+          base: config.baseBranch,
+          dir: entry.dir,
+          sourceGlobs: [],
+          files: prepared.commit,
+          edits: [{ path: MANIFEST_PATH, update: addToManifest(entry) }],
+          message: `${entry.key}: nuovo documento «${entry.title}»\n\nCreato dalla dashboard dal modello ${entry.template}.`,
+        })
+        const pr = await gh.openPullRequest({
+          branch,
+          base: config.baseBranch,
+          title: `Nuovo documento: ${entry.title}`,
+          body: [
+            `Crea \`${entry.dir}/\` dal modello \`${entry.template}\` e la sua voce in \`${MANIFEST_PATH}\` (procedura \`documento\`).`,
+            "",
+            `Richiesto da ${viewer.person.name} dalla dashboard dei documenti: si unisce da solo quando la CI passa.`,
+          ].join("\n"),
+        })
+        await setCreation(entry.key, { prNumber: pr.number, prUrl: pr.url })
+        await gh.enableAutoMerge(pr.number)
+      } catch (error) {
+        deps.onError?.(error, entry.key)
+        const [row] = await db.select().from(documents).where(eq(documents.key, entry.key))
+        // With its pull request open, a failure (auto-merge) is shown and checked again; without one, it failed.
+        if (row?.creation?.prNumber)
+          await setCreation(entry.key, { error: `Auto-merge non attivato: ${message(error)}` })
+        else await setCreation(entry.key, { error: `La pull request non è stata aperta: ${message(error)}` }, "failed")
+      }
+    })()
+    openingPr.set(entry.key, opening)
+    await opening.finally(() => openingPr.delete(entry.key))
+    void advanceCreation(entry.key)
     return deps.regulations.internal.documentView(await loadDocument(entry.key))
   }
 
-  /** Checks a creation's pull request: merged → the document is active with its first version; closed → failed. */
-  function advanceCreation(key: string): Promise<void> {
+  /**
+   * The first version of a created document: the sources and assets of the merge commit, so a pull request fixed by
+   * hand is imported as merged. The in-memory GitHub of development has no shared directories: there the template's
+   * shared files copied at creation are kept.
+   */
+  async function mergedDocument(key: string, mergeSha: string, creation: DocumentCreationJson) {
+    const source = githubLegalSource(deps.github as LegalGitHub, mergeSha)
+    const manifest = await source.manifest()
+    const entry = manifest.documents.find((d) => d.key === key)
+    if (!entry) throw new Error(`${key} non è in ${MANIFEST_PATH} dopo il merge.`)
+    const template = entry.template ? manifest.templates[entry.template] : null
+    const { sources, assets } = await source.readDocument(entry, template)
+    if (template && !Object.keys(assets.files).some((p) => p.startsWith("shared/"))) {
+      const [stored] = await db.select().from(blobs).where(eq(blobs.hash, creation.assetsBlob))
+      const bundle = stored ? (JSON.parse(Buffer.from(stored.content).toString("utf8")) as AssetBundle) : null
+      for (const [path, content] of Object.entries(bundle?.files ?? {}))
+        if (path.startsWith("shared/")) assets.files[path] = content
+    }
+    return { entry, sources, assetsHash: await deps.regulations.internal.storeAssets(assets) }
+  }
+
+  /**
+   * Checks a creation: a pull request not yet recorded is looked up by its branch (the process may have stopped
+   * before saving it); merged → the document is active with its first version; closed → failed; failing CI or
+   * conflicts → an error to fix on GitHub.
+   */
+  function advanceCreation(key: string, options: { replacing?: boolean } = {}): Promise<void> {
     const flightKey = `document:${key}`
     const running = inFlight.get(flightKey)
     if (running) return running
     const run = (async () => {
       const [row] = await db.select().from(documents).where(eq(documents.key, key))
-      if (!row || row.status !== "creating" || !row.creation?.prNumber || !deps.github) return
-      const creation = row.creation
-      const pr = await deps.github.getPullRequest(creation.prNumber as number)
+      if (!row || row.status !== "creating" || !row.creation || !deps.github || openingPr.has(key)) return
+      const gh = deps.github
+      let creation = row.creation
+      if (!creation.prNumber) {
+        const found = await gh.findPullRequest(creation.branch)
+        if (found) {
+          await setCreation(key, { prNumber: found.number, prUrl: found.url, error: null })
+          if (!found.merged && found.state === "open") await gh.enableAutoMerge(found.number)
+          creation = { ...creation, prNumber: found.number, prUrl: found.url }
+        } else {
+          // Nobody here is opening it: after the grace period (or when someone creates the key again) it failed.
+          if (options.replacing || now().getTime() - new Date(creation.startedAt).getTime() > CREATION_GRACE_MS)
+            await setCreation(key, { error: "La pull request non è stata aperta: puoi crearlo di nuovo." }, "failed")
+          return
+        }
+      }
+      const pr = await gh.getPullRequest(creation.prNumber as number)
       if (pr.merged && pr.mergeSha) {
         const mergeSha = pr.mergeSha
+        const merged = await mergedDocument(key, mergeSha, creation)
         await db.transaction(async (tx) => {
           const [existing] = await tx.select({ id: versions.id }).from(versions).where(eq(versions.documentKey, key))
           if (!existing)
@@ -1074,15 +1149,31 @@ export function createEmanationService(deps: {
               tag: null,
               label: `import ${mergeSha.slice(0, 7)}`,
               origin: "import",
-              files: creation.sources,
-              sourceHash: await sourceHash({ entry: row.entry, files: creation.sources, assets: creation.assetsBlob }),
+              files: merged.sources,
+              sourceHash: await sourceHash({
+                entry: merged.entry.entry,
+                files: merged.sources,
+                assets: merged.assetsHash,
+              }),
               commitSha: mergeSha,
               publishedAt: now(),
-              assetsBlob: creation.assetsBlob,
+              assetsBlob: merged.assetsHash,
             })
           await tx
             .update(documents)
-            .set({ status: "active", creation: null, updatedAt: now() })
+            .set({
+              title: merged.entry.title,
+              dir: merged.entry.dir,
+              entry: merged.entry.entry,
+              sources: merged.entry.sources,
+              outputs: merged.entry.outputs,
+              tagPrefix: merged.entry.tagPrefix,
+              template: merged.entry.template,
+              procedure: merged.entry.procedure,
+              status: "active",
+              creation: null,
+              updatedAt: now(),
+            })
             .where(and(eq(documents.key, key), eq(documents.status, "creating")))
         })
       } else if (pr.state === "closed") {
@@ -1095,6 +1186,12 @@ export function createEmanationService(deps: {
         // Still open: it may be fixed by hand and merge; close it on GitHub to start again.
         await setCreation(key, {
           error: "La CI del repository dei documenti è fallita: correggi la pull request, o chiudila per riprovare.",
+        })
+      } else if (pr.mergeable === false) {
+        // E.g. two creations both appending to documents.json: auto-merge waits forever until it's resolved.
+        await setCreation(key, {
+          error:
+            "La pull request è in conflitto con il ramo principale: risolvi il conflitto, o chiudila per riprovare.",
         })
       } else if (creation.error) await setCreation(key, { error: null })
     })()

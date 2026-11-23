@@ -12,6 +12,7 @@ import type { CollabControl } from "@/regulations/collab/internal-client"
 import { createYjsPersistence } from "@/regulations/collab/persistence"
 import { decodeFiles, encodeFiles } from "@/regulations/collab/ydoc"
 import type { AssetBundle } from "@/regulations/compile/protocol"
+import type * as C from "@/regulations/contract"
 import type { Files } from "@/regulations/contract"
 import { REGULATION_PERMISSIONS as P } from "@/regulations/contract"
 import { sha256 } from "@/regulations/db"
@@ -19,9 +20,9 @@ import { createDiffService } from "@/regulations/diff/service"
 import type { DiffSummarizer } from "@/regulations/diff/summarizer"
 import { createDirectory } from "@/regulations/directory"
 import { fakeGitHub } from "@/regulations/emanation/github"
-import { createEmanationService, type EmanationNotifier } from "@/regulations/emanation/service"
+import { CREATION_GRACE_MS, createEmanationService, type EmanationNotifier } from "@/regulations/emanation/service"
 import { parseDocument } from "@/regulations/latex"
-import { localLegalSource } from "@/regulations/legal-source"
+import { appendDocumentEntry, localLegalSource } from "@/regulations/legal-source"
 import { createRegulationsService, type Viewer } from "@/regulations/service"
 
 /**
@@ -420,7 +421,15 @@ try {
   assert.equal(asSeg.procedure.transitions[0].label, "Pubblica")
   await rejects(emanation.start(dir, guidaDraft.id), "FORBIDDEN")
   await rejects(service.transition(seg, { draftId: guidaDraft.id, to: "pubblicata" }), "BAD_REQUEST", /Pubblica/)
-  await emanation.start(seg, guidaDraft.id)
+  const startedGuida = await emanation.start(seg, guidaDraft.id)
+  // No notice for a documento: skipped from the start, not left pending.
+  assert.deepEqual(
+    startedGuida.steps.filter((s) => s.key === "email" || s.key === "telegram").map((s) => [s.state, s.detail]),
+    [
+      ["skipped", "Nessuna notifica per questo documento"],
+      ["skipped", "Nessuna notifica per questo documento"],
+    ]
+  )
   await until("guida published", async () => (await emanation.get(seg, guidaDraft.id)).status === "done")
   const published = await emanation.get(seg, guidaDraft.id)
   assert.equal(published.tag, "guida-v2026.11.10")
@@ -458,6 +467,23 @@ try {
   checked.push(
     "a repository documento is published by regulations:manage through the App, with no delibera, LLM or notice"
   )
+
+  // The repository makes it read-only while it has only closed drafts: they still open, with the procedure they ran.
+  writeManifest({
+    ...manifest,
+    documents: manifest.documents.map((d) => (d.key === "guida" ? { ...d, procedure: null } : d)),
+  })
+  await service.syncDocuments(seg)
+  assert.equal((await service.getDocument(lettore, "guida")).kind, "consultazione")
+  const closedView = await service.getDraft(seg, guidaDraft.id)
+  assert.deepEqual(
+    [closedView.state, closedView.procedure.key, closedView.can.emanate],
+    ["pubblicata", "documento", false]
+  )
+  writeManifest(manifest)
+  await service.syncDocuments(seg)
+  assert.equal((await service.getDocument(lettore, "guida")).procedureKey, "documento")
+  checked.push("a closed draft still opens after its document's procedure changed")
 
   // ---------------------------------------------------------------------------------------------------------------
   // Private documents from a template
@@ -527,7 +553,13 @@ try {
     "verbali.tex": "\\documentclass{polinetwork}\\begin{document}Riservato\\end{document}",
   })
   clock = new Date("2026-11-10T12:00:00Z")
-  const privatePublished = await emanation.start(seg, privateDraft.id)
+  // Two "Pubblica" at once: one publishes, the other refuses; one version.
+  const both = await Promise.allSettled([emanation.start(seg, privateDraft.id), emanation.start(seg, privateDraft.id)])
+  assert.deepEqual(both.map((r) => r.status).sort(), ["fulfilled", "rejected"])
+  const refusedTwin = both.find((r) => r.status === "rejected") as PromiseRejectedResult
+  assert.match(String(refusedTwin.reason.code), /CONFLICT/)
+  assert.equal((await versionOf("verbali")).length, 2)
+  const privatePublished = (both.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<C.Emanation>).value
   assert.equal(privatePublished.status, "done")
   assert.equal(privatePublished.tag, null)
   assert.deepEqual(
@@ -599,6 +631,9 @@ try {
     "PAYLOAD_TOO_LARGE"
   )
   await rejects(service.uploadDocument(seg, { key: "statuto", title: "Doppio", file: file(pdfBytes("x")) }), "CONFLICT")
+  // An upload doesn't depend on the repository: a broken manifest doesn't block it (the database still has its keys).
+  writeFileSync(join(repo, "documents.json"), "{")
+  await rejects(service.uploadDocument(seg, { key: "guida", title: "Doppio", file: file(pdfBytes("x")) }), "CONFLICT")
   const bilancio = await service.uploadDocument(seg, {
     key: "bilancio",
     title: "Bilancio 2026",
@@ -608,6 +643,7 @@ try {
     [bilancio.kind, bilancio.origin, bilancio.procedureKey, bilancio.procedure, bilancio.editable],
     ["privato", "upload", null, null, false]
   )
+  writeManifest(manifest)
   assert.equal(bilancio.latestVersion?.origin, "upload")
   assert.equal(bilancio.latestVersion?.pdfAvailable, true)
   const servedPdf = await service.versionPdf(lettore, bilancio.latestVersion?.id as string)
@@ -660,19 +696,29 @@ try {
   assert.equal(creating.creation?.prNumber, 2)
   const pr = github.prs[1]
   assert.match(pr.title, /Nuovo documento: Regolamento della Commissione/)
+  // Fixed by hand on the pull request before it merges: the first version is what merged, not what was proposed.
+  const fixedBranch = github.files(pr.branch)
+  fixedBranch.set("regolamenti/commissione/regolamenti/parte.tex", "\\regolamento{Corretto a mano}\n")
   await until("creation merged", async () => (await service.getDocument(lettore, "commissione")).status === "active")
   const files = github.files()
   assert.match(
     files.get("regolamenti/commissione/main.tex") as string,
     /% Regolamento della Commissione commissione 2026-11-11/
   )
-  assert.match(files.get("regolamenti/commissione/regolamenti/parte.tex") as string, /\\regolamento\{Regolamento/)
+  assert.equal(files.get("regolamenti/commissione/regolamenti/parte.tex"), "\\regolamento{Corretto a mano}\n")
   // Other skeleton files are committed byte for byte.
   assert.match(
     new TextDecoder().decode(files.get("regolamenti/commissione/latexmkrc") as Uint8Array),
     /shared\/regolamento/
   )
-  const committed = JSON.parse(files.get("documents.json") as string)
+  // documents.json keeps its formatting: the pull request only appends the entry.
+  const originalManifest = readFileSync(join(repo, "documents.json"), "utf8")
+  const cut = originalManifest.lastIndexOf("}", originalManifest.lastIndexOf("]")) + 1
+  const committedText = files.get("documents.json") as string
+  assert.equal(committedText.startsWith(originalManifest.slice(0, cut)), true)
+  assert.equal(committedText.endsWith(originalManifest.slice(cut)), true)
+  assert.match(committedText, /"sources": \["\*\.tex", "regolamenti\/\*\.tex"\]/)
+  const committed = JSON.parse(committedText)
   assert.deepEqual(committed.documents.at(-1), {
     key: "commissione",
     title: "Regolamento della Commissione",
@@ -691,6 +737,8 @@ try {
   assert.equal(active.latestVersion?.origin, "import")
   const [commissioneV1] = await versionOf("commissione")
   assert.deepEqual(Object.keys(commissioneV1.files).sort(), ["main.tex", "regolamenti/parte.tex"])
+  assert.equal(commissioneV1.files["regolamenti/parte.tex"], "\\regolamento{Corretto a mano}\n")
+  assert.equal(commissioneV1.commitSha, github.prs[1].mergeSha)
   assert.deepEqual(Object.keys((await bundleOf(commissioneV1.assetsBlob)).files).sort(), [
     "shared/pandoc/filter.lua",
     "shared/polinetwork-regolamento.cls",
@@ -731,6 +779,114 @@ try {
   assert.notEqual(again.creation?.prNumber, retried.creation?.prNumber)
   await until("second creation merged", async () => (await service.getDocument(lettore, "altro")).status === "active")
   assert.equal(github.files().has("generali/altro/altro.tex"), true)
+
+  // A failed repository key can become a private document.
+  const terzo = await emanation.createDocument(seg, {
+    key: "terzo",
+    title: "Terzo",
+    template: "generale",
+    storage: "repo",
+  })
+  Object.assign(github.prs.find((p) => p.number === terzo.creation?.prNumber) as object, { state: "closed" })
+  await until("terzo failed", async () => (await service.getDocument(lettore, "terzo")).status === "failed")
+  const terzoPrivate = await service.createPrivateDocument(seg, {
+    key: "terzo",
+    title: "Terzo privato",
+    template: "generale",
+    storage: "private",
+  })
+  assert.deepEqual([terzoPrivate.storage, terzoPrivate.status], ["private", "active"])
+  checked.push("a failed creation's key can be reused, also for a private document")
+
+  // A pull request that can't merge (a documents.json conflict) is reported, and resumes once resolved.
+  const quarto = await emanation.createDocument(seg, {
+    key: "quarto",
+    title: "Quarto",
+    template: "generale",
+    storage: "repo",
+  })
+  const quartoPr = github.prs.find((p) => p.number === quarto.creation?.prNumber) as (typeof github.prs)[number]
+  quartoPr.mergeable = false
+  await until("conflict reported", async () =>
+    /in conflitto/.test((await service.getDocument(lettore, "quarto")).creation?.error ?? "")
+  )
+  assert.equal((await service.getDocument(lettore, "quarto")).status, "creating")
+  quartoPr.mergeable = true
+  await until("quarto merged", async () => (await service.getDocument(lettore, "quarto")).status === "active")
+
+  // The process stopped after opening the pull request but before saving its number: it's found by its branch.
+  const lostBranch = "documenti/nuovo-perso-x"
+  await github.client.commitToBranch({
+    branch: lostBranch,
+    base: "main",
+    dir: "generali/perso",
+    sourceGlobs: [],
+    files: { "perso.tex": "\\documentclass{polinetwork}\\begin{document}Perso\\end{document}\n" },
+    edits: [
+      {
+        path: "documents.json",
+        update: (current) =>
+          appendDocumentEntry(current as string, {
+            key: "perso",
+            title: "Perso",
+            dir: "generali/perso",
+            entry: "perso.tex",
+            sources: ["*.tex"],
+            outputs: { pdf: "perso.pdf" },
+            tagPrefix: "perso-",
+            template: "generale",
+            procedure: "documento",
+          }),
+      },
+    ],
+    message: "perso",
+  })
+  await github.client.openPullRequest({ branch: lostBranch, base: "main", title: "Nuovo documento: Perso", body: "" })
+  const orphan = (key: string, branch: string, startedAt: Date) =>
+    db.insert(documents).values({
+      key,
+      title: key,
+      dir: `generali/${key}`,
+      entry: `${key}.tex`,
+      sources: ["*.tex"],
+      outputs: { pdf: `${key}.pdf` },
+      tagPrefix: `${key}-`,
+      procedure: "documento",
+      template: "generale",
+      status: "creating",
+      creation: {
+        branch,
+        prNumber: null,
+        prUrl: null,
+        error: null,
+        startedBy: seg.person,
+        startedAt: startedAt.toISOString(),
+        sources: {},
+        assetsBlob: modello.assetsBlob as string,
+      },
+    })
+  await orphan("perso", lostBranch, clock)
+  await until(
+    "lost pull request found and merged",
+    async () => (await service.getDocument(lettore, "perso")).status === "active"
+  )
+  assert.match((await versionOf("perso"))[0].files["perso.tex"], /Perso/)
+  // No pull request and no branch: failed after the grace period, or at once when the key is created again.
+  await orphan("vecchio", "documenti/nuovo-vecchio-x", new Date(clock.getTime() - CREATION_GRACE_MS - 1000))
+  await orphan("fermo", "documenti/nuovo-fermo-x", clock)
+  await emanation.tick()
+  assert.equal((await service.getDocument(lettore, "vecchio")).status, "failed")
+  assert.equal((await service.getDocument(lettore, "fermo")).status, "creating")
+  const fermo = await emanation.createDocument(seg, {
+    key: "fermo",
+    title: "Fermo",
+    template: "generale",
+    storage: "repo",
+  })
+  assert.equal(fermo.status, "creating")
+  assert.notEqual(fermo.creation?.prNumber, null)
+  checked.push("a creation stuck without a pull request or behind a conflict is recovered, reported or replaced")
+
   assert.deepEqual(notices, [])
   assert.deepEqual(llmCalls, [])
   assert.deepEqual(errors, [])

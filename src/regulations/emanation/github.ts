@@ -14,6 +14,8 @@ export type PullRequestInfo = {
   mergeSha: string | null
   /** Combined result of the checks on the head commit. */
   checks: "pending" | "success" | "failure"
+  /** `false` when it can't be merged (conflicts); `null` while GitHub computes it, or once merged. */
+  mergeable: boolean | null
 }
 
 export type ReleaseInfo = { id: number; url: string; assets: { id: number; name: string }[] }
@@ -141,6 +143,7 @@ export function githubAppClient(options: {
       merged: data.merged,
       mergeSha: data.merged ? data.merge_commit_sha : null,
       checks: data.merged ? "success" : await checksOf(o, data.head.sha),
+      mergeable: data.merged ? null : data.mergeable,
     }
   }
 
@@ -426,7 +429,7 @@ export function fakeGitHub(options: {
     if (pr.merged || pr.state === "closed") return
     if (Date.now() - pr.openedAt < (options.ciDelayMs ?? 0)) return
     pr.checks = options.failChecks ? "failure" : "success"
-    if (pr.checks === "success" && pr.autoMerge) {
+    if (pr.checks === "success" && pr.autoMerge && pr.mergeable !== false) {
       const head = commits.get(refs.get(`heads/${pr.branch}`) as string) as Snapshot
       const merged = sha()
       commits.set(merged, new Map(head))
@@ -437,8 +440,8 @@ export function fakeGitHub(options: {
   }
   const view = (pr: (typeof prs)[number]): PullRequestInfo => {
     tick(pr)
-    const { number, url, state, merged, mergeSha, checks } = pr
-    return { number, url, state, merged, mergeSha, checks }
+    const { number, url, state, merged, mergeSha, checks, mergeable } = pr
+    return { number, url, state, merged, mergeSha, checks, mergeable }
   }
 
   const client: LegalGitHub = {
@@ -488,6 +491,7 @@ export function fakeGitHub(options: {
         merged: false,
         mergeSha: null,
         checks: "pending" as const,
+        mergeable: true as boolean | null,
         branch: input.branch,
         base: input.base,
         autoMerge: false,

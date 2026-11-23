@@ -2,7 +2,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { describe, expect, it } from "vitest"
 import { type RepoReader, readDocumentWith } from "@/regulations/compile/assets"
-import { ManifestError, parseManifest } from "@/regulations/legal-source"
+import { appendDocumentEntry, ManifestError, parseManifest } from "@/regulations/legal-source"
 import { fillSkeleton, latexEscape, placementOf, TemplateError } from "@/regulations/templates"
 import { SEARCH_PATH } from "@/regulations/worker/xelatex"
 
@@ -52,6 +52,52 @@ describe("documents.json v2", () => {
     expect(message(JSON.stringify({ ...manifest, documents: [{ ...doc, procedure: "altro" }] }))).toMatch(/procedure/)
     expect(message(JSON.stringify({ ...manifest, documents: [{ ...doc, dir: "../fuori" }] }))).toMatch(/dir/)
     expect(message(JSON.stringify({ ...manifest, documents: [{ ...doc, outputs: {} }] }))).toMatch(/outputs\.pdf/)
+  })
+})
+
+describe("appending to documents.json", () => {
+  const entry = { key: "nuovo", sources: ["*.tex", "parti/*.tex"], outputs: { pdf: "nuovo.pdf" }, template: null }
+
+  it("keeps the repository's formatting: the diff is only the new entry, arrays inline", () => {
+    const text = [
+      "{",
+      '  "version": 2,',
+      '  "templates": { "x": { "title": "X", "shared": "s", "skeleton": "k" } },',
+      '  "documents": [',
+      "    {",
+      '      "key": "rri",',
+      '      "sources": ["RRI.tex", "regolamenti/*.tex"]',
+      "    }",
+      "  ]",
+      "}",
+      "",
+    ].join("\n")
+    expect(appendDocumentEntry(text, entry)).toBe(
+      [
+        ...text.split("\n").slice(0, 7),
+        "    },",
+        "    {",
+        '      "key": "nuovo",',
+        '      "sources": ["*.tex", "parti/*.tex"],',
+        '      "outputs": {',
+        '        "pdf": "nuovo.pdf"',
+        "      },",
+        '      "template": null',
+        "    }",
+        "  ]",
+        "}",
+        "",
+      ].join("\n")
+    )
+  })
+
+  it("fills an empty list, and rewrites a layout it can't follow", () => {
+    const empty = appendDocumentEntry('{\n  "version": 2,\n  "templates": {},\n  "documents": []\n}\n', entry)
+    expect(JSON.parse(empty).documents).toEqual([entry])
+    expect(empty).toContain('\n  "documents": [\n    {\n      "key": "nuovo",')
+    const odd = '{"documents":[{"key":"a"}],"version":2}'
+    expect(JSON.parse(appendDocumentEntry(odd, entry)).documents).toEqual([{ key: "a" }, entry])
+    expect(() => appendDocumentEntry("{}", entry)).toThrow(/elenco dei documenti/)
   })
 })
 
@@ -154,7 +200,7 @@ it.skipIf(!process.env.SEED_TEST_DB_PORT)(
         .split("\n")
         .findLast((line) => line.startsWith('{"checked"')) ?? "{}"
     )
-    expect(result.checked).toHaveLength(10)
+    expect(result.checked).toHaveLength(13)
   },
   95_000
 )

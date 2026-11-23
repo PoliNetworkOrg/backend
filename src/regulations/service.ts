@@ -148,6 +148,16 @@ export function createRegulationsService(deps: RegulationsDeps) {
     return procedureOf(document.procedure)
   }
 
+  /**
+   * The procedure a draft is shown with: its document's, or, when the document's procedure changed since (sync only
+   * allows that once its drafts are closed), the one its state belongs to, so a closed draft still opens.
+   */
+  function procedureOfDraft(document: DocumentRow, draft: DraftRow): ProcedureConfig {
+    const current = document.procedure ? procedureOf(document.procedure) : null
+    if (current?.states.some((s) => s.key === draft.state)) return current
+    return procedureOf(draft.state === "pubblicata" ? "documento" : "rri")
+  }
+
   /** Why drafts can't be created for the document, or null. */
   function notEditableReason(document: DocumentRow): string | null {
     if (document.status !== "active") return "Il documento è ancora in creazione."
@@ -345,7 +355,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
 
   async function draftView(viewer: Viewer, draft: DraftRow, role: C.DraftRole): Promise<C.Draft> {
     const document = await loadDocument(draft.documentKey)
-    const config = procedureFor(document)
+    const config = procedureOfDraft(document, draft)
     const [deliberaRow] = await db
       .select()
       .from(delibere)
@@ -1356,7 +1366,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
   }
 
   /**
-   * The key is free across repository and private documents (a failed creation may be replaced), and a repository
+   * The key is free across repository and private documents (a failed creation is replaced), and a repository
    * document's tag prefix (`<key>-`) can't be confused with another's: the release workflow tells documents apart by it.
    */
   async function checkNewKey(
@@ -1365,8 +1375,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
     manifest: { documents: { key: string; tagPrefix: string }[] } | null
   ) {
     const [existing] = await db.select().from(documents).where(eq(documents.key, key))
-    if (existing && !(existing.status === "failed" && storage === "repo"))
-      fail("CONFLICT", "Esiste già un documento con questa chiave.")
+    // A failed creation (its pull request never merged) leaves the key free, for any kind of document.
+    if (existing && existing.status !== "failed") fail("CONFLICT", "Esiste già un documento con questa chiave.")
     if (manifest?.documents.some((d) => d.key === key))
       fail("CONFLICT", "La chiave è già usata nel repository dei documenti.")
     if (storage !== "repo") return existing ?? null
@@ -1430,6 +1440,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
     return { head, entry, sources: filled.sources, commit: filled.commit, assetsHash, replaces }
   }
 
+  /** Drops a failed creation's row (never imported: no versions, no drafts) so its key can be used again. */
+  async function replaceFailed(tx: RegulationsTx, key: string) {
+    await tx.delete(documents).where(and(eq(documents.key, key), eq(documents.status, "failed")))
+  }
+
   const uniqueViolation = (error: unknown) => String((error as { code?: string }).code ?? error).includes("23505")
 
   /** A private document from a template: copied from the repository now, kept only here, procedure `documento`. */
@@ -1438,6 +1453,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const at = now()
     try {
       await db.transaction(async (tx) => {
+        if (prepared.replaces) await replaceFailed(tx, input.key)
         await tx.insert(documents).values({
           key: input.key,
           title: input.title,
@@ -1523,12 +1539,19 @@ export function createRegulationsService(deps: RegulationsDeps) {
   async function uploadDocument(viewer: Viewer, input: { key: string; title: string; file: File }) {
     requirePermission(viewer, P.manage, "Solo Presidente e Segretario caricano documenti.")
     const pdf = await readPdf(input.file)
-    // The key is unique across private and repository documents: check the manifest when the repository is reachable.
-    const manifest = deps.legal ? await manifestOrFail() : null
-    await checkNewKey(input.key, "private", manifest)
+    // Unique across private and repository documents: the database has every imported one; the manifest adds those
+    // not synced yet, when it can be read. An upload never depends on the repository.
+    let manifest: Awaited<ReturnType<LegalSource["manifest"]>> | null = null
+    try {
+      manifest = (await deps.legal?.manifest()) ?? null
+    } catch {
+      manifest = null
+    }
+    const replaces = await checkNewKey(input.key, "private", manifest)
     const at = now()
     try {
       await db.transaction(async (tx) => {
+        if (replaces) await replaceFailed(tx, input.key)
         await tx.insert(documents).values({
           key: input.key,
           title: input.title,

@@ -25,12 +25,12 @@ The wire contract is `src/regulations/contract.ts`, of which the admin dashboard
 - **`documento`**: bozza → pubblicata, published by `regulations:manage` with `emanation.start` ("Pubblica"). No
   delibera, no LLM differences, no notice. A repository document goes through the App exactly like an emanation
   (pull request, auto-merge after CI, tag `<tagPrefix>vYYYY.MM.DD` dated the day it was published, release); the
-  email and Telegram steps are `skipped`. A private one is published at once in the database: the version keeps its
+  email and Telegram steps are `skipped` from the start. A second "Pubblica" while one runs is refused. A private one is published at once in the database: the version keeps its
   sources, the assets of its lineage and the PDF compiled by the worker (a text that doesn't compile is refused), and
   every emanation step is `skipped`. Drafts, merges, history and comments work as for the RRI; rettifiche don't exist.
 - **Sola consultazione**: `documents.sync` imports the repository's head as a version (sources and assets, the PDF
   compiled by the worker on demand), and imports it again when the sources change in the repository. Every mutation
-  refuses it.
+  refuses it. Drafts closed before a document became read-only still open, with the procedure they ran.
 
 Reading needs `regulations:read` (private documents included). Creating documents and uploading PDFs needs
 `regulations:manage`, which the policy of `documents.create`, `documents.upload` and `versions.upload` carries too.
@@ -60,16 +60,23 @@ document's latest version at the new bundle (an imported version's PDF is droppe
   template's shared tree are copied from the repository now. The document gets a first version, origin `template`
   ("Modello"): create a draft from it.
 - **`repo`**: the App commits `regolamenti/<key>/` (template `regolamento`) or `generali/<key>/` (any other) from the
-  skeleton, plus the new entry appended to `documents.json` at the pull request's base (procedure `documento`), opens a
-  pull request and enables auto-merge. The document is listed with `status: "creating"` and `creation.prUrl` until it
-  merges (webhook, or the reconciliation every `REGULATIONS_RECONCILE_SECONDS`); then it is `active` with the committed
-  sources as its first version. A failed CI keeps it `creating` with `creation.error` (fix the pull request, or close it);
-  a closed pull request or a commit that fails makes it `failed`, and `documents.create` with the same key starts again.
-  A key whose tag prefix (`<key>-`) would be confused with another repository document's is refused, since the release
-  workflow tells documents apart by it.
+  skeleton, plus the new entry spliced into `documents.json` as it is at the pull request's base, keeping the file's
+  formatting so the diff is only the entry (procedure `documento`). It opens a pull request and enables auto-merge. The
+  document is listed with `status: "creating"` and `creation.prUrl` until it merges (webhook, or the reconciliation
+  every `REGULATIONS_RECONCILE_SECONDS`); then it is `active`, and its first version is read from the merge commit, so a
+  pull request fixed by hand is imported as merged.
+  - Failing CI or a pull request that can't merge (e.g. two creations conflicting on `documents.json`) keep it
+    `creating` with `creation.error`: fix the pull request, or close it.
+  - A closed pull request or a commit that fails makes it `failed`; `documents.create` with the same key starts again,
+    as a repository or a private document.
+  - A creation whose pull request number was never saved (the process stopped) is found again by its branch; with no
+    pull request it fails after 5 minutes, or at once when the key is created again.
+  - A key whose tag prefix (`<key>-`) would be confused with another repository document's is refused, since the release
+    workflow tells documents apart by it.
 
 `documents.upload` (`FormData`: `key`, `title`, `file`) creates a private, read-only document from a PDF (at most 20 MB,
-checked by its `%PDF-` header); `versions.upload` (`documentKey`, `file`) adds a new version. `versions.pdf` serves the
+checked by its `%PDF-` header; its key is checked against the database, and against `documents.json` only when that can
+be read); `versions.upload` (`documentKey`, `file`) adds a new version. `versions.pdf` serves the
 PDF of any version: official, uploaded, or compiled.
 
 ## Data

@@ -180,3 +180,85 @@ export function githubLegalSource(gh: LegalGitHub, ref: string): LegalSource {
     ...sourceOver(reader, async () => gh.readText(MANIFEST_PATH, await sha())),
   }
 }
+
+/**
+ * Appends a document to documents.json as text, in the repository's style (two-space indentation, one key per line,
+ * arrays of strings inline), so a creation pull request's diff is only the new entry. Falls back to a full
+ * `JSON.stringify` when the file's layout can't be followed.
+ */
+export function appendDocumentEntry(text: string, entry: Record<string, unknown>): string {
+  const manifest = JSON.parse(text) as { documents?: unknown[] }
+  const documents = manifest.documents
+  if (!Array.isArray(documents)) throw new Error(`${MANIFEST_PATH} non ha l'elenco dei documenti.`)
+  const expected = JSON.stringify([...documents, entry])
+  const fallback = () => `${JSON.stringify({ ...manifest, documents: [...documents, entry] }, null, 2)}\n`
+  const close = documentsArrayEnd(text)
+  if (close === null) return fallback()
+  const lineStart = (at: number) => text.lastIndexOf("\n", at - 1) + 1
+  const indentAt = (at: number) => /^[ \t]*/.exec(text.slice(lineStart(at)))?.[0] ?? ""
+  const unit = /\n([ \t]+)\S/.exec(text)?.[1] ?? "  "
+  const closeIndent = indentAt(close)
+  let last = close - 1
+  while (last >= 0 && /\s/.test(text[last])) last--
+  const empty = text[last] === "["
+  // The last entry's closing brace sits on a line with the entries' indentation.
+  const itemIndent = empty ? closeIndent + unit : indentAt(last)
+  const formatted = formatJson(entry, itemIndent, unit)
+  const result = empty
+    ? `${text.slice(0, last + 1)}\n${itemIndent}${formatted}\n${closeIndent}${text.slice(close)}`
+    : `${text.slice(0, last + 1)},\n${itemIndent}${formatted}${text.slice(last + 1)}`
+  try {
+    if (JSON.stringify((JSON.parse(result) as { documents: unknown[] }).documents) === expected) return result
+  } catch {
+    // Not followed: write the whole file instead.
+  }
+  return fallback()
+}
+
+/** Objects one key per line; arrays of primitives inline (`["a", "b"]`), other arrays one item per line. */
+function formatJson(value: unknown, indent: string, unit: string): string {
+  if (Array.isArray(value)) {
+    if (value.every((v) => v === null || typeof v !== "object"))
+      return `[${value.map((v) => JSON.stringify(v)).join(", ")}]`
+    return `[\n${value.map((v) => indent + unit + formatJson(v, indent + unit, unit)).join(",\n")}\n${indent}]`
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value)
+    if (!entries.length) return "{}"
+    return `{\n${entries
+      .map(([k, v]) => `${indent}${unit}${JSON.stringify(k)}: ${formatJson(v, indent + unit, unit)}`)
+      .join(",\n")}\n${indent}}`
+  }
+  return JSON.stringify(value)
+}
+
+/** Offset of the `]` closing the top-level `"documents"` array, or null. */
+function documentsArrayEnd(text: string): number | null {
+  let depth = 0
+  let inString = false
+  let key: string | null = null
+  let stringStart = 0
+  let arrayDepth: number | null = null
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inString) {
+      if (c === "\\") i++
+      else if (c === '"') {
+        inString = false
+        key = text.slice(stringStart + 1, i)
+      }
+      continue
+    }
+    if (c === '"') {
+      inString = true
+      stringStart = i
+    } else if (c === "{" || c === "[") {
+      if (c === "[" && depth === 1 && key === "documents" && arrayDepth === null) arrayDepth = depth + 1
+      depth++
+    } else if (c === "}" || c === "]") {
+      if (c === "]" && arrayDepth !== null && depth === arrayDepth) return i
+      depth--
+    } else if (c === ",") key = null
+  }
+  return null
+}
