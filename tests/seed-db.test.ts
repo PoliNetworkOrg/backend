@@ -67,6 +67,20 @@ describe.skipIf(!testPort)("database seed", () => {
     expect(await query("SELECT DISTINCT target_id FROM tg_audit_log")).toEqual([{ target_id: "100000001" }])
   }, 30_000)
 
+  it("seeds project resources with IdP authors after the legacy permission table was removed", async () => {
+    await seed()
+    const resources = await query(`SELECT r.kind, r.url, r.created_by_sub, p.title
+      FROM web_project_resources r JOIN web_projects p ON p.id = r.project_id
+      ORDER BY r."order", r.id`)
+    expect(resources).toHaveLength(8)
+    expect(resources.every((row) => typeof row.created_by_sub === "string" && row.created_by_sub.length > 0)).toBe(true)
+    expect(resources.slice(0, 3).map((row) => row.kind)).toEqual(["android", "ios", "source"])
+    await seed()
+    expect(await query("SELECT count(*)::int AS count FROM web_project_resources")).toEqual([{ count: 8 }])
+    await query("DELETE FROM web_projects")
+    expect(await query("SELECT count(*)::int AS count FROM web_project_resources")).toEqual([{ count: 0 }])
+  }, 30_000)
+
   it("uses retained groups for messages", async () => {
     await query(`INSERT INTO tg_groups (telegram_id, title) VALUES (-1000000000001, 'retained')`)
 
