@@ -19,7 +19,10 @@ const fields = {
   /** The LaTeX worker, to compile published versions without an official PDF. */
   REGULATIONS_WORKER_URL: z.url().optional(),
   REGULATIONS_WORKER_SECRET: z.string().min(1).optional(),
-  /** A local clone of PoliNetworkOrg/legal to import documents from (development); otherwise the GitHub App. */
+  /**
+   * A local clone of the documents repository (PoliNetworkOrg/documents, formerly `legal`) to import documents from
+   * (development); otherwise the GitHub App.
+   */
   REGULATIONS_LEGAL_DIR: z.string().min(1).optional(),
 
   /**
@@ -31,7 +34,7 @@ const fields = {
   REGULATIONS_LLM_API_KEY: z.string().min(1).optional(),
   REGULATIONS_LLM_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
 
-  /** `app`: the GitHub App on the legal repository; `fake`: in memory (the default outside production). */
+  /** `app`: the GitHub App on the documents repository; `fake`: in memory (the default outside production). */
   REGULATIONS_GITHUB_MODE: z.enum(["app", "fake"]).optional(),
   REGULATIONS_GITHUB_APP_ID: z.string().min(1).optional(),
   /** PEM; `\\n` escapes are accepted. */
@@ -44,10 +47,11 @@ const fields = {
   REGULATIONS_GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
   /** Seconds between reconciliations of emanations waiting on GitHub, for webhook deliveries that got lost. */
   REGULATIONS_RECONCILE_SECONDS: z.coerce.number().int().min(5).max(3600).default(300),
+  /** The documents repository, `owner/name` (renamed from `PoliNetworkOrg/legal`). */
   REGULATIONS_GITHUB_REPO: z
     .string()
     .regex(/^[\w.-]+\/[\w.-]+$/)
-    .default("PoliNetworkOrg/legal"),
+    .default("PoliNetworkOrg/documents"),
   REGULATIONS_GITHUB_BASE: z.string().min(1).default("main"),
   /** Development: where the in-memory GitHub keeps its state across restarts. */
   REGULATIONS_FAKE_GITHUB_STATE: z.string().min(1).optional(),

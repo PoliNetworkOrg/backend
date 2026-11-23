@@ -1,8 +1,11 @@
 import { z } from "zod"
 
 /**
- * Wire contract of the regulations editor (`regulations.*`), shared with the admin dashboard (PoliNetworkOrg/admin),
+ * Wire contract of the documents editor (`regulations.*`), shared with the admin dashboard (PoliNetworkOrg/admin),
  * which keeps a copy of this file. Keep input/output changes coordinated with that repository.
+ *
+ * It covers every PoliNetwork document, not only the regulations: the documents of the repository (its
+ * `documents.json`), with the procedure each one declares, and the private documents kept only in the backend.
  *
  * Dates and instants are ISO 8601 strings: `YYYY-MM-DD` for calendar dates (a delibera), full timestamps otherwise.
  * People are IdP accounts, identified by their subject (`id`).
@@ -10,11 +13,14 @@ import { z } from "zod"
 
 /** IdP permissions (PoliNetwork Auth). Per-draft access is backend data, not IdP roles. */
 export const REGULATION_PERMISSIONS = {
-  /** See documents, versions and every draft (as a viewer). */
+  /** See documents (private ones included), versions and every draft (as a viewer). */
   read: "regulations:read",
   /** Create drafts, assign members, edit any draft, merge, send to approval. */
   write: "regulations:write",
-  /** Record the approval, emanate, regenerate the LLM diff. */
+  /**
+   * Record the approval, emanate, regenerate the LLM diff, publish a `documento` draft, create documents (repository
+   * or private) and upload PDFs.
+   */
   manage: "regulations:manage",
   /** Rectify (rettifica) and manage deleghe. */
   rectify: "regulations:rectify",
@@ -30,21 +36,41 @@ export const documentKeySchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/)
 // Procedure (configuration per document type)
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** The states a procedure may use. A document type picks its own subset, transitions and deadlines. */
-export const STATE_KEYS = ["bozza", "in_approvazione", "approvata", "emanata"] as const
+/**
+ * The states a procedure may use. A document type picks its own subset, transitions and deadlines:
+ * - `rri`: bozza → in_approvazione → approvata → emanata (rettifica: bozza → emanata);
+ * - `documento`: bozza → pubblicata.
+ * `emanata` and `pubblicata` are final: the draft became a published version.
+ */
+export const STATE_KEYS = ["bozza", "in_approvazione", "approvata", "emanata", "pubblicata"] as const
 export const stateKeySchema = z.enum(STATE_KEYS)
 export type StateKey = z.infer<typeof stateKeySchema>
+/** A draft in one of these states is closed: it is a published version now. */
+export const FINAL_STATES = ["emanata", "pubblicata"] as const satisfies readonly StateKey[]
+/** Drafts still on their way (counted as open, listed by default). */
+export const OPEN_STATES = ["bozza", "in_approvazione", "approvata"] as const satisfies readonly StateKey[]
 
 /**
- * - `modifica`: the ordinary path (bozza → in_approvazione → approvata → emanata);
+ * The procedure a document declares in `documents.json`:
+ * - `rri`: the Raccolta dei Regolamenti Interni's (delibera, LLM differences, Soci notice, rettifica, deleghe);
+ * - `documento`: bozza → pubblicata, published by `regulations:manage`, no delibera, no LLM, no notice.
+ * A document without a procedure (`null`) is read-only ("sola consultazione").
+ */
+export const PROCEDURE_KEYS = ["rri", "documento"] as const
+export const procedureKeySchema = z.enum(PROCEDURE_KEYS)
+export type ProcedureKey = z.infer<typeof procedureKeySchema>
+
+/**
+ * - `modifica`: the ordinary path (bozza → in_approvazione → approvata → emanata; bozza → pubblicata for `documento`);
  * - `rettifica`: typos with no change of meaning; skips `approvata` and is emanated by the Segretario or a delegate.
+ *   Only for documents with the `rri` procedure.
  */
 export const DRAFT_KINDS = ["modifica", "rettifica"] as const
 export const draftKindSchema = z.enum(DRAFT_KINDS)
 export type DraftKind = z.infer<typeof draftKindSchema>
 
 export const procedureSchema = z.object({
-  key: z.string(),
+  key: procedureKeySchema,
   states: z.array(
     z.object({
       key: stateKeySchema,
@@ -86,8 +112,9 @@ export const meSchema = z.object({
   deleghe: z.number().int(),
   permissions: z.object({ read: z.boolean(), write: z.boolean(), manage: z.boolean(), rectify: z.boolean() }),
   /**
-   * Documents the caller may rectify: every document with `regulations:rectify`, the scope of their active deleghe
-   * otherwise. Lets a delegate without `regulations:read` start a rettifica from the latest version.
+   * Documents the caller may rectify (only `rri` procedure documents): every one with `regulations:rectify`, the scope
+   * of their active deleghe otherwise. Lets a delegate without `regulations:read` start a rettifica from the latest
+   * version.
    */
   rectifiable: z.array(
     z.object({
@@ -137,36 +164,154 @@ export const deliberaSchema = z.discriminatedUnion("kind", [
 ])
 export type Delibera = z.infer<typeof deliberaSchema>
 
+/**
+ * Where a version comes from:
+ * - `import`: imported from the repository (first import, or the repository's head for a read-only document);
+ * - `draft`: emanated or published from a draft (`draftId`);
+ * - `template`: the starting text of a private document created from a template;
+ * - `upload`: an uploaded PDF (private, read-only documents).
+ */
+export const VERSION_ORIGINS = ["import", "draft", "template", "upload"] as const
+export const versionOriginSchema = z.enum(VERSION_ORIGINS)
+export type VersionOrigin = z.infer<typeof versionOriginSchema>
+
 export const versionSummarySchema = z.object({
   id: z.string(),
   documentKey: z.string(),
-  /** Git tag on the legal repository, e.g. `rri-v2026.10.08`; `null` for the initial import without a tag. */
+  /** Git tag on the documents repository, e.g. `rri-v2026.10.08`; `null` for imports and private documents. */
   tag: z.string().nullable(),
   /** e.g. "v2026.10.08", or the tag/commit it was imported from. */
   label: z.string(),
-  /** `null` for versions imported from the repository. */
+  origin: versionOriginSchema,
+  /** `null` for versions imported from the repository and for `documento` publications. */
   delibera: deliberaSchema.nullable(),
   publishedAt: z.string(),
   releaseUrl: z.string().nullable(),
-  /** Whether `versions.pdf` can serve the official PDF. */
+  /** Whether `versions.pdf` can serve its PDF (official, uploaded, or compiled on demand). */
   pdfAvailable: z.boolean(),
-  /** The draft it was emanated from. */
+  /** The draft it was emanated or published from. */
   draftId: z.string().nullable(),
 })
 export type VersionSummary = z.infer<typeof versionSummarySchema>
 
+/**
+ * How the dashboard groups documents:
+ * - `regolamento`: procedure `rri`, or a document made from the `regolamento` template;
+ * - `generale`: any other repository document with a procedure (Documenti generali);
+ * - `privato`: kept only in the backend (never on GitHub, the LLM, email or Telegram);
+ * - `consultazione`: a repository document without a procedure (Statuto, Regolamento Elettorale): read-only.
+ */
+export const DOCUMENT_KINDS = ["regolamento", "generale", "privato", "consultazione"] as const
+export const documentKindSchema = z.enum(DOCUMENT_KINDS)
+export type DocumentKind = z.infer<typeof documentKindSchema>
+
+/** `repo`: in the documents repository on GitHub; `private`: only in the backend's database. */
+export const DOCUMENT_STORAGES = ["repo", "private"] as const
+export const documentStorageSchema = z.enum(DOCUMENT_STORAGES)
+export type DocumentStorage = z.infer<typeof documentStorageSchema>
+
+/** `latex`: sources compiled to PDF; `upload`: an uploaded PDF, read-only (a new version is a new upload). */
+export const DOCUMENT_ORIGINS = ["latex", "upload"] as const
+export const documentOriginSchema = z.enum(DOCUMENT_ORIGINS)
+export type DocumentOrigin = z.infer<typeof documentOriginSchema>
+
+/**
+ * - `active`: usable;
+ * - `creating`: a repository document whose pull request (from `documents.create`) hasn't merged yet ("in creazione");
+ * - `failed`: that pull request failed or was closed: see `creation.error`; `documents.create` with the same key
+ *   tries again.
+ */
+export const DOCUMENT_STATUSES = ["active", "creating", "failed"] as const
+export const documentStatusSchema = z.enum(DOCUMENT_STATUSES)
+
+export const documentCreationSchema = z.object({
+  /** The pull request on the documents repository. */
+  prNumber: z.number().int().nullable(),
+  prUrl: z.string().nullable(),
+  /** Why it failed, in Italian, or `null`. */
+  error: z.string().nullable(),
+  startedAt: z.string(),
+  startedBy: personRefSchema,
+})
+
 export const documentSchema = z.object({
   key: z.string(),
   title: z.string(),
+  kind: documentKindSchema,
+  storage: documentStorageSchema,
+  origin: documentOriginSchema,
+  /** Template key in `documents.json` (`regolamento`, `generale`), or `null` (self-contained, uploaded). */
+  template: z.string().nullable(),
+  /** `null`: sola consultazione. */
+  procedureKey: procedureKeySchema.nullable(),
+  /** The procedure's states and transitions; `null` for sola consultazione. */
+  procedure: procedureSchema.nullable(),
+  /** Drafts can be created: a LaTeX document with a procedure, `active`. */
+  editable: z.boolean(),
+  status: documentStatusSchema,
+  /** For a repository document created from the dashboard, until it's active. */
+  creation: documentCreationSchema.nullable(),
+  /** Tag prefix on the repository; meaningless for private documents. */
   tagPrefix: z.string(),
-  procedure: procedureSchema,
   latestVersion: versionSummarySchema.nullable(),
-  /** Drafts not yet emanated or deleted. */
+  /** Drafts not yet emanated, published or deleted. */
   openDrafts: z.number().int(),
-  /** The only draft that may be `in_approvazione` at a time. */
+  /** The only draft that may be `in_approvazione` at a time (`rri` only). */
   inApproval: z.object({ id: z.string(), title: z.string() }).nullable(),
 })
 export type DocumentInfo = z.infer<typeof documentSchema>
+
+/** `documents.sync`: what the import from the repository did. */
+export const syncResultSchema = z.object({
+  /** Every document of the manifest that was imported or updated. */
+  documents: z.array(z.string()),
+  /** Documents imported for the first time (their first version). */
+  imported: z.array(z.string()),
+  /** Read-only documents whose sources changed in the repository: a new version from its head. */
+  updated: z.array(z.string()),
+  /** Left as they are, with the reason (e.g. the key is a private document's, or open drafts block a change). */
+  skipped: z.array(z.object({ key: z.string(), reason: z.string() })),
+})
+export type SyncResult = z.infer<typeof syncResultSchema>
+
+/** A template of `documents.json`: the starting files and the shared class of new documents. */
+export const templateSchema = z.object({
+  key: z.string(),
+  title: z.string(),
+  /** Parent directory of a new repository document, e.g. `regolamenti/` (it goes in `regolamenti/<key>/`). */
+  directory: z.string(),
+})
+export type TemplateInfo = z.infer<typeof templateSchema>
+
+/**
+ * `documents.create` (`regulations:manage`): a new document from a template.
+ * - `repo`: the GitHub App opens a pull request adding `<directory>/` from the template's skeleton and the manifest
+ *   entry (procedure `documento`); it auto-merges after CI. The document is listed as `creating` until then.
+ * - `private`: the skeleton and the template's shared files are copied from the repository now and kept only in the
+ *   backend; procedure `documento`. Its first version (origin `template`) is the starting text: create a draft from it.
+ * The key is unique across repository and private documents.
+ */
+export const createDocumentInputSchema = z.object({
+  key: documentKeySchema,
+  title: z.string().trim().min(1).max(120),
+  template: z.string().regex(/^[a-z][a-z0-9-]{0,39}$/),
+  storage: documentStorageSchema,
+})
+export type CreateDocumentInput = z.output<typeof createDocumentInputSchema>
+
+/** The largest PDF `documents.upload` and `versions.upload` accept. */
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+
+/**
+ * `documents.upload` (`regulations:manage`), sent as `FormData`: `key`, `title`, `file` (a PDF up to 20 MB). Creates a
+ * private, read-only document (origin `upload`) with the file as its first version.
+ */
+export const uploadDocumentFieldsSchema = z.object({
+  key: documentKeySchema,
+  title: z.string().trim().min(1).max(120),
+})
+/** `versions.upload` (`regulations:manage`), sent as `FormData`: `documentKey`, `file`. A new version of an upload. */
+export const uploadVersionFieldsSchema = z.object({ documentKey: documentKeySchema })
 
 /** Source files by path, relative to the document's directory (e.g. `regolamenti/2_interno.tex`). */
 export const filesSchema = z.record(z.string(), z.string())
@@ -291,7 +436,10 @@ export const capabilitiesSchema = z.object({
   transitions: z.array(transitionOptionSchema),
   /** Record the approval (`approvata`) with the delibera. */
   approve: z.boolean(),
-  /** "Emana e notifica" (or, for a rettifica, "Emana rettifica"). */
+  /**
+   * `emanation.start` now: "Emana e notifica" (`rri`), "Emana rettifica", or "Pubblica" (`documento`). The label is
+   * the procedure's transition to the final state.
+   */
   emanate: z.boolean(),
   /**
    * Why the caller, who could otherwise emanate in this state, can't right now (e.g. a superseded base, text that
@@ -339,7 +487,7 @@ export const createDraftInputSchema = z.object({
 export const renameDraftInputSchema = z.object({ draftId: draftIdSchema, title: z.string().trim().min(1).max(120) })
 export const listDraftsInputSchema = z.object({
   documentKey: documentKeySchema.optional(),
-  /** Include emanated drafts. */
+  /** Include emanated and published drafts. */
   includeClosed: z.boolean().default(false),
 })
 
@@ -594,6 +742,10 @@ export type Diff = z.infer<typeof diffSchema>
 // Emanation
 // ---------------------------------------------------------------------------------------------------------------------
 
+/**
+ * Steps of `emanation.start`. A repository `documento` runs pr → release and skips the notices; a private one is
+ * published in the database at once (every step `skipped`, status `done`).
+ */
 export const EMANATION_STEPS = ["pr", "checks", "merge", "tag", "release", "email", "telegram"] as const
 export const emanationStepSchema = z.object({
   key: z.enum(EMANATION_STEPS),
@@ -643,6 +795,7 @@ export const delegaSchema = z.object({
 export type Delega = z.infer<typeof delegaSchema>
 export const createDelegaInputSchema = z.object({
   userId: z.string().min(1),
+  /** An `rri` procedure document, or none for all of them. */
   documentKey: documentKeySchema.nullish(),
   expiresAt: z.iso.datetime({ offset: true }).nullish(),
   note: z.string().trim().max(500).nullish(),

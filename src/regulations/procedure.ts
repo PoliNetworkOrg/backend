@@ -1,4 +1,4 @@
-import type { DraftKind, Procedure, StateKey } from "./contract"
+import type { DraftKind, Procedure, ProcedureKey, StateKey } from "./contract"
 
 /**
  * Procedures are configuration per document type (spec decision 10): states, transitions, who may take them, what
@@ -39,7 +39,7 @@ export type DeadlineRule = {
 }
 
 export type ProcedureConfig = {
-  key: string
+  key: ProcedureKey
   states: { key: StateKey; label: string; editable: boolean }[]
   transitions: TransitionRule[]
   deadlines: DeadlineRule[]
@@ -134,12 +134,42 @@ const RRI: ProcedureConfig = {
   ],
 }
 
-export const PROCEDURES: Record<string, ProcedureConfig> = { rri: RRI }
+/**
+ * Documenti generali (and private documents from a template): one step, published by Presidente or Segretario. No
+ * delibera, no LLM differences, no notice; a repository document is published through the GitHub App like an
+ * emanation (pull request, CI, tag, release), a private one in the database.
+ */
+const DOCUMENTO: ProcedureConfig = {
+  key: "documento",
+  states: [
+    { key: "bozza", label: "Bozza", editable: true },
+    { key: "pubblicata", label: "Pubblicata", editable: false },
+  ],
+  transitions: [
+    {
+      from: "bozza",
+      to: "pubblicata",
+      label: "Pubblica",
+      kinds: ["modifica"],
+      who: "manage",
+      requires: ["parses"],
+      effect: "emanate",
+    },
+  ],
+  deadlines: [],
+}
+
+export const PROCEDURES: Record<ProcedureKey, ProcedureConfig> = { rri: RRI, documento: DOCUMENTO }
 
 export function procedureOf(key: string): ProcedureConfig {
-  const procedure = PROCEDURES[key]
+  const procedure = PROCEDURES[key as ProcedureKey]
   if (!procedure) throw new Error(`Unknown procedure ${key}`)
   return procedure
+}
+
+/** The rule "Emana e notifica" / "Emana rettifica" / "Pubblica" for a draft, and the final state it leads to. */
+export function emanateRule(config: ProcedureConfig, kind: DraftKind): TransitionRule | null {
+  return config.transitions.find((r) => r.effect === "emanate" && r.kinds.includes(kind)) ?? null
 }
 
 /** The contract's view of a procedure. */

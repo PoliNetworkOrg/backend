@@ -35,11 +35,11 @@ const service = new Proxy(
   }
 ) as never
 
-function context(actor: Actor, scopes = ["backend:admin"]): Context {
+function context(actor: Actor, scopes = ["backend:admin"], permissions: string[] = []): Context {
   return {
     auth: { kind: "token", actor, scopes: new Set(scopes) },
     access: {
-      has: () => false,
+      has: (_, permission) => permissions.includes(permission),
       current: () => null,
       subjectBySub: () => undefined,
       subjectByTelegramId: () => undefined,
@@ -64,6 +64,65 @@ describe("regulations tRPC router", () => {
     await expect(router.createCaller(context(user, ["backend:public:read"])).me.get()).rejects.toMatchObject({
       code: "FORBIDDEN",
     })
+  })
+
+  it("creates and uploads documents only for regulations:manage, reading uploads from FormData", async () => {
+    const uploads: { viewer: string; key: string; title: string; file: string }[] = []
+    const document = {
+      key: "bilancio",
+      title: "Bilancio",
+      kind: "privato",
+      storage: "private",
+      origin: "upload",
+      template: null,
+      procedureKey: null,
+      procedure: null,
+      editable: false,
+      status: "active",
+      creation: null,
+      tagPrefix: "bilancio-",
+      latestVersion: null,
+      openDrafts: 0,
+      inApproval: null,
+    }
+    const uploading = new Proxy(service as object, {
+      get: (target, name) =>
+        name === "uploadDocument"
+          ? async (viewer: { sub: string }, input: { key: string; title: string; file: File }) => {
+              uploads.push({ viewer: viewer.sub, key: input.key, title: input.title, file: await input.file.text() })
+              return document
+            }
+          : Reflect.get(target, name),
+    }) as never
+    const router = makeRouter(
+      uploading,
+      createDirectory(async () => [{ sub: "anna", name: "Anna", email: null }])
+    )
+    const procedures = (router as unknown as { _def: { procedures: Record<string, { _def: { meta: unknown } }> } })._def
+      .procedures
+    for (const name of ["documents.create", "documents.upload", "versions.upload"])
+      expect(procedures[name]._def.meta).toMatchObject({
+        policy: { user: { scope: "backend:admin", permission: "regulations:manage" } },
+      })
+    const user: Actor = { kind: "user", sub: "anna", client: "admin-dashboard", telegramId: null }
+    const manager = () => router.createCaller(context(user, ["backend:admin"], ["regulations:manage"]))
+    const form = () => {
+      const fd = new FormData()
+      fd.set("key", "bilancio")
+      fd.set("title", "Bilancio")
+      fd.set("file", new File(["%PDF-1.4 bilancio"], "b.pdf", { type: "application/pdf" }))
+      return fd
+    }
+    await expect(router.createCaller(context(user)).documents.upload(form())).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
+    expect(uploads).toEqual([])
+    expect(await manager().documents.upload(form())).toEqual(document)
+    expect(uploads).toEqual([{ viewer: "anna", key: "bilancio", title: "Bilancio", file: "%PDF-1.4 bilancio" }])
+    const missing = form()
+    missing.delete("file")
+    await expect(manager().documents.upload(missing)).rejects.toMatchObject({ code: "BAD_REQUEST" })
+    expect(uploads).toHaveLength(1)
   })
 
   it("exposes the procedures of the contract shared with the admin", () => {
@@ -92,9 +151,11 @@ describe("regulations tRPC router", () => {
         "diff.get",
         "diff.pdf",
         "diff.regenerate",
+        "documents.create",
         "documents.get",
         "documents.list",
         "documents.sync",
+        "documents.upload",
         "drafts.create",
         "drafts.delete",
         "drafts.files",
@@ -112,9 +173,11 @@ describe("regulations tRPC router", () => {
         "snapshots.get",
         "snapshots.list",
         "snapshots.restore",
+        "templates.list",
         "users.search",
         "versions.list",
         "versions.pdf",
+        "versions.upload",
       ].sort()
     )
   })

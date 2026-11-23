@@ -50,12 +50,16 @@ try {
   await migrate(db, { migrationsFolder: "./drizzle" })
   const legal = mkdtempSync(join(tmpdir(), "regs-legal-"))
   cpSync(join(import.meta.dirname, "fixtures/regulations/sample"), join(legal, "sample"), { recursive: true })
-  cpSync(join(import.meta.dirname, "fixtures/regulations/sample"), join(legal, "shared"), { recursive: true })
+  cpSync(join(import.meta.dirname, "fixtures/regulations/sample"), join(legal, "shared/regolamento"), {
+    recursive: true,
+  })
   writeFileSync(
-    join(legal, "legal.json"),
+    join(legal, "documents.json"),
     JSON.stringify({
-      version: 1,
-      shared: "shared",
+      version: 2,
+      templates: {
+        regolamento: { title: "Regolamento", shared: "shared/regolamento", skeleton: "templates/regolamento" },
+      },
       documents: [
         {
           key: "sample",
@@ -65,6 +69,7 @@ try {
           sources: ["main.tex", "parti/*.tex"],
           outputs: { pdf: "sample.pdf" },
           tagPrefix: "sample-",
+          template: "regolamento",
           procedure: "rri",
         },
       ],

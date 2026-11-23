@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import {
   blobs,
+  type DocumentCreationJson,
   deleghe,
   delibere,
   documents,
@@ -15,6 +16,7 @@ import {
 import { attachedLine } from "@/emails/templates/regulation-emanated"
 import type { CollabControl } from "../collab/internal-client"
 import { saveSnapshot } from "../collab/persistence"
+import type { AssetBundle } from "../compile/protocol"
 import { sourceHash } from "../compile/protocol"
 import type * as C from "../contract"
 import { EMANATION_STEPS } from "../contract"
@@ -22,7 +24,8 @@ import { type RegulationsDb, sha256 } from "../db"
 import type { DiffService } from "../diff/service"
 import type { Directory } from "../directory"
 import { applyDelibera, DeliberaMacroMissing, parseDocument } from "../latex"
-import { deadlineAt, todayInItaly } from "../procedure"
+import { appendDocumentEntry, githubLegalSource, MANIFEST_PATH, parseManifest } from "../legal-source"
+import { deadlineAt, emanateRule, todayInItaly } from "../procedure"
 import { fail, type RegulationsService, type Viewer } from "../service"
 import type { LegalGitHub } from "./github"
 import { sendOnce, telegramEscape } from "./notify"
@@ -109,13 +112,20 @@ const dateOf = (d: { date: string | Date }) =>
   (d.date as unknown) instanceof Date
     ? (d.date as unknown as Date).toISOString().slice(0, 10)
     : String(d.date).slice(0, 10)
+/** How long a creation may go without a pull request before it counts as failed (the process stopped meanwhile). */
+export const CREATION_GRACE_MS = 5 * 60_000
 const pending = (): EmanationStepJson => ({ state: "pending", url: null, at: null, detail: null })
 
 /**
- * "Emana e notifica" (spec decision 10.4): a PR with the generated sources on the legal repository, auto-merged once
- * CI passes; after the merge the tag, then the release the legal CI builds, with the differences PDF attached; then
- * the email to the Soci and the Telegram post, each recorded. Every step is idempotent and the whole thing resumes
- * from where it stopped (GitHub webhook, a 30-second poll, or `emanation.retry`).
+ * "Emana e notifica" (spec decision 10.4): a PR with the generated sources on the documents repository, auto-merged
+ * once CI passes; after the merge the tag, then the release the repository's CI builds, with the differences PDF
+ * attached; then the email to the Soci and the Telegram post, each recorded. Every step is idempotent and the whole
+ * thing resumes from where it stopped (GitHub webhook, a 30-second poll, or `emanation.retry`).
+ *
+ * "Pubblica" (procedure `documento`) is the same path without delibera, differences and notices for a repository
+ * document, and a publication in the database for a private one, which never reaches GitHub, the LLM, email or
+ * Telegram. The same GitHub side also creates new repository documents (`createDocument`): a pull request adding the
+ * document from its template, auto-merged after CI.
  */
 export function createEmanationService(deps: {
   db: RegulationsDb
@@ -131,7 +141,7 @@ export function createEmanationService(deps: {
 }) {
   const { db, config } = deps
   const now = deps.now ?? (() => new Date())
-  const { access, loadDraft, loadDocument, currentFiles, rectifyRight, emanationOf, supersededReason } =
+  const { access, loadDraft, loadDocument, currentFiles, rectifyRight, emanationOf, supersededReason, procedureFor } =
     deps.regulations.internal
   const inFlight = new Map<string, Promise<void>>()
 
@@ -177,14 +187,29 @@ export function createEmanationService(deps: {
   // Start
   // ------------------------------------------------------------------------------------------------------------------
 
+  /** Freezes the live text for an emanation that skips the procedure's earlier states (rettifica, documento). */
+  async function freeze(draft: { id: string }, entry: string) {
+    let files: C.Files
+    let parses: boolean
+    if (deps.collab) ({ files, parses } = await deps.collab.freeze(draft.id))
+    else {
+      files = await currentFiles(await loadDraft(draft.id))
+      parses = parseDocument(files, entry).parses
+    }
+    return { files, parses }
+  }
+
   async function start(viewer: Viewer, draftId: string): Promise<C.Emanation> {
     const { draft } = await access(viewer, draftId)
-    if (!deps.github) fail("PRECONDITION_FAILED", "La GitHub App del repository legal non è configurata.")
+    const document = await loadDocument(draft.documentKey)
+    const procedure = procedureFor(document)
     if (await emanationOf(draft.id)) fail("CONFLICT", "L'emanazione è già stata avviata.")
+    if (procedure.key === "documento") return publish(viewer, draft, document)
+    if (!deps.github) fail("PRECONDITION_FAILED", "La GitHub App del repository dei documenti non è configurata.")
     // Emanating a draft based on a superseded version would undo what was published since.
     const superseded = await supersededReason(draft, viewer)
     if (superseded) fail("PRECONDITION_FAILED", superseded)
-    const document = await loadDocument(draft.documentKey)
+    assertRepo(document)
 
     if (draft.kind === "modifica") {
       if (!viewer.can("regulations:manage")) fail("FORBIDDEN", "Solo Presidente e Segretario possono emanare.")
@@ -199,13 +224,7 @@ export function createEmanationService(deps: {
       if (!right) fail("FORBIDDEN", "Solo il Segretario o chi ha una sua delega può emanare una rettifica.")
       if (draft.state !== "bozza") fail("PRECONDITION_FAILED", "La rettifica è già stata emanata.")
       // Freeze the text, record the rettifica, then the differences: all before anything goes to GitHub.
-      let files: C.Files
-      let parses: boolean
-      if (deps.collab) ({ files, parses } = await deps.collab.freeze(draft.id))
-      else {
-        files = await currentFiles(draft)
-        parses = parseDocument(files, document.entry).parses
-      }
+      const { files, parses } = await freeze(draft, document.entry)
       const undo = async () => {
         await db.update(drafts).set({ frozenFiles: null }).where(eq(drafts.id, draft.id))
         await db
@@ -279,6 +298,117 @@ export function createEmanationService(deps: {
     return view(draft.id)
   }
 
+  /** Nothing of a private document goes to GitHub (nor to the LLM, email or Telegram). */
+  function assertRepo(document: { key: string; storage: string }) {
+    if (document.storage !== "repo")
+      throw new Error(`${document.key} is a private document: it never leaves the backend`)
+  }
+
+  const skippedNotice = (): EmanationStepJson => ({
+    state: "skipped",
+    url: null,
+    at: now().toISOString(),
+    detail: "Nessuna notifica per questo documento",
+  })
+
+  const allSteps = (state: EmanationStepJson["state"], detail: string | null) =>
+    Object.fromEntries(
+      EMANATION_STEPS.map((k) => [
+        k,
+        { state, url: null, at: state === "pending" ? null : now().toISOString(), detail },
+      ])
+    ) as Record<EmanationStepKey, EmanationStepJson>
+
+  /**
+   * "Pubblica" (procedure `documento`, `regulations:manage`): freezes the text, then a private document is published in
+   * the database at once, a repository one goes through the GitHub App like an emanation, without notices.
+   */
+  async function publish(
+    viewer: Viewer,
+    draft: Awaited<ReturnType<typeof loadDraft>>,
+    document: Awaited<ReturnType<typeof loadDocument>>
+  ): Promise<C.Emanation> {
+    if (!viewer.can("regulations:manage")) fail("FORBIDDEN", "Solo Presidente e Segretario possono pubblicare.")
+    if (draft.kind !== "modifica" || draft.state !== "bozza")
+      fail("PRECONDITION_FAILED", "Si pubblica una bozza non ancora pubblicata.")
+    if (document.storage === "repo" && !deps.github)
+      fail("PRECONDITION_FAILED", "La GitHub App del repository dei documenti non è configurata.")
+    const superseded = await supersededReason(draft, viewer)
+    if (superseded) fail("PRECONDITION_FAILED", superseded)
+    const { files, parses } = await freeze(draft, document.entry)
+    // The frozen text is the claim: a second "Pubblica" while this one runs finds it and refuses, so it can't publish
+    // twice (nor reopen the text under this one).
+    const claimed = await db
+      .update(drafts)
+      .set({ frozenFiles: files, parses, updatedAt: now() })
+      .where(and(eq(drafts.id, draft.id), eq(drafts.state, "bozza"), isNull(drafts.frozenFiles)))
+      .returning({ id: drafts.id })
+    if (!claimed.length) fail("CONFLICT", "La pubblicazione è già in corso.")
+    const reopen = async () => {
+      await db.update(drafts).set({ frozenFiles: null }).where(eq(drafts.id, draft.id))
+      await deps.collab?.reopen(draft.id).catch(() => {})
+    }
+    if (!parses) {
+      await reopen()
+      fail("PRECONDITION_FAILED", "Il testo non è valido: correggi gli errori prima di pubblicare.")
+    }
+
+    if (document.storage === "private") {
+      try {
+        // The emanation record is written in the same transaction as the version and the draft's state.
+        await deps.regulations.internal.publishPrivate(viewer, draft, files, async (tx, versionId) => {
+          await tx.insert(emanations).values({
+            draftId: draft.id,
+            status: "done",
+            files,
+            branch: "",
+            versionId,
+            steps: allSteps("skipped", "Documento privato: pubblicato solo nella dashboard"),
+            startedBy: viewer.person,
+            startedAt: now(),
+            finishedAt: now(),
+          })
+        })
+      } catch (error) {
+        await reopen()
+        throw error
+      }
+      await saveSnapshot(db, { draftId: draft.id, kind: "state", name: "Pubblicata", files, by: viewer.person })
+      await deps.collab?.broadcast(draft.id, { type: "state", state: "pubblicata" }).catch(() => {})
+      return view(draft.id)
+    }
+
+    try {
+      await db.insert(emanations).values({
+        draftId: draft.id,
+        status: "running",
+        files,
+        branch: `documenti/${draft.documentKey}-${draft.id}`,
+        steps: {
+          ...allSteps("pending", null),
+          email: skippedNotice(),
+          telegram: skippedNotice(),
+        },
+        startedBy: viewer.person,
+        startedAt: now(),
+      })
+    } catch (error) {
+      // Without a record nothing can resume it: give the text back. With one (it committed), polling resumes it.
+      if (!(await emanationOf(draft.id))) await reopen()
+      throw error
+    }
+    await saveSnapshot(db, {
+      draftId: draft.id,
+      kind: "state",
+      name: "Pubblicazione avviata",
+      files,
+      by: viewer.person,
+    })
+    await deps.collab?.broadcast(draft.id, { type: "state", state: draft.state }).catch(() => {})
+    void advance(draft.id)
+    return view(draft.id)
+  }
+
   // ------------------------------------------------------------------------------------------------------------------
   // Steps
   // ------------------------------------------------------------------------------------------------------------------
@@ -290,7 +420,12 @@ export function createEmanationService(deps: {
     const gh = deps.github as LegalGitHub
     const draft = await loadDraft(e.draftId)
     const document = await loadDocument(draft.documentKey)
-    const delibera = (await deliberaOf(draft.id)) as typeof delibere.$inferSelect
+    assertRepo(document)
+    const delibera = await deliberaOf(draft.id)
+    // The rri procedure carries the delibera and the LLM's categories; a documento only its publication date.
+    const line = delibera
+      ? `${deliberaLine(delibera)}.`
+      : `Pubblicato da ${e.startedBy.name} il ${italianDate(todayInItaly(e.startedAt))}.`
     let pr = e.prNumber ? await gh.getPullRequest(e.prNumber) : await gh.findPullRequest(e.branch)
     if (!pr) {
       await gh.commitToBranch({
@@ -299,19 +434,21 @@ export function createEmanationService(deps: {
         dir: document.dir,
         sourceGlobs: document.sources,
         files: e.files,
-        message: `${document.key}: ${draft.title}\n\n${deliberaLine(delibera)}. Generato dalla dashboard.`,
+        message: `${document.key}: ${draft.title}\n\n${line} Generato dalla dashboard.`,
       })
-      const categories = (await deps.diff.latestRow(draft.id))?.categories ?? []
+      const categories = delibera ? ((await deps.diff.latestRow(draft.id))?.categories ?? []) : []
       pr = await gh.openPullRequest({
         branch: e.branch,
         base: config.baseBranch,
         title: `${document.title}: ${draft.title}`,
         body: [
-          `${deliberaLine(delibera)}.`,
+          line,
           "",
           ...categories.map((c) => `- **${c.title}**: ${c.summary}`),
-          "",
-          "Generato dalla dashboard dei regolamenti, dopo l'approvazione: si unisce da solo quando la CI passa. Non modificare a mano.",
+          ...(categories.length ? [""] : []),
+          delibera
+            ? "Generato dalla dashboard dei documenti, dopo l'approvazione: si unisce da solo quando la CI passa. Non modificare a mano."
+            : "Generato dalla dashboard dei documenti: si unisce da solo quando la CI passa. Non modificare a mano.",
         ].join("\n"),
       })
     }
@@ -331,7 +468,7 @@ export function createEmanationService(deps: {
       await setStep(e.draftId, "checks", { state: "done", url: pr.url, at: now().toISOString(), detail: null })
       return "done"
     }
-    if (pr.checks === "failure") throw new Error("La CI del repository legal è fallita: controlla la PR.")
+    if (pr.checks === "failure") throw new Error("La CI del repository dei documenti è fallita: controlla la PR.")
     if (pr.state === "closed") throw new Error("La PR è stata chiusa senza unirla.")
     await setStep(e.draftId, "checks", { state: "running", url: pr.url, detail: "In attesa della CI" })
     return "wait"
@@ -357,10 +494,12 @@ export function createEmanationService(deps: {
     const gh = deps.github as LegalGitHub
     const draft = await loadDraft(e.draftId)
     const document = await loadDocument(draft.documentKey)
-    const delibera = (await deliberaOf(draft.id)) as typeof delibere.$inferSelect
+    const delibera = await deliberaOf(draft.id)
+    // Dated by the delibera (rri), or by the day the publication started (documento).
+    const date = delibera ? dateOf(delibera) : todayInItaly(e.startedAt)
     let tag = e.tag
     if (!tag) {
-      const stem = `${document.tagPrefix}v${dateOf(delibera).replace(/-/g, ".")}`
+      const stem = `${document.tagPrefix}v${date.replace(/-/g, ".")}`
       for (let n = 1; ; n++) {
         const candidate = n === 1 ? stem : `${stem}.${n}`
         const [taken] = await db
@@ -390,6 +529,8 @@ export function createEmanationService(deps: {
         documentKey: document.key,
         tag,
         label: tag.slice(document.tagPrefix.length),
+        origin: "draft",
+        entry: document.entry,
         files: e.files,
         sourceHash: await sourceHash({ entry: document.entry, files: e.files, assets: latest?.assetsBlob ?? "" }),
         commitSha: e.mergeSha,
@@ -398,11 +539,18 @@ export function createEmanationService(deps: {
         assetsBlob: latest?.assetsBlob ?? null,
       })
       await db.update(emanations).set({ versionId }).where(eq(emanations.draftId, e.draftId))
+      const final = emanateRule(procedureFor(document), draft.kind)?.to ?? "emanata"
       await db
         .update(drafts)
-        .set({ state: "emanata", emanatedAt: now(), stateChangedAt: now(), updatedAt: now() })
+        .set({ state: final, emanatedAt: now(), stateChangedAt: now(), updatedAt: now() })
         .where(eq(drafts.id, draft.id))
-      await saveSnapshot(db, { draftId: draft.id, kind: "state", name: `Emanata (${tag})`, files: e.files, by: null })
+      await saveSnapshot(db, {
+        draftId: draft.id,
+        kind: "state",
+        name: `${final === "pubblicata" ? "Pubblicata" : "Emanata"} (${tag})`,
+        files: e.files,
+        by: null,
+      })
     }
     await setStep(e.draftId, "tag", {
       state: "done",
@@ -424,11 +572,14 @@ export function createEmanationService(deps: {
       await setStep(e.draftId, "release", { state: "running", detail: "In attesa della release della CI" })
       return "wait"
     }
-    const delibera = (await deliberaOf(draft.id)) as typeof delibere.$inferSelect
-    const differencesName = `differenze-${tag}.pdf`
-    const differences = await deps.diff.renderPdf(draft.id, { newLabel: tag, subtitle: deliberaLine(delibera) })
-    if (!release.assets.some((a) => a.name === differencesName))
-      await gh.uploadAsset(release.id, differencesName, differences, "application/pdf")
+    // The differences PDF exists only in the rri procedure (a documento has no LLM differences).
+    const delibera = await deliberaOf(draft.id)
+    if (delibera) {
+      const differencesName = `differenze-${tag}.pdf`
+      const differences = await deps.diff.renderPdf(draft.id, { newLabel: tag, subtitle: deliberaLine(delibera) })
+      if (!release.assets.some((a) => a.name === differencesName))
+        await gh.uploadAsset(release.id, differencesName, differences, "application/pdf")
+    }
     const pdf = await gh.downloadAsset(official.id)
     const hash = sha256(pdf)
     await db.insert(blobs).values({ hash, contentType: "application/pdf", content: pdf }).onConflictDoNothing()
@@ -475,7 +626,20 @@ export function createEmanationService(deps: {
     return kind === "modifica" ? todayInItaly(deadlineAt(todayInItaly(now()), 10)) : null
   }
 
+  /** Only the rri procedure notifies the Soci, and never about a private document. */
+  async function skipNotice(e: Row, key: "email" | "telegram"): Promise<boolean> {
+    const document = await loadDocument((await loadDraft(e.draftId)).documentKey)
+    if (document.procedure === "rri" && document.storage === "repo") return false
+    await setStep(e.draftId, key, {
+      state: "skipped",
+      at: now().toISOString(),
+      detail: "Nessuna notifica per questo documento",
+    })
+    return true
+  }
+
   async function stepEmail(e: Row): Promise<Outcome> {
+    if (await skipNotice(e, "email")) return "skip"
     const { draft, document, official, differences, categories } = await filesForNotice(e)
     const delibera = (await deliberaOf(draft.id)) as typeof delibere.$inferSelect
     const tag = e.tag as string
@@ -567,6 +731,7 @@ export function createEmanationService(deps: {
   }
 
   async function stepTelegram(e: Row): Promise<Outcome> {
+    if (await skipNotice(e, "telegram")) return "skip"
     if (!config.telegram) {
       await setStep(e.draftId, "telegram", {
         state: "skipped",
@@ -773,6 +938,7 @@ export function createEmanationService(deps: {
       .from(emanations)
       .where(inArray(emanations.status, ["running", "waiting"]))
     for (const row of rows) if (!row.nextCheckAt || row.nextCheckAt <= now()) await advance(row.draftId)
+    await tickCreations()
   }
 
   /** GitHub webhook: a PR merged, a check finished, a release published. */
@@ -804,6 +970,252 @@ export function createEmanationService(deps: {
         .from(emanations)
         .where(and(eq(emanations.status, "waiting"), isNotNull(emanations.prNumber)))
     for (const row of rows) await advance(row.draftId)
+    if (["pull_request", "check_suite", "check_run", "status"].includes(event)) await tickCreations()
+  }
+
+  // ------------------------------------------------------------------------------------------------------------------
+  // New repository documents
+  // ------------------------------------------------------------------------------------------------------------------
+
+  /**
+   * documents.json at the pull request's base with the new entry appended, keeping the file's formatting (never a stale
+   * copy of the manifest).
+   */
+  function addToManifest(entry: { key: string }) {
+    return (current: string | null) => {
+      if (current === null) throw new Error(`${MANIFEST_PATH} non trovato nel repository dei documenti.`)
+      const manifest = JSON.parse(current) as { documents?: { key?: string }[] }
+      if (manifest.documents?.some((d) => d.key === entry.key))
+        throw new Error("La chiave è già usata nel repository dei documenti.")
+      const next = appendDocumentEntry(current, entry)
+      // What the backend will read back must be valid (e.g. the template still exists at this base).
+      parseManifest(next)
+      return next
+    }
+  }
+
+  async function setCreation(key: string, patch: Partial<DocumentCreationJson>, status?: "active" | "failed") {
+    const [row] = await db.select().from(documents).where(eq(documents.key, key))
+    if (!row?.creation || row.status !== "creating") return
+    await db
+      .update(documents)
+      .set({ creation: { ...row.creation, ...patch }, updatedAt: now(), ...(status ? { status } : {}) })
+      .where(and(eq(documents.key, key), eq(documents.status, "creating")))
+  }
+
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+  /** Creations whose pull request this process is opening right now: not failed for lacking one. */
+  const openingPr = new Map<string, Promise<void>>()
+
+  /**
+   * `documents.create` with storage `repo` (`regulations:manage`): the App opens a pull request adding
+   * `<placement>/<key>/` from the template's skeleton and the documents.json entry (procedure `documento`), with
+   * auto-merge after CI like an emanation. The document is `creating` until the merge, then its first version is what
+   * the merge commit holds. A pull request that is closed, a commit that fails, or a creation whose pull request can't
+   * be found after `CREATION_GRACE_MS` leaves it `failed`: the same key may be created again.
+   */
+  async function createDocument(viewer: Viewer, input: C.CreateDocumentInput): Promise<C.DocumentInfo> {
+    if (!viewer.can("regulations:manage")) fail("FORBIDDEN", "Solo Presidente e Segretario creano documenti.")
+    if (!deps.github) fail("PRECONDITION_FAILED", "La GitHub App del repository dei documenti non è configurata.")
+    const gh = deps.github
+    // A previous creation of this key that never got its pull request (the process stopped before opening it) is
+    // settled first: its pull request is found, or, with no branch to recover, it fails and the key is free again.
+    await advanceCreation(input.key, { replacing: true })
+    const prepared = await deps.regulations.internal.prepareDocument(viewer, { ...input, storage: "repo" })
+    const { entry } = prepared
+    const branch = `documenti/nuovo-${entry.key}-${nanoid(8).replace(/[^A-Za-z0-9]/g, "x")}`
+    const creation: DocumentCreationJson = {
+      branch,
+      prNumber: null,
+      prUrl: null,
+      error: null,
+      startedBy: viewer.person,
+      startedAt: now().toISOString(),
+      sources: prepared.sources,
+      assetsBlob: prepared.assetsHash,
+    }
+    try {
+      await db.transaction(async (tx) => {
+        if (prepared.replaces)
+          await tx.delete(documents).where(and(eq(documents.key, entry.key), eq(documents.status, "failed")))
+        await tx.insert(documents).values({
+          key: entry.key,
+          title: entry.title,
+          dir: entry.dir,
+          entry: entry.entry,
+          sources: entry.sources,
+          outputs: entry.outputs,
+          tagPrefix: entry.tagPrefix,
+          procedure: entry.procedure,
+          storage: "repo",
+          origin: "latex",
+          template: entry.template,
+          status: "creating",
+          creation,
+          createdAt: now(),
+          updatedAt: now(),
+        })
+      })
+    } catch (error) {
+      if (String((error as { code?: string }).code ?? error).includes("23505"))
+        fail("CONFLICT", "Esiste già un documento con questa chiave.")
+      throw error
+    }
+    const opening = (async () => {
+      try {
+        await gh.commitToBranch({
+          branch,
+          base: config.baseBranch,
+          dir: entry.dir,
+          sourceGlobs: [],
+          files: prepared.commit,
+          edits: [{ path: MANIFEST_PATH, update: addToManifest(entry) }],
+          message: `${entry.key}: nuovo documento «${entry.title}»\n\nCreato dalla dashboard dal modello ${entry.template}.`,
+        })
+        const pr = await gh.openPullRequest({
+          branch,
+          base: config.baseBranch,
+          title: `Nuovo documento: ${entry.title}`,
+          body: [
+            `Crea \`${entry.dir}/\` dal modello \`${entry.template}\` e la sua voce in \`${MANIFEST_PATH}\` (procedura \`documento\`).`,
+            "",
+            `Richiesto da ${viewer.person.name} dalla dashboard dei documenti: si unisce da solo quando la CI passa.`,
+          ].join("\n"),
+        })
+        await setCreation(entry.key, { prNumber: pr.number, prUrl: pr.url })
+        await gh.enableAutoMerge(pr.number)
+      } catch (error) {
+        deps.onError?.(error, entry.key)
+        const [row] = await db.select().from(documents).where(eq(documents.key, entry.key))
+        // With its pull request open, a failure (auto-merge) is shown and checked again; without one, it failed.
+        if (row?.creation?.prNumber)
+          await setCreation(entry.key, { error: `Auto-merge non attivato: ${message(error)}` })
+        else await setCreation(entry.key, { error: `La pull request non è stata aperta: ${message(error)}` }, "failed")
+      }
+    })()
+    openingPr.set(entry.key, opening)
+    await opening.finally(() => openingPr.delete(entry.key))
+    void advanceCreation(entry.key)
+    return deps.regulations.internal.documentView(await loadDocument(entry.key))
+  }
+
+  /**
+   * The first version of a created document: the sources and assets of the merge commit, so a pull request fixed by
+   * hand is imported as merged. The in-memory GitHub of development has no shared directories: there the template's
+   * shared files copied at creation are kept.
+   */
+  async function mergedDocument(key: string, mergeSha: string, creation: DocumentCreationJson) {
+    const source = githubLegalSource(deps.github as LegalGitHub, mergeSha)
+    const manifest = await source.manifest()
+    const entry = manifest.documents.find((d) => d.key === key)
+    if (!entry) throw new Error(`${key} non è in ${MANIFEST_PATH} dopo il merge.`)
+    const template = entry.template ? manifest.templates[entry.template] : null
+    const { sources, assets } = await source.readDocument(entry, template)
+    if (template && !Object.keys(assets.files).some((p) => p.startsWith("shared/"))) {
+      const [stored] = await db.select().from(blobs).where(eq(blobs.hash, creation.assetsBlob))
+      const bundle = stored ? (JSON.parse(Buffer.from(stored.content).toString("utf8")) as AssetBundle) : null
+      for (const [path, content] of Object.entries(bundle?.files ?? {}))
+        if (path.startsWith("shared/")) assets.files[path] = content
+    }
+    return { entry, sources, assetsHash: await deps.regulations.internal.storeAssets(assets) }
+  }
+
+  /**
+   * Checks a creation: a pull request not yet recorded is looked up by its branch (the process may have stopped
+   * before saving it); merged → the document is active with its first version; closed → failed; failing CI or
+   * conflicts → an error to fix on GitHub.
+   */
+  function advanceCreation(key: string, options: { replacing?: boolean } = {}): Promise<void> {
+    const flightKey = `document:${key}`
+    const running = inFlight.get(flightKey)
+    if (running) return running
+    const run = (async () => {
+      const [row] = await db.select().from(documents).where(eq(documents.key, key))
+      if (!row || row.status !== "creating" || !row.creation || !deps.github || openingPr.has(key)) return
+      const gh = deps.github
+      let creation = row.creation
+      if (!creation.prNumber) {
+        const found = await gh.findPullRequest(creation.branch)
+        if (found) {
+          await setCreation(key, { prNumber: found.number, prUrl: found.url, error: null })
+          if (!found.merged && found.state === "open") await gh.enableAutoMerge(found.number)
+          creation = { ...creation, prNumber: found.number, prUrl: found.url }
+        } else {
+          // Nobody here is opening it: after the grace period (or when someone creates the key again) it failed.
+          if (options.replacing || now().getTime() - new Date(creation.startedAt).getTime() > CREATION_GRACE_MS)
+            await setCreation(key, { error: "La pull request non è stata aperta: puoi crearlo di nuovo." }, "failed")
+          return
+        }
+      }
+      const pr = await gh.getPullRequest(creation.prNumber as number)
+      if (pr.merged && pr.mergeSha) {
+        const mergeSha = pr.mergeSha
+        const merged = await mergedDocument(key, mergeSha, creation)
+        await db.transaction(async (tx) => {
+          const [existing] = await tx.select({ id: versions.id }).from(versions).where(eq(versions.documentKey, key))
+          if (!existing)
+            await tx.insert(versions).values({
+              id: nanoid(16),
+              documentKey: key,
+              tag: null,
+              label: `import ${mergeSha.slice(0, 7)}`,
+              origin: "import",
+              entry: merged.entry.entry,
+              files: merged.sources,
+              sourceHash: await sourceHash({
+                entry: merged.entry.entry,
+                files: merged.sources,
+                assets: merged.assetsHash,
+              }),
+              commitSha: mergeSha,
+              publishedAt: now(),
+              assetsBlob: merged.assetsHash,
+            })
+          await tx
+            .update(documents)
+            .set({
+              title: merged.entry.title,
+              dir: merged.entry.dir,
+              entry: merged.entry.entry,
+              sources: merged.entry.sources,
+              outputs: merged.entry.outputs,
+              tagPrefix: merged.entry.tagPrefix,
+              template: merged.entry.template,
+              procedure: merged.entry.procedure,
+              status: "active",
+              creation: null,
+              updatedAt: now(),
+            })
+            .where(and(eq(documents.key, key), eq(documents.status, "creating")))
+        })
+      } else if (pr.state === "closed") {
+        await setCreation(
+          key,
+          { error: "La pull request è stata chiusa senza unirla: puoi crearlo di nuovo." },
+          "failed"
+        )
+      } else if (pr.checks === "failure") {
+        // Still open: it may be fixed by hand and merge; close it on GitHub to start again.
+        await setCreation(key, {
+          error: "La CI del repository dei documenti è fallita: correggi la pull request, o chiudila per riprovare.",
+        })
+      } else if (pr.mergeable === false) {
+        // E.g. two creations both appending to documents.json: auto-merge waits forever until it's resolved.
+        await setCreation(key, {
+          error:
+            "La pull request è in conflitto con il ramo principale: risolvi il conflitto, o chiudila per riprovare.",
+        })
+      } else if (creation.error) await setCreation(key, { error: null })
+    })()
+      .catch((error) => deps.onError?.(error, key))
+      .finally(() => inFlight.delete(flightKey))
+    inFlight.set(flightKey, run)
+    return run
+  }
+
+  async function tickCreations() {
+    const rows = await db.select({ key: documents.key }).from(documents).where(eq(documents.status, "creating"))
+    for (const row of rows) await advanceCreation(row.key)
   }
 
   /** Every delega created or revoked is notified to the Direttivo (Statuto, art. "Direttivo", comma 9). */
@@ -839,7 +1251,7 @@ export function createEmanationService(deps: {
     )
   }
 
-  return { start, get, retry, advance, tick, onWebhook, delegaChanged }
+  return { start, get, retry, advance, tick, onWebhook, delegaChanged, createDocument, advanceCreation }
 }
 
 export type EmanationService = ReturnType<typeof createEmanationService>
