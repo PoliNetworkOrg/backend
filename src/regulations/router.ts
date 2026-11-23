@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import { type AuditTargetOf, audit } from "@/audit/option"
 import { dashboard, SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
@@ -7,6 +8,41 @@ import type { DiffService } from "./diff/service"
 import type { Directory } from "./directory"
 import type { EmanationService } from "./emanation/service"
 import { fail, type RegulationsService, type Viewer } from "./service"
+
+/** The input fields kept in audit events: references to records, states, roles and titles. */
+const AUDITED_FIELDS = [
+  "draftId",
+  "targetDraftId",
+  "snapshotId",
+  "commentId",
+  "delegaId",
+  "documentKey",
+  "userId",
+  "role",
+  "to",
+  "from.kind",
+  "from.id",
+  "source.kind",
+  "source.id",
+  "kind",
+  "title",
+  "name",
+  "expiresAt",
+  "template",
+  "storage",
+] as const
+
+/**
+ * The document `documents.create` and `documents.upload` add. They name it `key`, which audit copies hide as a secret,
+ * so the event names it as its target. The raw input is JSON for `create` and `FormData` for `upload`.
+ */
+const newDocument: AuditTargetOf = ({ input }) => {
+  const fields = input instanceof FormData ? Object.fromEntries(input.entries()) : input
+  if (fields === null || typeof fields !== "object") return null
+  const { key, title } = fields as Record<string, unknown>
+  if (typeof key !== "string") return null
+  return { type: "regulations.document", id: key, label: typeof title === "string" ? title : null }
+}
 
 /**
  * `regulations.*`: every procedure is open to dashboard users (scope `backend:admin`), and the service checks the
@@ -21,16 +57,22 @@ export function createRegulationsRouter(
 ) {
   const diff = () => extras.diff ?? fail("PRECONDITION_FAILED", "Le differenze non sono configurate.")
   const emanation = () => extras.emanation ?? fail("PRECONDITION_FAILED", "L'emanazione non è configurata.")
-  const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
-    if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
-    const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
-    return next({ ctx: { viewer } })
-  })
-  const manager = policy(dashboard(C.REGULATION_PERMISSIONS.manage)).use(async ({ ctx, next }) => {
-    if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
-    const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
-    return next({ ctx: { viewer } })
-  })
+  // Comments, snapshots, deleghe and delibere keep their own authors and text: the audit log keeps only which records a
+  // call names, never comment bodies, quotes, merge resolutions, delibere or notes.
+  const user = policy({ user: { scope: SCOPE.admin } })
+    .meta(audit.full({ fields: AUDITED_FIELDS }))
+    .use(async ({ ctx, next }) => {
+      if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
+      const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
+      return next({ ctx: { viewer } })
+    })
+  const manager = policy(dashboard(C.REGULATION_PERMISSIONS.manage))
+    .meta(audit.full({ fields: AUDITED_FIELDS }))
+    .use(async ({ ctx, next }) => {
+      if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
+      const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
+      return next({ ctx: { viewer } })
+    })
   const draftRef = C.draftRefInputSchema
   const ok = z.void()
   const pdf = z.instanceof(File).refine((f) => f.size <= C.MAX_UPLOAD_BYTES, "Il PDF supera i 20 MB.")
@@ -59,8 +101,14 @@ export function createRegulationsRouter(
         .input(z.object({ documentKey: C.documentKeySchema }))
         .output(C.documentSchema)
         .query(({ ctx, input }) => service.getDocument(ctx.viewer, input.documentKey)),
-      sync: user.output(C.syncResultSchema).mutation(({ ctx }) => service.syncDocuments(ctx.viewer)),
+      sync: user.output(C.syncResultSchema).mutation(async ({ ctx }) => {
+        const result = await service.syncDocuments(ctx.viewer)
+        // Sync takes no input: what it imported, updated and skipped is the only trace of what it changed.
+        ctx.audit.set({ after: { imported: result.imported, updated: result.updated, skipped: result.skipped } })
+        return result
+      }),
       create: manager
+        .meta(audit.full({ fields: AUDITED_FIELDS, target: newDocument }))
         .input(C.createDocumentInputSchema)
         .output(C.documentSchema)
         .mutation(({ ctx, input }) =>
@@ -69,6 +117,7 @@ export function createRegulationsRouter(
             : emanation().createDocument(ctx.viewer, input)
         ),
       upload: manager
+        .meta(audit.full({ fields: AUDITED_FIELDS, target: newDocument }))
         .input(uploadDocument)
         .output(C.documentSchema)
         .mutation(({ ctx, input }) => service.uploadDocument(ctx.viewer, input)),
@@ -135,6 +184,7 @@ export function createRegulationsRouter(
         .mutation(({ ctx, input }) => service.removeAssignment(ctx.viewer, input)),
     }),
     collabTicket: user
+      .meta(audit.none("Hands out a one-minute ticket to connect to the editor; it changes nothing"))
       .input(draftRef)
       .output(C.collabTicketSchema)
       .mutation(({ ctx, input }) => service.collabTicket(ctx.viewer, input.draftId)),

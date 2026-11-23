@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA, VIEWS } from "@/db"
 import { dashboard, SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
@@ -20,8 +21,16 @@ async function assertGroupExists(groupId: number, type: "tg" | "wa") {
   if (!groups.length) throw new Error("Group not found")
 }
 
+/** One report by its id; several by their number, with the ids in the input. */
+function reportsTarget(ids: number[]) {
+  return ids.length === 1
+    ? { type: "web.report", id: ids[0] ?? null }
+    : { type: "web.report", id: null, label: `${ids.length} reports` }
+}
+
 export const reports = createTRPCRouter({
   create: policy({ service: { scope: SCOPE.publicRead } })
+    .meta(audit.full())
     .input(
       z.discriminatedUnion("reportType", [
         z.object({
@@ -37,12 +46,16 @@ export const reports = createTRPCRouter({
         }),
       ])
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       if (input.reportType === "broken_link") {
         await assertGroupExists(input.groupId, input.type)
       }
 
-      await DB.insert(REPORTS).values(input)
+      const [report] = await DB.insert(REPORTS).values(input).returning()
+      ctx.audit.set({
+        target: { type: "web.report", id: report.id, label: report.label ?? report.reportedLink },
+        after: report,
+      })
 
       return { ok: true as const }
     }),
@@ -73,14 +86,58 @@ export const reports = createTRPCRouter({
     }),
 
   resolve: policy(dashboard("web:reports:manage"))
+    .meta(audit.full())
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
-    .mutation(async ({ input }) => {
-      return await DB.update(REPORTS).set({ status: "resolved" }).where(inArray(REPORTS.id, input.ids)).returning()
+    .mutation(async ({ input, ctx }) => {
+      const { before, after } = await DB.transaction(async (tx) => {
+        const before = await tx
+          .select()
+          .from(REPORTS)
+          .where(inArray(REPORTS.id, input.ids))
+          .orderBy(REPORTS.id)
+          .for("update")
+        const after = await tx
+          .update(REPORTS)
+          .set({ status: "resolved" })
+          .where(
+            inArray(
+              REPORTS.id,
+              before.map((row) => row.id)
+            )
+          )
+          .returning()
+        return { before, after }
+      })
+
+      ctx.audit.set({ target: reportsTarget(input.ids), before, after })
+      return after
     }),
 
   dismiss: policy(dashboard("web:reports:manage"))
+    .meta(audit.full())
     .input(z.object({ ids: z.array(z.number().int()).min(1) }))
-    .mutation(async ({ input }) => {
-      return await DB.update(REPORTS).set({ status: "dismissed" }).where(inArray(REPORTS.id, input.ids)).returning()
+    .mutation(async ({ input, ctx }) => {
+      const { before, after } = await DB.transaction(async (tx) => {
+        const before = await tx
+          .select()
+          .from(REPORTS)
+          .where(inArray(REPORTS.id, input.ids))
+          .orderBy(REPORTS.id)
+          .for("update")
+        const after = await tx
+          .update(REPORTS)
+          .set({ status: "dismissed" })
+          .where(
+            inArray(
+              REPORTS.id,
+              before.map((row) => row.id)
+            )
+          )
+          .returning()
+        return { before, after }
+      })
+
+      ctx.audit.set({ target: reportsTarget(input.ids), before, after })
+      return after
     }),
 })

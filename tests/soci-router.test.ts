@@ -1,6 +1,7 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { PDFDocument } from "pdf-lib"
 import { beforeAll, describe, expect, it } from "vitest"
+import type { AuditTargetOf } from "@/audit/option"
 import type { Context } from "@/trpc"
 import { admitInput, harness, registerInput } from "./soci-fixtures"
 
@@ -36,9 +37,12 @@ function context(granted = DIRETTIVO, actor: Actor = user, scopes = ["backend:ad
 describe("Soci tRPC contract", () => {
   it("gives every procedure a dashboard policy with its soci permission", () => {
     const r = makeRouter(harness().service)
-    const procedures = (r as unknown as { _def: { procedures: Record<string, { _def: { meta: unknown } }> } })._def
-      .procedures
-    expect(Object.fromEntries(Object.entries(procedures).map(([path, p]) => [path, p._def.meta]))).toEqual({
+    const procedures = (
+      r as unknown as { _def: { procedures: Record<string, { _def: { meta: { policy: unknown } } }> } }
+    )._def.procedures
+    expect(
+      Object.fromEntries(Object.entries(procedures).map(([path, p]) => [path, { policy: p._def.meta.policy }]))
+    ).toEqual({
       "members.list": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
       "members.get": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
       "members.unregistered": { policy: { user: { scope: "backend:admin", permission: "soci:read" } } },
@@ -54,6 +58,22 @@ describe("Soci tRPC contract", () => {
       "me.get": { policy: { user: { scope: "backend:admin", permission: "people:self" } } },
       "me.uploadReceipt": { policy: { user: { scope: "backend:admin", permission: "people:self" } } },
       "me.completeDetails": { policy: { user: { scope: "backend:admin", permission: "people:self" } } },
+    })
+  })
+
+  it("records soci changes without their details, naming a socio only by a valid member number", () => {
+    const r = makeRouter(harness().service)
+    type Def = { _def: { type: string; meta: { audit: { capture: string; target: AuditTargetOf } } } }
+    const procedures = (r as unknown as { _def: { procedures: Record<string, Def> } })._def.procedures
+    const mutations = Object.values(procedures).filter((p) => p._def.type === "mutation")
+    expect(mutations).toHaveLength(9)
+    for (const p of mutations) expect(p._def.meta.audit.capture).toBe("minimal")
+    const target = procedures["members.update"]._def.meta.audit.target
+    expect(target({ input: { number: 12, details: {} }, data: undefined })).toEqual({ type: "soci.member", id: 12 })
+    expect(target({ input: { account: {} }, data: { number: 13 } })).toEqual({ type: "soci.member", id: 13 })
+    expect(target({ input: { number: "RSSMRA80A01F205X" }, data: undefined })).toEqual({
+      type: "soci.member",
+      id: null,
     })
   })
 

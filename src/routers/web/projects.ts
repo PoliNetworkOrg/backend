@@ -1,5 +1,6 @@
-import { asc, eq } from "drizzle-orm"
+import { asc, eq, sql } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { projectsCategories } from "@/db/schema/web/projects"
@@ -43,6 +44,7 @@ export default createTRPCRouter({
     }),
 
   addProject: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -68,10 +70,12 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.project", id: res.id, label: res.title }, after: res })
       return res
     }),
 
   editProject: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -88,24 +92,37 @@ export default createTRPCRouter({
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
 
-      const [res] = await DB.update(PROJECTS)
-        .set({
-          title,
-          descriptionIt,
-          descriptionEn,
-          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
-          link,
-          category,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(PROJECTS.id, input.id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(PROJECTS).where(eq(PROJECTS.id, input.id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(PROJECTS)
+          .set({
+            title,
+            descriptionIt,
+            descriptionEn,
+            ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
+            link,
+            category,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(PROJECTS.id, input.id))
+          .returning()
 
+        return { before, res }
+      })
+
+      ctx.audit.set({
+        target: { type: "web.project", id: input.id, label: res?.title ?? before?.title },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return res
     }),
 
   reorderProjects: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         projectIds: z
@@ -114,25 +131,42 @@ export default createTRPCRouter({
           .refine((projectIds) => new Set(projectIds).size === projectIds.length),
       })
     )
-    .mutation(async ({ input }) => {
-      await DB.transaction(async (tx) => {
-        await Promise.all(
-          input.projectIds.map((id, index) => tx.update(PROJECTS).set({ order: index }).where(eq(PROJECTS.id, id)))
+    .mutation(async ({ input, ctx }) => {
+      // Both orders are read in the reorder's transaction, so they are the ones it changed.
+      const { before, after, updatedCount } = await DB.transaction(async (tx) => {
+        const order = () =>
+          tx
+            .select({ id: PROJECTS.id, title: PROJECTS.title, order: PROJECTS.order })
+            .from(PROJECTS)
+            .orderBy(asc(PROJECTS.order))
+        // Serialize reorders before reading, so each one's `before` is the order the previous one committed. EXCLUSIVE
+        // also waits for edits holding row locks (which would otherwise deadlock with this update); plain reads go on.
+        await tx.execute(sql`LOCK TABLE ${PROJECTS} IN EXCLUSIVE MODE`)
+        const before = await order()
+        const updated = await Promise.all(
+          input.projectIds.map((id, index) =>
+            tx.update(PROJECTS).set({ order: index }).where(eq(PROJECTS.id, id)).returning({ id: PROJECTS.id })
+          )
         )
+        return { before, after: await order(), updatedCount: updated.reduce((total, rows) => total + rows.length, 0) }
       })
 
+      if (updatedCount === 0) ctx.audit.skip()
+      else ctx.audit.set({ target: { type: "web.projects", id: "order", label: "Projects order" }, before, after })
       return { error: null }
     }),
 
   deleteProject: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       const deleted = await DB.delete(PROJECTS).where(eq(PROJECTS.id, id)).returning()
+      ctx.audit.set({ target: { type: "web.project", id, label: deleted[0]?.title }, before: deleted[0] })
 
       if (deleted.length === 0) return { error: "NOT_FOUND" }
       return { error: null }

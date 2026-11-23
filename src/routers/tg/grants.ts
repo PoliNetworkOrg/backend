@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { and, eq, gt, inArray, isNull } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { describeActor } from "@/idp/actor-info"
 import { ACT_AS_SCOPE } from "@/idp/auth"
@@ -53,6 +54,7 @@ export default createTRPCRouter({
    * grantor is the token's user.
    */
   create: policy(dashboard("tg:grants:manage"))
+    .meta(audit.full())
     .input(
       z.object({
         userId: z.number(),
@@ -76,6 +78,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId }, reason: input.reason })
       if (actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
 
       try {
@@ -92,6 +95,7 @@ export default createTRPCRouter({
           grantedBySub: actor.sub,
           grantedViaClient: actor.client,
         })
+        ctx.audit.set({ after: { validSince: input.since, validUntil: input.until } })
 
         if (input.sendTgLog) {
           const author = await describeActor(actor)
@@ -119,6 +123,7 @@ export default createTRPCRouter({
     telegram: { scope: ACT_AS_SCOPE, permission: "tg:grants:manage" },
     ...dashboard("tg:grants:manage"),
   })
+    .meta(audit.full())
     .input(
       z.object({
         userId: z.number(),
@@ -139,6 +144,7 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { actor } = ctx
+      ctx.audit.set({ target: { type: "tg.user", id: input.userId } })
       if (actor.kind === "service") throw new TRPCError({ code: "FORBIDDEN" })
 
       try {
@@ -153,8 +159,9 @@ export default createTRPCRouter({
           .where(
             and(eq(s.grants.telegramUserId, input.userId), gt(s.grants.validUntil, now), isNull(s.grants.interruptedAt))
           )
-          .returning({ id: s.grants.id })
+          .returning()
 
+        ctx.audit.set({ after: interrupted })
         if (interrupted.length === 0)
           return {
             success: false,

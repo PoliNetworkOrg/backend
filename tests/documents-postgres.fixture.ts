@@ -277,6 +277,64 @@ try {
   assert.equal(await website.getDocument({ slug: "statuto" }), null)
   checked.push("deleting a version or a document deletes its files")
 
+  // The router is called on its own here, so actions are its procedure names without the `web.documents.` prefix.
+  const events = async (action: string) =>
+    // `#>> '{}'` reads a jsonb object or a jsonb string holding one (as drizzle's Bun driver stores them) as text.
+    (
+      await connection`SELECT outcome, target_type, target_id, before #>> '{}' AS before, after #>> '{}' AS after
+        FROM common_audit_events WHERE action = ${action} ORDER BY id`
+    ).map(
+      (event: {
+        outcome: string
+        target_type: string
+        target_id: string
+        before: string | null
+        after: string | null
+      }) => ({
+        ...event,
+        before: event.before === null ? null : JSON.parse(event.before),
+        after: event.after === null ? null : JSON.parse(event.after),
+      })
+    )
+  // Not found, a duplicate slug, then the rename.
+  const [missingCategory, duplicateSlugEvent, renamed] = await events("updateCategory")
+  assert.deepEqual(
+    [renamed.outcome, renamed.target_type, renamed.target_id, renamed.before.title, renamed.after.title],
+    ["success", "web.documentCategory", String(bilanci.id), "Bilanci", "Bilanci annuali"]
+  )
+  for (const failed of [missingCategory, duplicateSlugEvent])
+    assert.deepEqual([failed.outcome, failed.before, failed.after], ["failure", null, null])
+  const deletedCategories = await events("deleteCategory")
+  assert.deepEqual(
+    deletedCategories.map((event: { outcome: string; before: { title: string } | null }) => [
+      event.outcome,
+      event.before?.title ?? null,
+    ]),
+    [
+      ["failure", null],
+      ["success", "Vuota"],
+      ["failure", null],
+    ]
+  )
+  const deletedVersion = (await events("deleteVersion")).find(
+    (event: { outcome: string }) => event.outcome === "success"
+  )
+  assert.deepEqual(
+    [deletedVersion?.target_type, deletedVersion?.target_id, deletedVersion?.before.version],
+    ["web.document", String(statutoDoc.id), v3.version]
+  )
+  const deletedDocument = (await events("deleteDocument")).find(
+    (event: { outcome: string }) => event.outcome === "success"
+  )
+  assert.deepEqual(
+    [deletedDocument?.target_id, deletedDocument?.before.title, deletedDocument?.before.versions.length],
+    [String(statutoDoc.id), "Statuto", 2]
+  )
+  const [{ count }] = await connection`SELECT count(*)::int AS count FROM common_audit_events
+    WHERE outcome <> 'success' AND after IS NOT NULL`
+  assert.equal(count, 0)
+  checked.push("audit events name the target and keep the states before and after, only for changes that happened")
+
   for (const slug of ["Invalid", "a b", "", "a".repeat(101)])
     await assert.rejects(website.getDocument({ slug }), { code: "BAD_REQUEST" })
   checked.push("document lookups validate the public slug")
