@@ -39,6 +39,7 @@ import {
   type TransitionRule,
   todayInItaly,
 } from "./procedure"
+import { strayFiles, strayFilesMessage, strayIssues } from "./sources"
 import { fillSkeleton, placementOf, TemplateError } from "./templates"
 
 /** The signed-in dashboard user. */
@@ -853,7 +854,13 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const { draft } = await access(viewer, draftId)
     const document = await loadDocument(draft.documentKey)
     const files = await currentFiles(draft)
-    return { files, structure: structureOf(files, document.entry) }
+    const structure = structureOf(files, document.entry)
+    const stray = strayIssues(files, document.sources)
+    return {
+      files,
+      structure: stray.length ? { ...structure, parses: false, issues: [...stray, ...structure.issues] } : structure,
+      sources: document.sources,
+    }
   }
 
   async function transition(viewer: Viewer, input: C.TransitionInput) {
@@ -886,6 +893,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
       if (!parses) {
         await deps.collab?.reopen(draft.id)
         fail("PRECONDITION_FAILED", "Il testo non è valido: correggi gli errori prima di inviarlo in approvazione.")
+      }
+      const stray = strayFiles(files, document.sources)
+      if (stray.length) {
+        await deps.collab?.reopen(draft.id)
+        fail("PRECONDITION_FAILED", strayFilesMessage(stray, document.sources))
       }
       try {
         await db

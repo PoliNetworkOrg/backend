@@ -324,6 +324,24 @@ try {
   assert.ok(kinds.includes("base") && kinds.includes("merge") && kinds.filter((k) => k === "restore").length === 2)
   checked.push("named snapshots restore without losing the current text")
 
+  // Files added in the editor: inside the document's sources, or a problem that blocks the approval.
+  const beforeFiles = await text(a.id)
+  await write(a.id, { ...beforeFiles, "parti/nuovo.tex": "% nuovo\n", "altro/x.tex": "% fuori\n" })
+  const withStray = await service.draftFiles(editor, a.id)
+  assert.deepEqual(withStray.sources, ["main.tex", "parti/*.tex"])
+  assert.equal(withStray.structure.parses, false)
+  assert.deepEqual(
+    withStray.structure.issues.filter((i) => i.code === "stray_file").map((i) => i.file),
+    ["altro/x.tex"]
+  )
+  await rejects(
+    service.transition(dir, { draftId: a.id, to: "in_approvazione" }),
+    "PRECONDITION_FAILED",
+    /«altro\/x\.tex» non è tra i sorgenti/
+  )
+  await write(a.id, beforeFiles)
+  checked.push("files outside the document's sources are a problem and block the approval")
+
   // Procedure.
   await rejects(service.transition(editor, { draftId: a.id, to: "in_approvazione" }), "FORBIDDEN")
   const sent = await service.transition(dir, { draftId: a.id, to: "in_approvazione" })

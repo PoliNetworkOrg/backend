@@ -491,7 +491,12 @@ export const listDraftsInputSchema = z.object({
   includeClosed: z.boolean().default(false),
 })
 
-export const draftFilesSchema = z.object({ files: filesSchema, structure: structureSchema })
+export const draftFilesSchema = z.object({
+  files: filesSchema,
+  structure: structureSchema,
+  /** The document's source globs (documents.json `sources`): where a draft may add files. Empty: anywhere. */
+  sources: z.array(z.string()),
+})
 
 export const transitionInputSchema = z.object({
   draftId: draftIdSchema,
