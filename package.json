@@ -8,6 +8,7 @@
   "license": "ISC",
   "type": "module",
   "scripts": {
+    "soci:preview": "bun --no-env-file ./scripts/soci-import-preview.ts",
     "dev": "bun --watch --no-clear-screen ./src/server.ts | pino-pretty",
     "build": "shx rm -rf dist && bun build ./src/server.ts ./src/collab.ts --production --outdir ./dist --sourcemap=linked --target bun && shx cp -r ./drizzle ./dist/ && shx cp -r ./src/emails/assets ./dist/",
     "build:npm": "NODE_ENV=production tsup --config tsup.npm.config.ts",
