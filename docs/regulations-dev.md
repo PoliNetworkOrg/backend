@@ -1,7 +1,8 @@
 # Regulations editor: local stack
 
 Runs the backend, the collab service, the LaTeX worker, Postgres and a stand-in for PoliNetwork Auth on one machine,
-with the RRI imported from a clone of PoliNetworkOrg/legal.
+with the documents imported from a clone of the documents repository (PoliNetworkOrg/documents, formerly `legal`). What
+the documents are (kinds, procedures, private documents, templates): [regulations-documents.md](regulations-documents.md).
 
 | Service | Where | Port |
 | --- | --- | --- |
@@ -14,10 +15,11 @@ with the RRI imported from a clone of PoliNetworkOrg/legal.
 ## Once
 
 ```sh
-# A clone of legal with the migrated RRI (any path; the default is ../legal next to this repository).
-git clone https://github.com/PoliNetworkOrg/legal.git /tmp/regs-legal
-# Until ghcr.io/polinetworkorg/legal-texlive is published, build it from legal:
-docker build -t ghcr.io/polinetworkorg/legal-texlive:local /tmp/regs-legal/docker/texlive
+# A clone of the documents repository with documents.json v2 (any path; the default is ../documents next to this
+# repository, or ../legal when only that exists).
+git clone https://github.com/PoliNetworkOrg/documents.git /tmp/regs-documents
+# Until ghcr.io/polinetworkorg/legal-texlive is published, build it from the repository:
+docker build -t ghcr.io/polinetworkorg/legal-texlive:local /tmp/regs-documents/docker/texlive
 bun install
 ```
 
@@ -26,11 +28,11 @@ bun install
 ```sh
 TEXLIVE_IMAGE=ghcr.io/polinetworkorg/legal-texlive:local \
   docker compose -f docker/regulations-dev.compose.yaml up -d --build
-REGULATIONS_LEGAL_DIR=/tmp/regs-legal bun run regulations:dev     # idp + backend + collab, logs prefixed
-REGULATIONS_LEGAL_DIR=/tmp/regs-legal bun run regulations:seed    # in another terminal, once
+REGULATIONS_LEGAL_DIR=/tmp/regs-documents bun run regulations:dev     # idp + backend + collab, logs prefixed
+REGULATIONS_LEGAL_DIR=/tmp/regs-documents bun run regulations:seed    # in another terminal, once
 ```
 
-The seed imports `legal.json` and the RRI as the first published version. It then creates three drafts, assigns
+The seed imports `documents.json`: every document, with its current sources as the first published version. It then creates three drafts, assigns
 `dev-editor` (editor) and `dev-commenter` (commenter) to each, and makes A and B change the same comma (a merge
 conflict), while C changes another article. It prints the draft ids.
 
@@ -53,6 +55,10 @@ but the published texts.
 bun run regulations:token dev-segretario              # a bearer token, valid 2 hours (auth-kit's maximum age)
 curl 'http://localhost:4300/dev/token?sub=dev-editor'  # the same, over HTTP
 ```
+
+The in-memory GitHub starts from the checkout's `documents.json`, so `documents.create` with storage `repo` opens a pull
+request against it, which its fake CI merges after 3 seconds; publications and emanations get a release whose PDF the
+worker compiles. Its state is kept in `.dev-idp/fake-github.json`: delete the file to start over.
 
 Tokens have `aud=https://backend.internal.polinetwork.org`, `scope=backend:admin`, and carry `name` and `email`. The
 shim refuses to run with `NODE_ENV=production` and checks no client assertion: never point a deployed backend at it.

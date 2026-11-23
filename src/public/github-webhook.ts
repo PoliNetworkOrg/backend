@@ -42,7 +42,7 @@ export function pgDeliveryLog(db: RegulationsDb, source = "github"): DeliveryLog
 }
 
 /**
- * `POST /public/webhooks/github`: the GitHub App's webhook on the legal repository (PR merged, checks, release
+ * `POST /public/webhooks/github`: the GitHub App's webhook on the documents repository (PR merged, checks, release
  * published). Authenticated by the HMAC with `REGULATIONS_GITHUB_WEBHOOK_SECRET`; each delivery id is handled once.
  * Without a secret the route answers 404, as if it didn't exist.
  */

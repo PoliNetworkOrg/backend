@@ -3,8 +3,8 @@ import { App, type Octokit, Octokit as OctokitCore } from "octokit"
 import { matchesGlob } from "../compile/assets"
 
 /**
- * What the emanation needs from the legal repository on GitHub. The real one is the GitHub App (Octokit); the fake
- * one simulates CI, merge and the release workflow, for development and tests.
+ * What the emanation needs from the documents repository on GitHub (`REGULATIONS_GITHUB_REPO`). The real one is the
+ * GitHub App (Octokit); the fake one simulates CI, merge and the release workflow, for development and tests.
  */
 export type PullRequestInfo = {
   number: number
@@ -14,19 +14,29 @@ export type PullRequestInfo = {
   mergeSha: string | null
   /** Combined result of the checks on the head commit. */
   checks: "pending" | "success" | "failure"
+  /** `false` when it can't be merged (conflicts); `null` while GitHub computes it, or once merged. */
+  mergeable: boolean | null
 }
 
 export type ReleaseInfo = { id: number; url: string; assets: { id: number; name: string }[] }
 
+/** A file's rewrite from its content at the base commit (`null` when it doesn't exist there). */
+export type FileEdit = { path: string; update: (current: string | null) => string }
+
 export type LegalGitHub = {
   repo: string
-  /** Commits the files under `dir` (replacing the sources matching `sourceGlobs`) on a new branch from `base`. */
+  /**
+   * Commits the files under `dir` (replacing the sources matching `sourceGlobs`) on a new branch from `base`, plus
+   * `edits` (paths from the repository root, rewritten from their content at `base`). Text files are strings, binary
+   * ones bytes. A branch that already exists is left as it is.
+   */
   commitToBranch(input: {
     branch: string
     base: string
     dir: string
     sourceGlobs: string[]
-    files: Record<string, string>
+    files: Record<string, string | Uint8Array>
+    edits?: FileEdit[]
     message: string
   }): Promise<{ sha: string }>
   findPullRequest(branch: string): Promise<PullRequestInfo | null>
@@ -95,7 +105,7 @@ export function githubAppClient(options: {
   })
   const uploadsUrl = options.baseUrl ?? "https://uploads.github.com"
   let cached: { octokit: Octokit; at: number } | null = null
-  /** Installation tokens last an hour; the App is installed only on the legal repository. */
+  /** Installation tokens last an hour; the App is installed only on the documents repository. */
   async function gh(): Promise<Octokit> {
     if (cached && Date.now() - cached.at < 30 * 60_000) return cached.octokit
     const { data } = await app.octokit.request("GET /repos/{owner}/{repo}/installation", { owner, repo })
@@ -133,6 +143,7 @@ export function githubAppClient(options: {
       merged: data.merged,
       mergeSha: data.merged ? data.merge_commit_sha : null,
       checks: data.merged ? "success" : await checksOf(o, data.head.sha),
+      mergeable: data.merged ? null : data.mergeable,
     }
   }
 
@@ -180,14 +191,22 @@ export function githubAppClient(options: {
         if (input.sourceGlobs.some((g) => matchesGlob(rel, g)) && !(rel in input.files))
           entries.push({ path: item.path, mode: "100644", type: "blob", sha: null })
       }
-      for (const [path, content] of Object.entries(input.files)) {
-        const { data: blob } = await o.request("POST /repos/{owner}/{repo}/git/blobs", {
-          owner,
-          repo,
-          content,
-          encoding: "utf-8",
-        })
-        entries.push({ path: prefix + path, mode: "100644", type: "blob", sha: blob.sha })
+      const blob = async (content: string | Uint8Array) =>
+        (
+          await o.request("POST /repos/{owner}/{repo}/git/blobs", {
+            owner,
+            repo,
+            ...(typeof content === "string"
+              ? { content, encoding: "utf-8" }
+              : { content: Buffer.from(content).toString("base64"), encoding: "base64" }),
+          })
+        ).data.sha
+      for (const [path, content] of Object.entries(input.files))
+        entries.push({ path: prefix + path, mode: "100644", type: "blob", sha: await blob(content) })
+      for (const edit of input.edits ?? []) {
+        const current = await readRepoFile(o, { owner, repo, path: edit.path, ref: baseSha })
+        const next = edit.update(current ? new TextDecoder().decode(current) : null)
+        entries.push({ path: edit.path, mode: "100644", type: "blob", sha: await blob(next) })
       }
       const { data: newTree } = await o.request("POST /repos/{owner}/{repo}/git/trees", {
         owner,
@@ -334,7 +353,7 @@ export function githubAppClient(options: {
 }
 
 /**
- * An in-memory legal repository. CI passes (or fails, with `failChecks`) `ciDelayMs` after a PR opens, auto-merge then
+ * An in-memory documents repository. CI passes (or fails, with `failChecks`) `ciDelayMs` after a PR opens, auto-merge then
  * merges it, and a pushed tag gets a release `releaseDelayMs` later with the assets `buildRelease` returns.
  */
 export function fakeGitHub(options: {
@@ -373,11 +392,17 @@ export function fakeGitHub(options: {
   const encode = (v: string | Uint8Array): Stored =>
     typeof v === "string" ? v : { b64: Buffer.from(v).toString("base64") }
   const decode = (v: Stored) => (typeof v === "string" ? v : new Uint8Array(Buffer.from(v.b64, "base64")))
+  /** The commit each branch forked from, for merges. */
+  const forks = new Map<string, string>()
+  const same = (a: string | Uint8Array | undefined, b: string | Uint8Array | undefined) =>
+    a === b ||
+    (a !== undefined && b !== undefined && typeof a !== "string" && typeof b !== "string" && Buffer.from(a).equals(b))
   function save() {
     if (!options.stateFile) return
     const data = {
       counter,
       refs: [...refs],
+      forks: [...forks],
       commits: [...commits].map(([id, files]) => [id, [...files].map(([p, c]) => [p, encode(c)])]),
       prs,
       releases: releases.map((r) => ({ ...r, files: r.files.map((f) => ({ ...f, content: encode(f.content) })) })),
@@ -390,6 +415,8 @@ export function fakeGitHub(options: {
     counter = data.counter
     refs.clear()
     for (const [k, v] of data.refs) refs.set(k, v)
+    forks.clear()
+    for (const [k, v] of data.forks ?? []) forks.set(k, v)
     commits.clear()
     for (const [id, files] of data.commits)
       commits.set(id, new Map(files.map(([p, c]: [string, Stored]) => [p, decode(c)])))
@@ -410,10 +437,26 @@ export function fakeGitHub(options: {
     if (pr.merged || pr.state === "closed") return
     if (Date.now() - pr.openedAt < (options.ciDelayMs ?? 0)) return
     pr.checks = options.failChecks ? "failure" : "success"
-    if (pr.checks === "success" && pr.autoMerge) {
+    if (pr.checks === "success" && pr.autoMerge && pr.mergeable !== false) {
+      // Apply the branch's changes since it forked to the base as it is now; a file the base changed meanwhile too is
+      // a conflict: the pull request stays open and can't merge, as on GitHub.
       const head = commits.get(refs.get(`heads/${pr.branch}`) as string) as Snapshot
+      const current = commits.get(refs.get(`heads/${pr.base}`) as string) as Snapshot
+      const fork = commits.get(forks.get(pr.branch) ?? "") ?? current
+      const next = new Map(current)
+      for (const path of new Set([...fork.keys(), ...head.keys()])) {
+        if (same(fork.get(path), head.get(path))) continue
+        if (!same(fork.get(path), current.get(path)) && !same(head.get(path), current.get(path))) {
+          pr.mergeable = false
+          log.push(`conflict #${pr.number} ${path}`)
+          return
+        }
+        const value = head.get(path)
+        if (value === undefined) next.delete(path)
+        else next.set(path, value)
+      }
       const merged = sha()
-      commits.set(merged, new Map(head))
+      commits.set(merged, next)
       refs.set(`heads/${pr.base}`, merged)
       Object.assign(pr, { merged: true, state: "closed", mergeSha: merged })
       log.push(`merged #${pr.number}`)
@@ -421,12 +464,12 @@ export function fakeGitHub(options: {
   }
   const view = (pr: (typeof prs)[number]): PullRequestInfo => {
     tick(pr)
-    const { number, url, state, merged, mergeSha, checks } = pr
-    return { number, url, state, merged, mergeSha, checks }
+    const { number, url, state, merged, mergeSha, checks, mergeable } = pr
+    return { number, url, state, merged, mergeSha, checks, mergeable }
   }
 
   const client: LegalGitHub = {
-    repo: options.repo ?? "PoliNetworkOrg/legal",
+    repo: options.repo ?? "PoliNetworkOrg/documents",
     async headSha(ref) {
       const found = refs.get(`heads/${ref}`) ?? (commits.has(ref) ? ref : null)
       if (!found) throw new Error(`no ref ${ref}`)
@@ -435,6 +478,7 @@ export function fakeGitHub(options: {
     async commitToBranch(input) {
       const existing = refs.get(`heads/${input.branch}`)
       if (existing) return { sha: existing }
+      forks.set(input.branch, refs.get(`heads/${input.base}`) as string)
       const base = commits.get(refs.get(`heads/${input.base}`) as string) as Snapshot
       const next = new Map(base)
       const prefix = `${input.dir}/`
@@ -444,6 +488,15 @@ export function fakeGitHub(options: {
           next.delete(path)
       }
       for (const [path, content] of Object.entries(input.files)) next.set(prefix + path, content)
+      for (const edit of input.edits ?? []) {
+        const current = base.get(edit.path)
+        next.set(
+          edit.path,
+          edit.update(
+            current === undefined ? null : typeof current === "string" ? current : new TextDecoder().decode(current)
+          )
+        )
+      }
       const id = sha()
       commits.set(id, next)
       refs.set(`heads/${input.branch}`, id)
@@ -463,6 +516,7 @@ export function fakeGitHub(options: {
         merged: false,
         mergeSha: null,
         checks: "pending" as const,
+        mergeable: true as boolean | null,
         branch: input.branch,
         base: input.base,
         autoMerge: false,

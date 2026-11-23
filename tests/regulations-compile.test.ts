@@ -151,7 +151,7 @@ it.skipIf(!hasXelatex)(
         .split("\n")
         .findLast((line) => line.startsWith('{"checked"')) ?? "{}"
     )
-    expect(result.checked).toHaveLength(5)
+    expect(result.checked).toHaveLength(8)
   },
   95_000
 )

@@ -48,13 +48,17 @@ try {
   // A legal checkout with the sample document.
   const legal = mkdtempSync(join(tmpdir(), "regs-legal-"))
   cpSync(join(import.meta.dirname, "fixtures/regulations/sample"), join(legal, "sample"), { recursive: true })
-  cpSync(join(import.meta.dirname, "fixtures/regulations/sample"), join(legal, "shared"), { recursive: true })
-  writeFileSync(join(legal, "shared/polinetwork-regolamento.cls"), "% class\n")
+  cpSync(join(import.meta.dirname, "fixtures/regulations/sample"), join(legal, "shared/regolamento"), {
+    recursive: true,
+  })
+  writeFileSync(join(legal, "shared/regolamento/polinetwork-regolamento.cls"), "% class\n")
   writeFileSync(
-    join(legal, "legal.json"),
+    join(legal, "documents.json"),
     JSON.stringify({
-      version: 1,
-      shared: "shared",
+      version: 2,
+      templates: {
+        regolamento: { title: "Regolamento", shared: "shared/regolamento", skeleton: "templates/regolamento" },
+      },
       documents: [
         {
           key: "sample",
@@ -64,6 +68,7 @@ try {
           sources: ["main.tex", "parti/*.tex"],
           outputs: { pdf: "sample.pdf" },
           tagPrefix: "sample-",
+          template: "regolamento",
           procedure: "rri",
         },
         {
@@ -72,8 +77,9 @@ try {
           dir: "x",
           entry: "x.tex",
           sources: [],
-          outputs: {},
+          outputs: { pdf: "x.pdf" },
           tagPrefix: "x-",
+          template: null,
           procedure: null,
         },
       ],
@@ -150,13 +156,21 @@ try {
 
   await rejects(service.syncDocuments(dir), "FORBIDDEN")
   const synced = await service.syncDocuments(seg)
-  assert.deepEqual(synced, { documents: ["sample"], imported: ["sample"] })
+  assert.deepEqual(synced, {
+    documents: ["sample", "manuale"],
+    imported: ["sample", "manuale"],
+    updated: [],
+    skipped: [],
+  })
   assert.deepEqual((await service.syncDocuments(seg)).imported, [])
-  const [doc] = await service.listDocuments(dir)
+  const catalog = await service.listDocuments(dir)
+  const doc = catalog.find((d) => d.key === "sample") as (typeof catalog)[number]
   assert.equal(doc.latestVersion?.label.startsWith("import"), true)
-  assert.equal(doc.procedure.states.length, 4)
+  assert.equal(doc.procedure?.states.length, 4)
+  assert.equal(doc.kind, "regolamento")
+  assert.equal(catalog.find((d) => d.key === "manuale")?.kind, "consultazione")
   await rejects(service.listDocuments(editor), "FORBIDDEN")
-  checked.push("documents and the first version are imported from legal.json, once")
+  checked.push("documents and the first version are imported from documents.json, once")
 
   // A version whose stored assets are wrong (fonts once read from GitHub as UTF-8 text) heals at the next boot.
   {

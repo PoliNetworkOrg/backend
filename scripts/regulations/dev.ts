@@ -2,8 +2,10 @@
  * Starts the regulations editor's local stack on the host: the dev IdP (4300), the backend (3000) and the collab
  * service (4100 websocket, 4101 internal), against the Postgres and worker of docker/regulations-dev.compose.yaml.
  *   bun run regulations:dev
- * REGULATIONS_LEGAL_DIR defaults to ../legal next to this repository (a clone of PoliNetworkOrg/legal).
+ * REGULATIONS_LEGAL_DIR defaults to ../documents next to this repository (a clone of PoliNetworkOrg/documents, the
+ * repository formerly called `legal`), or ../legal when only that exists.
  */
+import { existsSync } from "node:fs"
 import { join, resolve } from "node:path"
 
 const root = resolve(import.meta.dirname, "../..")
@@ -36,7 +38,11 @@ export const DEV_ENV: Record<string, string> = {
   REGULATIONS_COLLAB_INTERNAL_URL: "http://127.0.0.1:4101",
   REGULATIONS_WORKER_URL: "http://127.0.0.1:4200",
   REGULATIONS_WORKER_SECRET: "dev-worker-secret",
-  REGULATIONS_LEGAL_DIR: process.env.REGULATIONS_LEGAL_DIR ?? resolve(root, "../legal"),
+  REGULATIONS_LEGAL_DIR:
+    process.env.REGULATIONS_LEGAL_DIR ??
+    (existsSync(resolve(root, "../documents/documents.json"))
+      ? resolve(root, "../documents")
+      : resolve(root, "../legal")),
   REGULATIONS_LLM_PROVIDER: process.env.REGULATIONS_LLM_PROVIDER ?? "fake",
   REGULATIONS_GITHUB_MODE: process.env.REGULATIONS_GITHUB_MODE ?? "fake",
   REGULATIONS_FAKE_GITHUB_STATE: resolve(root, ".dev-idp/fake-github.json"),
