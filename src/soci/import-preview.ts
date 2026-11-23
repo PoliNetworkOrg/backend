@@ -40,7 +40,9 @@ export const bookMappingSchema = z
       mapping.ignoredColumns.some((name) => used.includes(name)) ||
       new Set(mapping.feeEvidence.map((f) => f.label)).size !== mapping.feeEvidence.length ||
       (mapping.scope === "history" && (!mapping.columns.endedOn || !mapping.columns.endReason)) ||
-      Object.keys(mapping.endReasonValues).length > 100
+      Object.keys(mapping.endReasonValues).length > 100 ||
+      // Cells are trimmed before lookup, so a padded key could never match.
+      Object.keys(mapping.endReasonValues).some((value) => value.trim() !== value)
     )
       ctx.addIssue({ code: "custom", message: "Inconsistent mapping" })
   })
@@ -69,11 +71,25 @@ export type BookDiagnostic = {
   relatedLine?: number
   matches?: number
 }
+/** Warnings every normalized row carries; the console counts them instead of listing each one. */
+export const ROW_WARNINGS: readonly string[] = [
+  "membership_unknown",
+  "account_unreconciled",
+  "fee_evidence_unreviewed",
+  "fee_evidence_unknown",
+]
 export type BookPreviewRow = {
   line: number
   status: "blocked" | "unresolved"
   candidate: BookCandidate | null
   diagnostics: BookDiagnostic[]
+}
+
+/** Whether two admissions of the same person were both in force at some point. An end date closes the day before
+ * a re-admission may start on it. Unknown memberships have no known end, so they are left for manual review. */
+function overlaps(a: BookCandidate, b: BookCandidate) {
+  if (a.membership === "unknown" || b.membership === "unknown") return false
+  return (a.endedOn === null || b.admittedOn < a.endedOn) && (b.endedOn === null || a.admittedOn < b.endedOn)
 }
 
 function dateValue(value: string, format: BookMapping["dateFormat"]): string | null {
@@ -206,15 +222,19 @@ export function previewBookCsv(source: string, config: unknown) {
   }
   for (const group of codes.values()) {
     if (group.length < 2) continue
-    const active = group.filter((r) => r.candidate?.membership === "active")
     for (const row of group) {
-      const conflict = active.length > 1 && row.candidate?.membership === "active"
+      const candidate = row.candidate as BookCandidate
+      const others = group.filter((other) => other !== row)
+      const active =
+        candidate.membership === "active" ? others.find((other) => other.candidate?.membership === "active") : undefined
+      const overlap = active ? undefined : others.find((other) => overlaps(candidate, other.candidate as BookCandidate))
+      const related = active ?? overlap ?? others[0]
       row.diagnostics.push({
-        severity: conflict ? "error" : "warning",
-        code: conflict ? "active_code_conflict" : "identity_review",
-        field: "details.codiceFiscale",
-        relatedLine: (group[0] === row ? group[1] : group[0]).line,
-        matches: group.length - 1,
+        severity: active || overlap ? "error" : "warning",
+        code: active ? "active_code_conflict" : overlap ? "overlapping_admissions" : "identity_review",
+        field: overlap ? "admittedOn" : "details.codiceFiscale",
+        relatedLine: related.line,
+        matches: others.length,
       })
     }
   }

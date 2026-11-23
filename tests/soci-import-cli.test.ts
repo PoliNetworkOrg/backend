@@ -53,7 +53,8 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true })
 })
 
-describe("credential-free CSV preview command", () => {
+// Each test spawns Bun up to four times; the 5 s default is too tight on a loaded runner.
+describe("credential-free CSV preview command", { timeout: 60_000 }, () => {
   it("runs offline with no service configuration and only redacted console diagnostics", async () => {
     const result = run()
     expect(result.status).toBe(0)
@@ -85,6 +86,16 @@ describe("credential-free CSV preview command", () => {
       status: 1,
       stderr: "Errore: output_inside_git.\n",
     })
+  })
+  it("names blocked rows before the warnings every row carries", async () => {
+    const rows = Array.from({ length: 300 }, (_, i) => `${i + 1};Nome;Cognome;2025-09-01;;`)
+    rows[248] = "249;Nome;Cognome;2025-02-30;;"
+    await writeFile(input, ["Numero;Nome;Cognome;Data;CF;Email", ...rows].join("\n"))
+    const result = run()
+    expect(result.status).toBe(2)
+    expect(result.stdout.split("\n")[2]).toBe("Riga 250: error invalid_value [admittedOn]")
+    expect(result.output).toContain("Avvisi account_unreconciled: 299 righe.")
+    expect(result.output).not.toContain("Altre diagnostiche")
   })
   it("returns status 2 for blocked rows and can still save their detailed report", async () => {
     await writeFile(input, csv.replace("2025-09-01", "2025-02-30"))

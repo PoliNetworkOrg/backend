@@ -34,10 +34,18 @@ describe("Libro Soci CSV parsing", () => {
     expect(parseBookCsv('"a,b",c,', ",")).toEqual([{ line: 1, cells: ["a,b", "c", ""] }])
   })
   it("skips blank physical lines but retains deliberately empty records", () => {
-    expect(parseBookCsv('\n\r\n;\n""\n', ";")).toEqual([
+    expect(parseBookCsv('\n\r\n;\n""\n  \t\n', ";")).toEqual([
       { line: 3, cells: ["", ""] },
       { line: 4, cells: [""] },
     ])
+    expect(parseBookCsv(' ;\n" "', ";")).toEqual([
+      { line: 1, cells: [" ", ""] },
+      { line: 2, cells: [" "] },
+    ])
+  })
+  it("limits cells by characters, not UTF-16 units", () => {
+    expect(parseBookCsv("\u{1F600}".repeat(16_384), ";")[0].cells[0]).toHaveLength(32_768)
+    errorCode(() => parseBookCsv("\u{1F600}".repeat(16_385), ";"), "cell_too_long")
   })
   it.each([
     ['a"b;c', "unexpected_quote"],
@@ -156,6 +164,12 @@ describe("local Libro Soci normalization", () => {
     expect(conflicting.rows.every((r) => r.diagnostics.some((d) => d.code === "duplicate_number"))).toBe(true)
     expect(previewBookCsv(`${source}\n123;Mario`, mapping).summary.blocked).toBe(2)
   })
+  it("refuses end reason keys that could never match a trimmed cell", () => {
+    errorCode(
+      () => previewBookCsv(source, { ...mapping, endReasonValues: { "dimissioni ": "resigned" } }),
+      "invalid_mapping"
+    )
+  })
   it("preserves historical re-admissions and blocks multiple explicitly active identities", () => {
     const config = {
       ...mapping,
@@ -177,5 +191,46 @@ describe("local Libro Soci normalization", () => {
     expect(codes(previewBookCsv(csv.replace("02/09/2025;dimissioni", ";dimissioni"), config))).toContain(
       "incomplete_end"
     )
+  })
+  it("blocks admissions of one person that were in force at the same time", () => {
+    const config = {
+      ...mapping,
+      scope: "history",
+      columns: { ...mapping.columns, codiceFiscale: "CF", endedOn: "Fine", endReason: "Motivo" },
+      endReasonValues: { dimissioni: "resigned" },
+    }
+    const book = (rows: string[]) => `${header};CF;Fine;Motivo\n${rows.join("\n")}`
+    // Still active from 2020, and a later admission that also ended: both blocked, pointing at each other.
+    const overlap = previewBookCsv(
+      book([
+        "1;Mario;Rossi;01/01/2020;RSSMRA80A01H501U;;",
+        "2;Mario;Rossi;01/01/2022;RSSMRA80A01H501U;01/01/2023;dimissioni",
+      ]),
+      config
+    )
+    expect(overlap.summary.blocked).toBe(2)
+    expect(
+      overlap.rows.map((r) => r.diagnostics.find((d) => d.code === "overlapping_admissions")?.relatedLine)
+    ).toEqual([3, 2])
+    // Two ended admissions whose periods cross.
+    expect(
+      previewBookCsv(
+        book([
+          "1;Mario;Rossi;01/01/2020;RSSMRA80A01H501U;01/01/2022;dimissioni",
+          "2;Mario;Rossi;01/06/2021;RSSMRA80A01H501U;01/01/2023;dimissioni",
+        ]),
+        config
+      ).summary.blocked
+    ).toBe(2)
+    // Re-admission on the day the previous membership ended is a sequence, not an overlap.
+    const sequence = previewBookCsv(
+      book([
+        "1;Mario;Rossi;01/01/2020;RSSMRA80A01H501U;01/01/2022;dimissioni",
+        "2;Mario;Rossi;01/01/2022;RSSMRA80A01H501U;;",
+      ]),
+      config
+    )
+    expect(sequence.summary.blocked).toBe(0)
+    expect(codes(sequence)).toContain("identity_review")
   })
 })

@@ -170,22 +170,27 @@ Copy the example mapping and explicitly configure:
   `birthPlace`, `residence`, `phone`, `endedOn`, `endReason`, `endNote`, `mailbox`, `entraObjectId`. Values are exact
   header names after trimming. Each source column has one assignment; remaining headers require `ignoredColumns`.
 - `endReasonValues`: optional exact translations, e.g. `{ "dimissioni": "resigned" }`; targets are `lapsed`,
-  `resigned`, `expelled`, `deceased`, `other`. No fuzzy matching.
+  `resigned`, `expelled`, `deceased`, `other`. No fuzzy matching; keys with leading or trailing spaces are refused.
 - `feeEvidence`: optional `{ "label": "Quota 2025/26", "column": "Quota" }` entries. Text is retained as unreviewed;
   blanks are unknown. The tool never creates Paid/Due status, payment dates, amounts or account identities.
 
 The console shows counts and at most 100 coded diagnostics with physical source line references and canonical field
-names. Exit codes: **0** preview without blocked rows (still unresolved), **2** blocked rows, **1** configuration,
-structural CSV or file errors. Malformed quoting, missing/duplicate/empty/unmapped headers and invalid UTF-8 stop the
-preview. Invalid records remain blocked in the report, with diagnostics and source line but no normalized candidate.
-Duplicate numbers block every affected row; ended and later admissions sharing a tax code are preserved for review,
-while multiple explicitly active admissions with that code are blocked.
+names, errors first. Warnings every row carries (`membership_unknown`, `account_unreconciled`, `fee_evidence_*`) are
+counted per code instead of listed. Exit codes: **0** preview without blocked rows (still unresolved), **2** blocked
+rows, **1** configuration, structural CSV or file errors. Malformed quoting, missing/duplicate/empty/unmapped headers
+and invalid UTF-8 stop the preview. Records with invalid fields remain blocked in the report, with diagnostics and
+source line but no normalized candidate. Rows blocked by an end-date, duplicate or tax-code check keep their candidate
+so the conflict can be inspected, and count among the normalized rows. Duplicate numbers block every affected row.
+Admissions sharing a tax code are kept for review when each ends before the next starts; multiple explicitly active
+admissions (`active_code_conflict`) and admissions in force at the same time (`overlapping_admissions`) are blocked.
 
 For a full **plaintext report containing personal data**, explicitly add `--out /private/directory/report.json`.
 The directory must exist outside Git worktrees; the file is created exclusively with mode 0600, and existing files
-or symlinks are refused. Protect and delete this report like the source book. Limits: 10 MiB input, 64 KiB mapping,
-50,000 data records, 256 columns and 16,384 characters per cell. UTF-8 BOM, CRLF/LF/CR, quoted cells, escaped quotes
-and embedded newlines are supported; blank physical lines are skipped. Other encodings need a separate local
+or symlinks are refused. If writing fails partway the partial file is deleted; `output_partial` means it could not
+be, and must be removed by hand. Protect and delete this report like the source book. Limits: 10 MiB input, 64 KiB
+mapping, 50,000 data records, 256 columns and 16,384 characters per cell. UTF-8 BOM, CRLF/LF/CR, quoted cells,
+escaped quotes and embedded newlines are supported; blank physical lines, including lines of only spaces or tabs, are
+skipped. Other encodings need a separate local
 conversion. Local snapshot reconciliation and any future application are separate steps.
 
 ### Fees

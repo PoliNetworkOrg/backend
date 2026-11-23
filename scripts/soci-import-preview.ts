@@ -1,9 +1,9 @@
 import { constants } from "node:fs"
-import { lstat, open, realpath } from "node:fs/promises"
+import { lstat, open, realpath, unlink } from "node:fs/promises"
 import { basename, dirname, join, parse, resolve } from "node:path"
 import { parseArgs } from "node:util"
 import { CsvPreviewError } from "../src/soci/import-csv"
-import { previewBookCsv } from "../src/soci/import-preview"
+import { type BookDiagnostic, previewBookCsv, ROW_WARNINGS } from "../src/soci/import-preview"
 
 async function readLocalText(path: string, limit: number, kind: "input" | "mapping") {
   const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK).catch(() => {
@@ -42,11 +42,22 @@ async function saveReport(path: string, report: unknown) {
       if (git) throw new CsvPreviewError("output_inside_git")
       if (directory === parse(directory).root) break
     }
-    const handle = await open(join(parent, basename(resolve(path))), "wx", 0o600)
-    try {
-      await handle.writeFile(`${JSON.stringify(report, null, 2)}\n`, "utf8")
-    } finally {
-      await handle.close()
+    const text = `${JSON.stringify(report, null, 2)}\n`
+    const target = join(parent, basename(resolve(path)))
+    const handle = await open(target, "wx", 0o600)
+    let failure: unknown = null
+    await handle.writeFile(text, "utf8").catch((error: unknown) => {
+      failure = error
+    })
+    await handle.close().catch((error: unknown) => {
+      failure ??= error
+    })
+    if (failure !== null) {
+      // Never leave a partial personal-data report behind; say so if it could not be removed.
+      await unlink(target).catch(() => {
+        throw new CsvPreviewError("output_partial")
+      })
+      throw failure
     }
   } catch (error) {
     if (error instanceof CsvPreviewError) throw error
@@ -93,18 +104,24 @@ async function main() {
   console.log(
     `Righe: ${report.summary.rows}; normalizzate: ${report.summary.normalized}; bloccate: ${report.summary.blocked}; da verificare: ${report.summary.unresolved}.`
   )
-  let emitted = 0
-  let total = 0
-  for (const row of report.rows)
-    for (const diagnostic of row.diagnostics) {
-      total++
-      if (emitted >= 100) continue
-      console.log(
-        `Riga ${row.line}: ${diagnostic.severity} ${diagnostic.code}${diagnostic.field ? ` [${diagnostic.field}]` : ""}${diagnostic.relatedLine ? ` (riga correlata ${diagnostic.relatedLine})` : ""}`
-      )
-      emitted++
-    }
-  if (total > emitted) console.log(`Altre diagnostiche: ${total - emitted}. Usare --out per il report completo.`)
+  // Errors first, so blocked rows are named even in long books; warnings every row carries are only counted.
+  const listed: { line: number; diagnostic: BookDiagnostic }[] = []
+  const counted = new Map<string, number>()
+  for (const severity of ["error", "warning"] as const)
+    for (const row of report.rows)
+      for (const diagnostic of row.diagnostics) {
+        if (diagnostic.severity !== severity) continue
+        if (severity === "warning" && ROW_WARNINGS.includes(diagnostic.code))
+          counted.set(diagnostic.code, (counted.get(diagnostic.code) ?? 0) + 1)
+        else listed.push({ line: row.line, diagnostic })
+      }
+  for (const { line, diagnostic } of listed.slice(0, 100))
+    console.log(
+      `Riga ${line}: ${diagnostic.severity} ${diagnostic.code}${diagnostic.field ? ` [${diagnostic.field}]` : ""}${diagnostic.relatedLine ? ` (riga correlata ${diagnostic.relatedLine})` : ""}`
+    )
+  if (listed.length > 100)
+    console.log(`Altre diagnostiche: ${listed.length - 100}. Usare --out per il report completo.`)
+  for (const [code, count] of counted) console.log(`Avvisi ${code}: ${count} righe.`)
   if (out !== undefined) console.log("Report dettagliato salvato localmente con permessi privati.")
   process.exitCode = report.summary.blocked ? 2 : 0
 }

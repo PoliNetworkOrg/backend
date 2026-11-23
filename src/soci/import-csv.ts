@@ -11,35 +11,47 @@ export class CsvPreviewError extends Error {
 
 export type CsvRecord = { line: number; cells: string[] }
 
-/** Strict quoted CSV. Blank physical lines are skipped; explicit empty records are retained. */
+/**
+ * Strict quoted CSV. Blank physical lines, including lines of unquoted whitespace only, are skipped; explicit empty
+ * records (a delimiter or a quoted cell) are retained. Cell lengths count Unicode characters, not UTF-16 units.
+ */
 export function parseBookCsv(source: string, delimiter: "," | ";"): CsvRecord[] {
   const text = source.startsWith("\uFEFF") ? source.slice(1) : source
   const records: CsvRecord[] = []
   let state: "start" | "plain" | "quoted" | "closed" = "start"
   let cells: string[] = []
   let cell = ""
+  let cellLength = 0
   let line = 1
   let startLine = 1
   let present = false
 
   const append = (value: string) => {
     cell += value
-    if (cell.length > 16_384) throw new CsvPreviewError("cell_too_long", startLine)
+    // Count code points: a low surrogate completes a character already counted by its high surrogate.
+    for (let i = 0; i < value.length; i++) {
+      const unit = value.charCodeAt(i)
+      if (unit < 0xdc00 || unit > 0xdfff) cellLength++
+    }
+    if (cellLength > 16_384) throw new CsvPreviewError("cell_too_long", startLine)
   }
   const field = () => {
     cells.push(cell)
     if (cells.length > 256) throw new CsvPreviewError("too_many_columns", startLine)
     cell = ""
+    cellLength = 0
     state = "start"
   }
   const record = () => {
-    if (present) {
+    const whitespaceOnly = cells.length === 0 && state === "plain" && cell.trim() === ""
+    if (present && !whitespaceOnly) {
       field()
       records.push({ line: startLine, cells })
       if (records.length > 50_001) throw new CsvPreviewError("too_many_rows", startLine)
     }
     cells = []
     cell = ""
+    cellLength = 0
     state = "start"
     present = false
   }
