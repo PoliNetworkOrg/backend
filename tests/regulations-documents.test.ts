@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { describe, expect, it } from "vitest"
-import { type RepoReader, readDocumentWith } from "@/regulations/compile/assets"
+import { mapLimit, type RepoReader, readDocumentWith } from "@/regulations/compile/assets"
 import { fakeGitHub } from "@/regulations/emanation/github"
 import { appendDocumentEntry, ManifestError, parseManifest } from "@/regulations/legal-source"
 import { fillSkeleton, latexEscape, placementOf, TemplateError } from "@/regulations/templates"
@@ -167,6 +167,47 @@ describe("asset bundles", () => {
   it("has no shared directory for a self-contained document", async () => {
     const { assets } = await readDocumentWith(reader, { ...layout, shared: null })
     expect(Object.keys(assets.files)).toEqual(["foto.png"])
+  })
+
+  it("reads the files concurrently, a few at a time, keeping the listing's order", async () => {
+    let running = 0
+    let most = 0
+    const slow: RepoReader = {
+      list: reader.list,
+      read: async (path) => {
+        most = Math.max(most, ++running)
+        // Uneven delays: the reads finish out of order
+        await new Promise((resolve) => setTimeout(resolve, path.length % 5))
+        running--
+        return reader.read(path)
+      },
+    }
+    const many = Object.fromEntries(
+      Array.from({ length: 30 }, (_, i) => [`img/${String(i).padStart(2, "0")}.png`, "x"])
+    )
+    Object.assign(tree, Object.fromEntries(Object.keys(many).map((p) => [`generali/guida/${p}`, "png"])))
+    try {
+      const { assets } = await readDocumentWith(slow, { ...layout, shared: "shared/generale" })
+      expect(Object.keys(assets.files)).toEqual(
+        Object.keys((await readDocumentWith(reader, { ...layout, shared: "shared/generale" })).assets.files)
+      )
+      expect(Object.keys(assets.files)).toContain("img/29.png")
+      expect(most).toBeGreaterThan(1)
+      expect(most).toBeLessThanOrEqual(8)
+    } finally {
+      for (const p of Object.keys(many)) delete tree[`generali/guida/${p}`]
+    }
+  })
+
+  it("maps with a concurrency limit, results in the items' order", async () => {
+    const delays = [30, 5, 20, 1, 10]
+    expect(await mapLimit(delays, 2, async (ms) => new Promise((r) => setTimeout(() => r(ms * 2), ms)))).toEqual([
+      60, 10, 40, 2, 20,
+    ])
+    expect(await mapLimit([], 4, async () => 1)).toEqual([])
+    await expect(mapLimit([1, 2], 2, async (n) => (n === 2 ? Promise.reject(new Error("no")) : n))).rejects.toThrow(
+      "no"
+    )
   })
 
   it("compiles with the shared tree on TEXINPUTS, TTFONTS and OPENTYPEFONTS, then TeX Live's defaults", () => {

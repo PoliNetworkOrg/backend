@@ -90,6 +90,9 @@ export async function readRepoFile(
   }
 }
 
+/** Commit trees kept in memory: a sync reads one, older ones only serve requests that started before it. */
+const TREES_KEPT = 4
+
 export function githubAppClient(options: {
   appId: string
   privateKey: string
@@ -145,6 +148,30 @@ export function githubAppClient(options: {
       checks: data.merged ? "success" : await checksOf(o, data.head.sha),
       mergeable: data.merged ? null : data.mergeable,
     }
+  }
+
+  /** A commit's tree never changes: a sync lists every document's directory at the same one, so it's fetched once. */
+  const trees = new Map<string, Promise<string[]>>()
+  async function blobPaths(ref: string): Promise<string[]> {
+    const cached = trees.get(ref)
+    if (cached) return cached
+    const paths = (async () => {
+      const o = await gh()
+      const { data: commit } = await o.request("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo, ref })
+      const { data: tree } = await o.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
+        owner,
+        repo,
+        tree_sha: commit.commit.tree.sha,
+        recursive: "1",
+      })
+      return tree.tree.flatMap((i) => (i.type === "blob" && i.path ? [i.path] : []))
+    })()
+    if (!/^[0-9a-f]{40}$/.test(ref)) return paths
+    trees.set(ref, paths)
+    // A failed request is not cached, and only the last few commits are kept
+    paths.catch(() => trees.delete(ref))
+    while (trees.size > TREES_KEPT) trees.delete(trees.keys().next().value as string)
+    return paths
   }
 
   return {
@@ -336,18 +363,8 @@ export function githubAppClient(options: {
       return readRepoFile(await gh(), { owner, repo, path, ref })
     },
     async listFiles(dir, ref) {
-      const o = await gh()
-      const { data: commit } = await o.request("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo, ref })
-      const { data: tree } = await o.request("GET /repos/{owner}/{repo}/git/trees/{tree_sha}", {
-        owner,
-        repo,
-        tree_sha: commit.commit.tree.sha,
-        recursive: "1",
-      })
       const prefix = `${dir.replace(/\/$/, "")}/`
-      return tree.tree
-        .filter((i) => i.type === "blob" && i.path?.startsWith(prefix))
-        .map((i) => (i.path as string).slice(prefix.length))
+      return (await blobPaths(ref)).filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length))
     },
   }
 }
