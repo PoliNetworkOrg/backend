@@ -40,6 +40,17 @@ Sync doesn't change a document's procedure while it has open drafts or an unfini
 Reading needs `regulations:read` (private documents included). Creating documents and uploading PDFs needs
 `regulations:manage`, which the policy of `documents.create`, `documents.upload` and `versions.upload` carries too.
 
+## Secret drafts
+
+`drafts.create` with `secret: true` starts a draft only its creator and the members they add see, whatever their IdP
+permissions: `regulations:read` and `regulations:write` don't see it (lists, counts, any procedure on it answers
+`NOT_FOUND`), and a Direttivo member added to it has the role they were given, not `editor`. Only the creator adds and
+removes members, deletes it and makes it visible (`drafts.reveal`, for good: it becomes an ordinary draft). Until then
+its procedure doesn't move: every transition and the emanation (or "Pubblica") come back blocked with the reason, and
+`drafts.transition` and `emanation.start` refuse it. A draft created from a secret draft is secret too, since it carries
+its text; the base of a draft whose parent is secret is titled "Bozza segreta". Migration
+`0042_regulations_secret_drafts` adds `regulations_drafts.secret`.
+
 ## Templates and the compile
 
 `documents.json` has a `templates` map: each template has a `shared` directory (class, `.sty`, fonts, images) and a

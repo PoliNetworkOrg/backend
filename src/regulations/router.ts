@@ -152,6 +152,10 @@ export function createRegulationsRouter(
         .input(C.createDraftInputSchema)
         .output(C.draftSchema)
         .mutation(({ ctx, input }) => service.createDraft(ctx.viewer, input)),
+      reveal: user
+        .input(draftRef)
+        .output(C.draftSchema)
+        .mutation(({ ctx, input }) => service.revealDraft(ctx.viewer, input.draftId)),
       rename: user
         .input(C.renameDraftInputSchema)
         .output(ok)

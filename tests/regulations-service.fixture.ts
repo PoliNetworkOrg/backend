@@ -18,7 +18,7 @@ import { fakeSummarizer } from "@/regulations/diff/summarizer"
 import { createDirectory } from "@/regulations/directory"
 import { parseDocument } from "@/regulations/latex"
 import { localLegalSource } from "@/regulations/legal-source"
-import { createRegulationsService, type RegulationsHooks, type Viewer } from "@/regulations/service"
+import { createRegulationsService, type RegulationsHooks, SECRET_BLOCK, type Viewer } from "@/regulations/service"
 
 const connection = {
   hostname: "127.0.0.1",
@@ -504,6 +504,71 @@ try {
   )
   assert.equal((await service.getDraft(delegato, r.id)).can.emanate, false)
   checked.push("a delega lets its holder start and emanate rettifiche until it is revoked")
+
+  // Secret drafts: only the creator and the members they add, out of the procedure until made visible.
+  {
+    const openBefore = (await service.getDocument(seg, "sample")).openDrafts
+    const secret = await service.createDraft(dir, {
+      documentKey: "sample",
+      title: "Segreta",
+      from: { kind: "version", id: versionId },
+      kind: "modifica",
+      secret: true,
+    })
+    assert.deepEqual([secret.secret, secret.myRole, secret.can.reveal, secret.can.assign], [true, "editor", true, true])
+    assert.ok(secret.can.transitions.length > 0)
+    assert.ok(secret.can.transitions.every((t) => t.blockedBy === SECRET_BLOCK))
+    for (const other of [seg, pres, editor]) await rejects(service.getDraft(other, secret.id), "NOT_FOUND")
+    assert.equal(
+      (await service.listDrafts(seg, { includeClosed: true })).some((d) => d.id === secret.id),
+      false
+    )
+    assert.equal((await service.getDocument(seg, "sample")).openDrafts, openBefore)
+    await rejects(service.setAssignment(seg, { draftId: secret.id, userId: "segretario", role: "editor" }), "NOT_FOUND")
+    await service.setAssignment(dir, { draftId: secret.id, userId: "presidente", role: "commenter" })
+    const asMember = await service.getDraft(pres, secret.id)
+    assert.deepEqual(
+      [asMember.myRole, asMember.can.edit, asMember.can.reveal, asMember.can.assign, asMember.can.delete],
+      ["commenter", false, false, false, false]
+    )
+    await rejects(service.setAssignment(pres, { draftId: secret.id, userId: "editor", role: "viewer" }), "FORBIDDEN")
+    await rejects(service.revealDraft(pres, secret.id), "FORBIDDEN")
+    await rejects(service.deleteDraft(pres, secret.id), "FORBIDDEN")
+    await rejects(service.removeAssignment(dir, { draftId: secret.id, userId: "direttivo" }), "BAD_REQUEST")
+    await rejects(
+      service.transition(dir, { draftId: secret.id, to: "in_approvazione" }),
+      "PRECONDITION_FAILED",
+      /segreta/
+    )
+    // A draft from a secret draft would show its text: it is secret too.
+    const child = await service.createDraft(dir, {
+      documentKey: "sample",
+      title: "Figlia",
+      from: { kind: "draft", id: secret.id },
+      kind: "modifica",
+    })
+    assert.equal(child.secret, true)
+    await rejects(
+      service.createDraft(pres, {
+        documentKey: "sample",
+        title: "Da fuori",
+        from: { kind: "draft", id: child.id },
+        kind: "modifica",
+      }),
+      "NOT_FOUND"
+    )
+
+    const revealed = await service.revealDraft(dir, secret.id)
+    assert.deepEqual([revealed.secret, revealed.can.reveal], [false, false])
+    assert.ok(revealed.can.transitions.every((t) => t.blockedBy !== SECRET_BLOCK))
+    assert.equal((await service.getDraft(seg, secret.id)).myRole, "editor")
+    assert.equal((await service.getDocument(seg, "sample")).openDrafts, openBefore + 1)
+    await rejects(service.revealDraft(dir, secret.id), "PRECONDITION_FAILED")
+    await rejects(service.getDraft(seg, child.id), "NOT_FOUND")
+    await service.deleteDraft(dir, child.id)
+    await service.deleteDraft(dir, secret.id)
+  }
+  checked.push("secret drafts are seen only by their creator and chosen members, and move only once made visible")
 
   await rejects(service.deleteDraft(editor, b.id), "NOT_FOUND")
   await service.deleteDraft(dir, b.id)

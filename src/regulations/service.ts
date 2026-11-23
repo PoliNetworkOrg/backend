@@ -84,6 +84,9 @@ const isFinal = (state: C.StateKey) => (FINAL_STATES as readonly string[]).inclu
 const PDF_MAGIC = "%PDF-"
 const day = (value: string | Date) => (value instanceof Date ? value.toISOString().slice(0, 10) : value)
 const ROLE_RANK: Record<C.DraftRole, number> = { viewer: 0, commenter: 1, editor: 2 }
+/** Why a secret draft's procedure can't move. */
+export const SECRET_BLOCK = "La bozza è segreta: rendila visibile prima di avviare la procedura."
+const isCreator = (viewer: Viewer, draft: Pick<DraftRow, "createdBy">) => draft.createdBy.id === viewer.sub
 
 export function createRegulationsService(deps: RegulationsDeps) {
   const { db, directory } = deps
@@ -125,6 +128,9 @@ export function createRegulationsService(deps: RegulationsDeps) {
   }
 
   async function roleOf(viewer: Viewer, draft: DraftRow): Promise<C.DraftRole | null> {
+    // A secret draft: its creator and the members they added, whatever their permissions.
+    if (draft.secret)
+      return isCreator(viewer, draft) ? "editor" : ((await assignmentOf(draft.id, viewer.sub))?.role ?? null)
     if (viewer.can(P.write)) return "editor"
     const assigned = (await assignmentOf(draft.id, viewer.sub))?.role ?? null
     if (viewer.can(P.read)) return assigned && ROLE_RANK[assigned] > 0 ? assigned : "viewer"
@@ -304,10 +310,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
       return { kind: "version", id: draft.baseVersionId, label: v?.label ?? draft.baseVersionId }
     }
     const [d] = await db
-      .select({ title: drafts.title })
+      .select({ title: drafts.title, secret: drafts.secret })
       .from(drafts)
       .where(eq(drafts.id, draft.baseDraftId as string))
-    return { kind: "draft", id: draft.baseDraftId as string, title: d?.title ?? "" }
+    // Its members may not be this draft's.
+    return { kind: "draft", id: draft.baseDraftId as string, title: d?.secret ? "Bozza segreta" : (d?.title ?? "") }
   }
 
   async function summary(draft: DraftRow, role: C.DraftRole): Promise<C.DraftSummary> {
@@ -319,6 +326,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
       state: draft.state,
       base: await baseOf(draft),
       myRole: role,
+      secret: draft.secret,
       createdBy: draft.createdBy,
       createdAt: draft.createdAt.toISOString(),
       updatedAt: draft.updatedAt.toISOString(),
@@ -382,6 +390,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
       if (rule.to === "in_approvazione" && other) blockedBy = `C'è già una bozza in approvazione: «${other.title}».`
       if (rule.effect === "freeze" && superseded) blockedBy = superseded
       if (emanation) blockedBy = "L'emanazione è in corso."
+      if (draft.secret) blockedBy = SECRET_BLOCK
       transitions.push({
         to: rule.to,
         label: rule.label,
@@ -394,7 +403,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
     const verb = config.key === "documento" ? "pubblicare" : "emanare"
     let emanateBlockedBy: string | null = null
     if (emanateNow && !emanation && allowed(viewer, emanateNow.who, rectify)) {
-      if (superseded) emanateBlockedBy = superseded
+      if (draft.secret) emanateBlockedBy = SECRET_BLOCK
+      else if (superseded) emanateBlockedBy = superseded
       else if (emanateNow.requires.includes("parses") && draft.parses === false)
         emanateBlockedBy = `Il testo non è valido: correggi gli errori prima di ${verb}.`
       // The rri procedure's ordinary path needs the LLM differences; rettifiche generate them while emanating.
@@ -433,14 +443,15 @@ export function createRegulationsService(deps: RegulationsDeps) {
       can: {
         edit: role === "editor" && editable,
         comment: ROLE_RANK[role] >= ROLE_RANK.commenter && !isFinal(draft.state),
-        assign: viewer.can(P.write) && !isFinal(draft.state),
-        merge: viewer.can(P.write) && editable,
+        assign: (draft.secret ? isCreator(viewer, draft) : viewer.can(P.write)) && !isFinal(draft.state),
+        merge: viewer.can(P.write) && role === "editor" && editable,
         transitions,
         approve: transitions.some((t) => t.to === "approvata" && !t.blockedBy),
         emanate,
         emanateBlockedBy,
         rectify,
         regenerateDiff:
+          !draft.secret &&
           config.key === "rri" &&
           document.storage === "repo" &&
           viewer.can(P.manage) &&
@@ -450,12 +461,15 @@ export function createRegulationsService(deps: RegulationsDeps) {
           !draft.notifiedAt &&
           !emanation,
         delete:
-          (viewer.can(P.write) || (draft.kind === "rettifica" && draft.createdBy.id === viewer.sub)) &&
+          (draft.secret
+            ? isCreator(viewer, draft)
+            : viewer.can(P.write) || (draft.kind === "rettifica" && isCreator(viewer, draft))) &&
           draft.state === "bozza" &&
           !emanation,
         rename: role === "editor" && !isFinal(draft.state),
         snapshot: role === "editor",
         restore: role === "editor" && editable,
+        reveal: draft.secret && isCreator(viewer, draft),
       },
       procedure: procedureView(config),
       deadlines,
@@ -525,7 +539,12 @@ export function createRegulationsService(deps: RegulationsDeps) {
       .select({ open: count() })
       .from(drafts)
       .where(
-        and(eq(drafts.documentKey, documentKey), isNull(drafts.deletedAt), inArray(drafts.state, [...OPEN_STATES]))
+        and(
+          eq(drafts.documentKey, documentKey),
+          isNull(drafts.deletedAt),
+          eq(drafts.secret, false),
+          inArray(drafts.state, [...OPEN_STATES])
+        )
       )
     return open
   }
@@ -748,7 +767,10 @@ export function createRegulationsService(deps: RegulationsDeps) {
   // Drafts
   // ------------------------------------------------------------------------------------------------------------------
 
-  async function createDraft(viewer: Viewer, input: C.CreateDraftInput): Promise<C.Draft> {
+  async function createDraft(
+    viewer: Viewer,
+    input: Omit<C.CreateDraftInput, "secret"> & { secret?: boolean }
+  ): Promise<C.Draft> {
     const document = await loadDocument(input.documentKey)
     const blocked = notEditableReason(document)
     if (blocked) fail("PRECONDITION_FAILED", blocked)
@@ -761,6 +783,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
     let baseFiles: C.Files
     let baseVersionId: string | null = null
     let baseDraftId: string | null = null
+    let secret = input.secret ?? false
     if (input.from.kind === "version") {
       const version = await versionRow(input.from.id)
       if (version.documentKey !== document.key) fail("BAD_REQUEST", "La versione è di un altro documento.")
@@ -771,6 +794,8 @@ export function createRegulationsService(deps: RegulationsDeps) {
       if (source.documentKey !== document.key) fail("BAD_REQUEST", "La bozza di origine è di un altro documento.")
       baseFiles = await currentFiles(source)
       baseDraftId = source.id
+      // Its text would show what the secret draft says.
+      secret ||= source.secret
     }
     const id = nanoid(12)
     const at = now()
@@ -785,6 +810,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
         baseDraftId,
         baseFiles,
         parses: parseDocument(baseFiles, document.entry).parses,
+        secret,
         createdBy: viewer.person,
         createdAt: at,
         updatedAt: at,
@@ -850,6 +876,16 @@ export function createRegulationsService(deps: RegulationsDeps) {
     await db.update(drafts).set({ deletedAt: now(), deletedBy: viewer.person }).where(eq(drafts.id, draft.id))
   }
 
+  /** A secret draft becomes an ordinary one, seen by `regulations:read`, with its procedure open. For good. */
+  async function revealDraft(viewer: Viewer, draftId: string) {
+    const { draft, role } = await access(viewer, draftId)
+    if (!draft.secret) fail("PRECONDITION_FAILED", "La bozza è già visibile.")
+    if (!isCreator(viewer, draft)) fail("FORBIDDEN", "Solo chi ha creato la bozza segreta la rende visibile.")
+    await db.update(drafts).set({ secret: false, updatedAt: now() }).where(eq(drafts.id, draft.id))
+    const revealed = await loadDraft(draft.id)
+    return draftView(viewer, revealed, (await roleOf(viewer, revealed)) ?? role)
+  }
+
   async function draftFiles(viewer: Viewer, draftId: string) {
     const { draft } = await access(viewer, draftId)
     const document = await loadDocument(draft.documentKey)
@@ -865,6 +901,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
 
   async function transition(viewer: Viewer, input: C.TransitionInput) {
     const { draft, role } = await access(viewer, input.draftId)
+    if (draft.secret) fail("PRECONDITION_FAILED", SECRET_BLOCK)
     const document = await loadDocument(draft.documentKey)
     const config = procedureFor(document)
     const rule = config.transitions.find(
@@ -1004,9 +1041,20 @@ export function createRegulationsService(deps: RegulationsDeps) {
     }))
   }
 
+  /** The Direttivo assigns members; in a secret draft, its creator alone (and others don't see it at all). */
+  async function assignable(viewer: Viewer, draftId: string) {
+    const draft = await loadDraft(draftId)
+    if (draft.secret) {
+      await access(viewer, draftId)
+      if (!isCreator(viewer, draft)) fail("FORBIDDEN", "Solo chi ha creato la bozza segreta sceglie chi la vede.")
+    } else requirePermission(viewer, P.write, "Solo il Direttivo assegna le persone alle bozze.")
+    return draft
+  }
+
   async function setAssignment(viewer: Viewer, input: { draftId: string; userId: string; role: C.DraftRole }) {
-    requirePermission(viewer, P.write, "Solo il Direttivo assegna le persone alle bozze.")
-    const draft = await loadDraft(input.draftId)
+    const draft = await assignable(viewer, input.draftId)
+    if (draft.secret && input.userId === draft.createdBy.id)
+      fail("BAD_REQUEST", "Chi ha creato la bozza segreta ne resta editor.")
     if (isFinal(draft.state)) fail("PRECONDITION_FAILED", "La bozza è già emanata o pubblicata.")
     const user = await directory.find(input.userId)
     if (!user) fail("NOT_FOUND", "Account non trovato tra quelli di PoliNetwork.")
@@ -1018,8 +1066,9 @@ export function createRegulationsService(deps: RegulationsDeps) {
   }
 
   async function removeAssignment(viewer: Viewer, input: { draftId: string; userId: string }) {
-    requirePermission(viewer, P.write, "Solo il Direttivo assegna le persone alle bozze.")
-    await loadDraft(input.draftId)
+    const draft = await assignable(viewer, input.draftId)
+    if (draft.secret && input.userId === draft.createdBy.id)
+      fail("BAD_REQUEST", "Chi ha creato la bozza segreta ne resta editor.")
     await db
       .delete(assignments)
       .where(and(eq(assignments.draftId, input.draftId), eq(assignments.userSub, input.userId)))
@@ -1720,6 +1769,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
     createDraft,
     listDrafts,
     getDraft,
+    revealDraft,
     renameDraft,
     deleteDraft,
     draftFiles,

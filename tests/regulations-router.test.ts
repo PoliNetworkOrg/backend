@@ -162,6 +162,7 @@ describe("regulations tRPC router", () => {
         "drafts.get",
         "drafts.list",
         "drafts.rename",
+        "drafts.reveal",
         "drafts.transition",
         "emanation.get",
         "emanation.retry",
