@@ -1,0 +1,1 @@
+ALTER TABLE "regulations_drafts" ADD COLUMN "secret" boolean DEFAULT false NOT NULL;

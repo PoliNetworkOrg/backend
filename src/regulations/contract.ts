@@ -395,8 +395,16 @@ export const draftSummarySchema = z.object({
   kind: draftKindSchema,
   state: stateKeySchema,
   base: draftBaseSchema,
-  /** The caller's effective role: `regulations:write` is always `editor`, `regulations:read` at least `viewer`. */
+  /**
+   * The caller's effective role: `regulations:write` is always `editor`, `regulations:read` at least `viewer`. In a
+   * secret draft only the creator (`editor`) and the members they add, with the role they were given.
+   */
   myRole: draftRoleSchema,
+  /**
+   * A secret draft: only its creator and the members they add see it, and its procedure is closed until the creator
+   * makes it visible to `regulations:read` (`drafts.reveal`), for good.
+   */
+  secret: z.boolean(),
   createdBy: personRefSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -453,6 +461,8 @@ export const capabilitiesSchema = z.object({
   rename: z.boolean(),
   snapshot: z.boolean(),
   restore: z.boolean(),
+  /** Make the secret draft visible (`drafts.reveal`): its creator only. */
+  reveal: z.boolean(),
 })
 export type Capabilities = z.infer<typeof capabilitiesSchema>
 
@@ -483,6 +493,8 @@ export const createDraftInputSchema = z.object({
     z.object({ kind: z.literal("draft"), id: draftIdSchema }),
   ]),
   kind: draftKindSchema.default("modifica"),
+  /** Start it secret. A draft from a secret draft is always secret. */
+  secret: z.boolean().default(false),
 })
 export const renameDraftInputSchema = z.object({ draftId: draftIdSchema, title: z.string().trim().min(1).max(120) })
 export const listDraftsInputSchema = z.object({

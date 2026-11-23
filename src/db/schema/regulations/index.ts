@@ -153,6 +153,11 @@ export const drafts = createTable.regulations(
     frozenFiles: jsonb("frozen_files").$type<Files>(),
     /** From the last text the collab service saved. */
     parses: boolean(),
+    /**
+     * Seen only by its creator and the members they add, whatever their IdP permissions, and out of the procedure until
+     * the creator makes it visible (`secret = false`), which can't be undone.
+     */
+    secret: boolean().notNull().default(false),
     createdBy: jsonb("created_by").$type<PersonRef>().notNull(),
     createdAt: at("created_at").notNull(),
     updatedAt: at("updated_at").notNull(),

@@ -26,7 +26,7 @@ import type { Directory } from "../directory"
 import { applyDelibera, DeliberaMacroMissing, parseDocument } from "../latex"
 import { appendDocumentEntry, githubLegalSource, MANIFEST_PATH, parseManifest } from "../legal-source"
 import { deadlineAt, emanateRule, todayInItaly } from "../procedure"
-import { fail, type RegulationsService, type Viewer } from "../service"
+import { fail, type RegulationsService, SECRET_BLOCK, type Viewer } from "../service"
 import { strayFiles, strayFilesMessage } from "../sources"
 import type { LegalGitHub } from "./github"
 import { sendOnce, telegramEscape } from "./notify"
@@ -202,6 +202,7 @@ export function createEmanationService(deps: {
 
   async function start(viewer: Viewer, draftId: string): Promise<C.Emanation> {
     const { draft } = await access(viewer, draftId)
+    if (draft.secret) fail("PRECONDITION_FAILED", SECRET_BLOCK)
     const document = await loadDocument(draft.documentKey)
     const procedure = procedureFor(document)
     if (await emanationOf(draft.id)) fail("CONFLICT", "L'emanazione è già stata avviata.")
