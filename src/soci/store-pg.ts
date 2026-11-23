@@ -149,10 +149,15 @@ export function createSociPgStore(db: Database): SociStore {
           await tx.insert(fees).values(firstFees.map((f) => ({ ...saveFee(f), memberId: row.id }) as FeeRow))
         return load(row)
       }),
-    update: (memberId, changes, entry) =>
+    update: (memberId, changes, entry, outgoing) =>
       db.transaction(async (tx) => {
         await tx.update(members).set(save(changes)).where(eq(members.id, memberId))
         await tx.insert(activity).values(entryRow(memberId, entry))
+        if (outgoing)
+          await tx
+            .insert(mail)
+            .values(mailRow(memberId, outgoing, entry.at))
+            .onConflictDoNothing()
       }),
     changeNumber: (memberId, number, entry) =>
       db.transaction(async (tx) => {

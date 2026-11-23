@@ -13,6 +13,7 @@ export const soci = createSociService({
   writes: { serialize: serializeMemberWrite, numberHolder, currentMember, rememberNumber },
   mail: { welcome: sendWelcomeEmail, numberChanged: sendMemberNumberChangedEmail },
   logger,
+  autoLapse: env.SOCI_AUTO_LAPSE,
   fees: {
     bank: env.SOCI_IBAN && env.SOCI_BENEFICIARI ? { iban: env.SOCI_IBAN, beneficiary: env.SOCI_BENEFICIARI } : null,
     myAreaUrl: `${env.ESIGN_DASHBOARD_URL.replace(/\/$/, "")}/dashboard/account/me`,

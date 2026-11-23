@@ -9,6 +9,7 @@ import { renderEmail } from "./render"
 import type { SecretSantaEmailRequest } from "./secret-santa-routes"
 import BirthdayEmail, { birthdaySubject } from "./templates/birthday"
 import FeeConfirmedEmail, { feeConfirmedSubject } from "./templates/fee-confirmed"
+import FeeLapsedEmail, { feeLapsedSubject } from "./templates/fee-lapsed"
 import FeeOpeningEmail, { feeOpeningSubject } from "./templates/fee-opening"
 import FeeRejectedEmail, { feeRejectedSubject } from "./templates/fee-rejected"
 import FeeReminderEmail, { feeReminderSubject } from "./templates/fee-reminder"
@@ -179,6 +180,7 @@ const FEE_EMAILS = {
   reminder: { subject: feeReminderSubject, Template: FeeReminderEmail },
   confirmed: { subject: feeConfirmedSubject, Template: FeeConfirmedEmail },
   rejected: { subject: feeRejectedSubject, Template: FeeRejectedEmail },
+  lapsed: { subject: feeLapsedSubject, Template: FeeLapsedEmail },
 } satisfies Record<FeeMailKind, unknown>
 
 /** Soci's outbox: throws on failure, and gives each email a stable Message-ID from its idempotency key. */

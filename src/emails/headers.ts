@@ -3,6 +3,7 @@ export const EMAIL_HEADERS = {
   "fee-reminder": "Promemoria quota associativa",
   "fee-confirmed": "Quota pagata",
   "fee-rejected": "Ricevuta non accettata",
+  "fee-lapsed": "Status di socio terminato",
   welcome: "Benvenuto in PoliNetwork APS",
   "member-number-changed": "Il tuo numero socio è cambiato",
   "signature-request": "È richiesta la tua firma",

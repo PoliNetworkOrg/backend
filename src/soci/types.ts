@@ -72,7 +72,7 @@ export type StoredFile = {
   uploadedAt: string
 }
 
-export const FEE_MAIL_KINDS = ["opening", "reminder", "confirmed", "rejected"] as const
+export const FEE_MAIL_KINDS = ["opening", "reminder", "confirmed", "rejected", "lapsed"] as const
 export type FeeMailKind = (typeof FEE_MAIL_KINDS)[number]
 export type MailKind = FeeMailKind | "birthday"
 /** What every fee email shows; `reason` only on a rejection, `paidOn` only on a confirmation. */
@@ -120,7 +120,7 @@ export interface SociStore {
   activity(memberId: number): Promise<ActivityEntry[]>
   /** Writes a record, its number, its first history entry and its first fees in one transaction. */
   insert(socio: NewSocio, entry: ActivityEntry, fees?: NewFee[]): Promise<Socio>
-  update(memberId: number, changes: SocioChanges, entry: ActivityEntry): Promise<void>
+  update(memberId: number, changes: SocioChanges, entry: ActivityEntry, mail?: NewMail): Promise<void>
   /** Gives the record a new number, keeping the old one as used. */
   changeNumber(memberId: number, number: number, entry: ActivityEntry): Promise<void>
 
