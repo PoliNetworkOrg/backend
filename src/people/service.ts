@@ -877,6 +877,7 @@ export function createPeopleService(options: PeopleOptions) {
         const p = link(u, find(u.state, invite.personId), v.sub, v.sub, "invite", "Accepted the email invite")
         Object.assign(invite, { revokedAt: null, acceptedAt: now().toISOString(), acceptedBy: v.sub })
         sendPending(u, ctx, p, (a) => a.assignedBy, "Linked by accepting an invite in People")
+        return p.id
       })
     },
 

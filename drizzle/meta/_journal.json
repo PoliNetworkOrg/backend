@@ -236,8 +236,71 @@
     {
       "idx": 33,
       "version": "7",
-      "when": 1793696445728,
-      "tag": "0033_project_resources",
+      "when": 1794230950342,
+      "tag": "0033_soci_register",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794495450334,
+      "tag": "0034_soci_residence_phone",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794495453875,
+      "tag": "0035_soci_residence_drop_parts",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794572877513,
+      "tag": "0036_soci_fees",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794598289997,
+      "tag": "0037_web_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794708800126,
+      "tag": "0038_regulations",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794708980775,
+      "tag": "0039_webhook_deliveries",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795393205259,
+      "tag": "0040_regulations_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795447326195,
+      "tag": "0041_audit_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795461286779,
+      "tag": "0042_project_resources",
       "breakpoints": true
     }
   ]

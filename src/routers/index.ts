@@ -1,9 +1,12 @@
 import { createTRPCRouter } from "@/trpc"
+import { auditRouter } from "./audit"
 import { azureRouter } from "./azure"
 import { esignRouter } from "./esign"
 import { groupsRouter } from "./groups"
 import { meRouter } from "./me"
 import { peopleRouter } from "./people"
+import { regulationsRouter } from "./regulations"
+import { sociRouter } from "./soci"
 import { tgRouter } from "./tg"
 import { waRouter } from "./wa"
 import { webRouter } from "./web"
@@ -14,11 +17,14 @@ import { webRouter } from "./web"
  * All routers added in /api/routers should be manually added here.
  */
 export const appRouter = createTRPCRouter({
+  audit: auditRouter,
   azure: azureRouter,
   esign: esignRouter,
   groups: groupsRouter,
   me: meRouter,
   people: peopleRouter,
+  regulations: regulationsRouter,
+  soci: sociRouter,
   tg: tgRouter,
   wa: waRouter,
   web: webRouter,

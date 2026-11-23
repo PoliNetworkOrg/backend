@@ -34,7 +34,7 @@ Requirements:
    ```sh
    bun dev
    ```
-5. (Optional) Fill the database with sample data: Telegram users, groups and messages, course groups and labels, projects, associations, FAQs, freshman guides, group link reports, audit log entries and grants:
+5. (Optional) Fill the database with sample data: Telegram users, groups and messages, course groups and labels, projects, associations, FAQs, freshman guides, website documents (with placeholder file links), group link reports, audit log entries and grants:
    ```sh
    bun run seed:db
    ```
@@ -56,6 +56,38 @@ Who acted always comes from the token, never from the input: procedures take no 
 The bot's socket.io client authenticates with its service token in `auth.token` (scope `backend:tg:events`) and is disconnected when the token expires; a socket without a token is refused. Set `OAUTH_BOT_CLIENT_ID` on the backend to the same registered OAuth client ID used by the bot. This is the actual client ID, not its display name. Sockets are rejected if this setting is absent, the client ID differs, the token is not a service token or the scope is missing.
 
 The IdP notifies `POST /internal/events` when access changes; the backend also polls the snapshot every 30 s. The last good signing keys and snapshot are stored in `common_idp_state`, so a restart during an IdP outage resumes from them. Permission checks deny once the snapshot is more than an hour old. Configuration is in `.env.example`.
+
+## Audit log
+
+`common_audit_events` records who used which permission to change what through the backend. The tRPC audit middleware
+(`src/audit`) writes one event per mutation: the action (the procedure path), the caller from the token, the target,
+the outcome (`success`, `failure` when an error is thrown or returned, `denied` when the policy refuses the caller), the
+request id shared by the calls of one HTTP request, and when. Calls without a valid token are not recorded.
+
+Every mutation declares how it is recorded in its procedure meta, and a test walks the router so that none ships
+without one, like its policy:
+
+- `.meta(audit.full())`: also the input, the reason and the states before and after that the handler adds with
+  `ctx.audit.set(...)`. `fields` keeps only those fields of the input, for inputs that carry personal data or free
+  text not worth keeping; a dotted field (`output.driveId`) keeps one field of a nested object.
+- `.meta(audit.minimal({ target }))`: only the actor, the action, the target and the outcome, for areas that keep their
+  own history behind their own permissions. People records each change in the person's activity history, and the
+  Libro Soci in `soci_activity`.
+- `.meta(audit.none(why))`: not recorded, e.g. the bot's ingestion, or Telegram moderation, which `tg_audit_log` keeps
+  under its own retention rules.
+
+Handlers call `ctx.audit.skip()` when a call changed nothing. Inputs and states are stored without secrets
+(`password`, `token`, `ticket`, `code`, `*Key`, `*Secret` fields) or file contents, and are cut when too large. Denied
+calls keep no input.
+
+Events are deleted 24 months after they were written (`AUDIT_EVENTS_RETENTION_MONTHS`). Dashboard users with the IdP
+permission `audit:read` read the log with `audit.list`, newest first, paged by `cursor` and filtered by area, outcome,
+target, actor, date or text.
+
+Changes made outside the backend's tRPC procedures are not in the log: directly in Telegram or WhatsApp, the cron jobs,
+the e-signing agent endpoints (each request keeps its own history), the GitHub webhook (regulations publications and
+document creations completing when their pull request merges, which keep their emanation record and the document's
+`creation` state) and roles and permissions in the IdP.
 
 ## People
 
@@ -87,6 +119,107 @@ The backend checks every role change with the same rules as Auth (`src/people/ru
 `src/auth/people-binding.ts`): no self-grants, the right permission per kind, and bounded delegation against the
 role's permissions. A concept with no role bound in Auth, or with more than one, can't be assigned. Writes are
 serialized by one transaction lock. Grant `idp:people:roles` to the backend's OAuth client to let it change roles.
+
+## Soci
+
+The `soci` router is the Libro Soci: one record per admission in `soci_members`, keyed on the Microsoft 365 account
+(`entra_object_id`) and the member number, with the bookkeeping data the association must keep and an append-only
+history in `soci_activity`. Records are never deleted, and a re-admission is a new record with a new number.
+Microsoft 365 stays the source of truth for who is a socio now: a PoliNetwork account in the Soci group. The design is
+the admin repository's `docs/people/soci.md`.
+
+- **Numbers are never reused.** `soci_numbers` keeps every number a record has held. A number is free only if no record
+  has ever held it and no Microsoft 365 user has it as `employeeId`.
+- **One active record per codice fiscale.** Codes are validated (format, omocodia, check character) and checked
+  against the birth date.
+- **Admitting** (`members.admit`) runs the Microsoft 365 workflow (account, `employeeId`, licences, Soci group, welcome
+  email to a typed address that isn't stored), then writes the record. A record that can't be written deletes the
+  account.
+- **Registering** (`members.register`) writes a record for an account already in Soci, with its current number; personal
+  fields are optional. `members.unregistered` lists the Soci group's accounts without a record.
+- `members.list` reports mismatches: an active record whose account isn't in Soci, or an ended one whose account is.
+
+Every `members.*` and `fees.*` procedure needs `admin:access` and `soci:read` (list, get, unregistered, fees list and
+file) or `soci:write` (admit, register, update, setNumber, confirm, reject, markPaid). Microsoft 365 writes run one at
+a time behind an in-process lock (`src/azure/member-writes.ts`), which also remembers numbers Entra's searches don't
+show yet. `azure.members` is read-only: admitting a socio and changing a member number go through `soci.members.*`.
+
+### Local CSV import preview
+
+`scripts/soci-import-preview.ts` normalizes a UTF-8 Libro Soci CSV **locally**, without a database, Microsoft 365,
+environment configuration or emails. It does not start the server, call registration/admission, or offer an apply
+option. Every candidate remains unresolved pending account/register reconciliation and financial review.
+
+Try the synthetic example from the repository root:
+
+```sh
+bun --no-env-file scripts/soci-import-preview.ts \
+  --input scripts/examples/soci-import.synthetic.csv \
+  --mapping scripts/examples/soci-import.mapping.json
+```
+
+The same command is available as `soci:preview`; use `bun --no-env-file --silent run soci:preview` if invoking through
+the package runner to avoid its command echo. Real input, mapping files containing private labels and detailed reports
+belong outside Git worktrees. Do not paste them into issue/PR bodies or console logs.
+
+Copy the example mapping and explicitly configure:
+
+- `delimiter`: comma or semicolon; `dateFormat`: `iso` (`YYYY-MM-DD`) or `italian` (`DD/MM/YYYY`). No guessing.
+- `scope`: `active-only`, `history` (requires mapped end date/reason columns; blank ends mean active), or `unknown`.
+- `columns`: required `number`, `firstName`, `lastName`, `admittedOn`; optional `alias`, `codiceFiscale`, `birthDate`,
+  `birthPlace`, `residence`, `phone`, `endedOn`, `endReason`, `endNote`, `mailbox`, `entraObjectId`. Values are exact
+  header names after trimming. Each source column has one assignment; remaining headers require `ignoredColumns`.
+- `endReasonValues`: optional exact translations, e.g. `{ "dimissioni": "resigned" }`; targets are `lapsed`,
+  `resigned`, `expelled`, `deceased`, `other`. No fuzzy matching; keys with leading or trailing spaces are refused.
+- `feeEvidence`: optional `{ "label": "Quota 2025/26", "column": "Quota" }` entries. Text is retained as unreviewed;
+  blanks are unknown. The tool never creates Paid/Due status, payment dates, amounts or account identities.
+
+The console shows counts and at most 100 coded diagnostics with physical source line references and canonical field
+names, errors first. Warnings every row carries (`membership_unknown`, `account_unreconciled`, `fee_evidence_*`) are
+counted per code instead of listed. Exit codes: **0** preview without blocked rows (still unresolved), **2** blocked
+rows, **1** configuration, structural CSV or file errors. Malformed quoting, missing/duplicate/empty/unmapped headers
+and invalid UTF-8 stop the preview. Records with invalid fields remain blocked in the report, with diagnostics and
+source line but no normalized candidate. Rows blocked by an end-date, duplicate or tax-code check keep their candidate
+so the conflict can be inspected, and count among the normalized rows. Duplicate numbers block every affected row.
+Admissions sharing a tax code are kept for review when each ends before the next starts; multiple explicitly active
+admissions (`active_code_conflict`) and admissions in force at the same time (`overlapping_admissions`) are blocked.
+
+For a full **plaintext report containing personal data**, explicitly add `--out /private/directory/report.json`.
+The directory must exist outside Git worktrees; the file is created exclusively with mode 0600, and existing files
+or symlinks are refused. If writing fails partway the partial file is deleted; `output_partial` means it could not
+be, and must be removed by hand. Protect and delete this report like the source book. Limits: 10 MiB input, 64 KiB
+mapping, 50,000 data records, 256 columns and 16,384 characters per cell. UTF-8 BOM, CRLF/LF/CR, quoted cells,
+escaped quotes and embedded newlines are supported; blank physical lines, including lines of only spaces or tabs, are
+skipped. Other encodings need a separate local
+conversion. Local snapshot reconciliation and any future application are separate steps.
+
+### Fees
+
+The rules are hard-coded from the Regolamento Interno (`src/soci/fees.ts`): €5.00 per fee year, 1 September – 31
+August (`2026/27`), renewals until 31 December, and the fee year after a summer admission (1 June – 31 August) is
+exempt. Fees live in `soci_fees`, one per socio and year; uploaded receipts in `soci_files` (PDF, PNG or JPEG up to 10
+MB, judged by content, never expired).
+
+- **Admitting or registering** records the admission's fee year as paid (method `admission`).
+- **Every day at 08:00** (Europe/Rome) `runDaily` opens the current fee year for every active socio without a fee: Due,
+  with the opening email (none once 31 December has passed), or Exempt. On 1 and 21 December it reminds every socio
+  whose fee is still Due, unless an opening or rejection email since that day already gave them the deadline. It is
+  idempotent, and does nothing until `SOCI_IBAN` and `SOCI_BENEFICIARI` are set.
+- **The socio** (`me.*`, `people:self`, found by the Microsoft 365 object ID in Auth's access snapshot) sees their
+  record, fees and bank details, uploads the transfer receipt as `FormData` (`file`, `transferDate`, `declaredCents`),
+  and fills in their own empty fields.
+- **The Direttivo** confirms or rejects (with a reason) an uploaded receipt, or marks a fee as paid by hand, which also
+  opens a fee the year hasn't opened yet.
+- **Birthdays:** at 08:00 `sendBirthdays` greets every active socio born that day (29 February: the 28th in years
+  without one), whatever the bank details.
+- **Emails** (Italian React Email templates, `bun run email` to preview) go to the socio's PoliNetwork mailbox through
+  the `soci_mail` outbox, drained every minute. Each email's id is its idempotency key, e.g. `reminder:2026:dec-1:12`,
+  so a job that runs twice never sends twice.
+
+| Variable           | Purpose                                                              |
+| ------------------ | -------------------------------------------------------------------- |
+| `SOCI_IBAN`        | The IBAN soci pay the fee to. Until it and the beneficiary are set, no fee year is opened. |
+| `SOCI_BENEFICIARI` | The account holder shown with the IBAN, e.g. `PoliNetwork APS`.     |
 
 ## E-signing with the CIE
 

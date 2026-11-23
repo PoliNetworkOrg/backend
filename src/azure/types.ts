@@ -54,6 +54,13 @@ export type CreateMemberInput = {
 /** The directory fields the member number workflow reads. */
 export type MemberSummary = Pick<ParsedUser, "id" | "displayName" | "givenName" | "mail" | "employeeId">
 
+/** A user in the Soci group. */
+export type SociGroupMember = MemberSummary & {
+  surname: string | null
+  /** ISO timestamp of the account's creation. */
+  createdDateTime: string | null
+}
+
 export type CreatedMember = {
   firstName: string
   lastName: string
@@ -73,4 +80,12 @@ export type AzureDirectory = {
   setMemberNumber(userId: string, assocNumber: number): Promise<{ error: string | null }>
   createMember(input: CreateMemberInput): Promise<CreatedMember>
   getAllGroups(): Promise<ParsedGroup[]>
+  /** The users in the Soci group. */
+  getSociMembers(): Promise<SociGroupMember[]>
+  /** Adds an existing user to the Soci group; a user already in it is left as is. */
+  addToSoci(userId: string): Promise<void>
+  /** Removes a user from the Soci group; a user not in it is left as is. */
+  removeFromSoci(userId: string): Promise<void>
+  /** Deletes a user, which releases their licences; a user already gone counts as deleted. */
+  deleteUser(userId: string): Promise<void>
 }

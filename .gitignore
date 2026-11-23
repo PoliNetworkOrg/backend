@@ -25,3 +25,4 @@ db.sqlite
 **/dist
 
 /coverage
+.dev-idp/

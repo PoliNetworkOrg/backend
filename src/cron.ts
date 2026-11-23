@@ -1,9 +1,10 @@
 import { Cron } from "croner"
 import { lt } from "drizzle-orm"
-import { MESSAGES_RETENTION_DAYS } from "./constants"
+import { AUDIT_EVENTS_RETENTION_MONTHS, MESSAGES_RETENTION_DAYS } from "./constants"
 import { DB, SCHEMA } from "./db"
 import { env } from "./env"
 import { logger } from "./logger"
+import { regulationsConfig } from "./regulations/config"
 import { endedMeasures } from "./utils/audit-log"
 
 export function cron() {
@@ -11,6 +12,7 @@ export function cron() {
     logger.info("[CRON] start")
     await cleanMessages()
     await cleanAuditLog()
+    await cleanAuditEvents()
     logger.info("[CRON] end")
   })
 
@@ -24,6 +26,24 @@ export function cron() {
     }
   })
 
+  // Regulations: the GitHub webhook (/public/webhooks/github) drives emanations; this reconciles missed deliveries.
+  new Cron("* * * * * *", { protect: true, interval: regulationsConfig.REGULATIONS_RECONCILE_SECONDS }, async () => {
+    try {
+      const { regulationsEmanation } = await import("./regulations")
+      await regulationsEmanation?.tick()
+    } catch (err) {
+      logger.error(err, "[CRON] regulations emanation")
+    }
+  })
+  new Cron("0 41 4 * * *", async () => {
+    try {
+      const { pruneWebhookDeliveries } = await import("./public/github-webhook")
+      await pruneWebhookDeliveries(DB)
+    } catch (err) {
+      logger.error(err, "[CRON] webhook deliveries")
+    }
+  })
+
   logger.info("[CRON] scheduled")
   new Cron("0 * * * * *", async () => {
     try {
@@ -31,6 +51,29 @@ export function cron() {
       await people.deliverPending()
     } catch (err) {
       logger.error(err, "[CRON] People mail outbox")
+    }
+  })
+  new Cron("0 * * * * *", async () => {
+    try {
+      const { soci } = await import("./soci")
+      await soci.deliverPending()
+    } catch (err) {
+      logger.error(err, "[CRON] Soci mail outbox")
+    }
+  })
+  // Opens the fee year, sends the December reminders and the birthday emails. Idempotent, and a missed day is caught up the next one.
+  new Cron("0 0 8 * * *", { timezone: "Europe/Rome" }, async () => {
+    try {
+      const { soci } = await import("./soci")
+      await soci.runDaily()
+    } catch (err) {
+      logger.error(err, "[CRON] Soci daily fee run")
+    }
+    try {
+      const { soci } = await import("./soci")
+      await soci.sendBirthdays()
+    } catch (err) {
+      logger.error(err, "[CRON] Soci birthday emails")
     }
   })
 }
@@ -61,5 +104,21 @@ export async function cleanAuditLog() {
     logger.info(`[CRON] END(cleanAuditLog) deleted ${deleted.length} audit log record(s).`)
   } catch (err) {
     logger.error(err, "[CRON] cleanAuditLog")
+  }
+}
+
+/** Deletes the backend audit events past their retention. */
+export async function cleanAuditEvents(now = new Date()) {
+  logger.info(`[CRON] START(cleanAuditEvents) retention months = ${AUDIT_EVENTS_RETENTION_MONTHS}`)
+
+  const cutoff = new Date(now)
+  cutoff.setMonth(cutoff.getMonth() - AUDIT_EVENTS_RETENTION_MONTHS)
+  try {
+    const deleted = await DB.delete(SCHEMA.COMMON.auditEvents)
+      .where(lt(SCHEMA.COMMON.auditEvents.createdAt, cutoff))
+      .returning({ id: SCHEMA.COMMON.auditEvents.id })
+    logger.info(`[CRON] END(cleanAuditEvents) deleted ${deleted.length} audit event(s).`)
+  } catch (err) {
+    logger.error(err, "[CRON] cleanAuditEvents")
   }
 }

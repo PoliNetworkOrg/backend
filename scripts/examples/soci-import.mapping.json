@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "delimiter": ";",
+  "dateFormat": "italian",
+  "scope": "unknown",
+  "columns": {
+    "number": "Numero",
+    "firstName": "Nome",
+    "lastName": "Cognome",
+    "admittedOn": "Ammissione",
+    "codiceFiscale": "Codice fiscale",
+    "birthDate": "Nascita",
+    "mailbox": "Email"
+  },
+  "feeEvidence": [{ "label": "Quota nel libro", "column": "Quota" }]
+}

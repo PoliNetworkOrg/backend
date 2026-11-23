@@ -1,5 +1,5 @@
 {
-  "id": "84f712c7-b026-479f-a488-ff83b2b61935",
+  "id": "02bd8f91-5f85-4fb8-adc2-7de85a0cf103",
   "prevId": "e5e83f23-209c-4eb1-a909-bf427b65e42d",
   "version": "7",
   "dialect": "postgresql",
@@ -1683,6 +1683,391 @@
       },
       "isRLSEnabled": false
     },
+    "public.soci_activity": {
+      "name": "soci_activity",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "soci_activity_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor": {
+          "name": "actor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "soci_activity_member_idx": {
+          "name": "soci_activity_member_idx",
+          "columns": [
+            {
+              "expression": "member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "soci_activity_member_id_soci_members_id_fk": {
+          "name": "soci_activity_member_id_soci_members_id_fk",
+          "tableFrom": "soci_activity",
+          "tableTo": "soci_members",
+          "columnsFrom": [
+            "member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.soci_members": {
+      "name": "soci_members",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "soci_members_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "number": {
+          "name": "number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entra_object_id": {
+          "name": "entra_object_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mailbox": {
+          "name": "mailbox",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_name": {
+          "name": "first_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_name": {
+          "name": "last_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "alias": {
+          "name": "alias",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "codice_fiscale": {
+          "name": "codice_fiscale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "birth_date": {
+          "name": "birth_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "birth_place": {
+          "name": "birth_place",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "residence_street": {
+          "name": "residence_street",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "residence_postal_code": {
+          "name": "residence_postal_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "residence_city": {
+          "name": "residence_city",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "residence_province": {
+          "name": "residence_province",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "residence_country": {
+          "name": "residence_country",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "admitted_on": {
+          "name": "admitted_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_on": {
+          "name": "ended_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_reason": {
+          "name": "end_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_note": {
+          "name": "end_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_state": {
+          "name": "account_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "account_deleted_on": {
+          "name": "account_deleted_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "soci_members_active_codice_fiscale_idx": {
+          "name": "soci_members_active_codice_fiscale_idx",
+          "columns": [
+            {
+              "expression": "codice_fiscale",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"soci_members\".\"ended_on\" is null and \"soci_members\".\"codice_fiscale\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "soci_members_number_unique": {
+          "name": "soci_members_number_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
+          ]
+        },
+        "soci_members_entra_object_id_unique": {
+          "name": "soci_members_entra_object_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "entra_object_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "soci_members_end_check": {
+          "name": "soci_members_end_check",
+          "value": "(\"soci_members\".\"ended_on\" is null) = (\"soci_members\".\"end_reason\" is null) and (\"soci_members\".\"ended_on\" is not null or \"soci_members\".\"end_note\" is null)"
+        },
+        "soci_members_end_reason_check": {
+          "name": "soci_members_end_reason_check",
+          "value": "\"soci_members\".\"end_reason\" in ('lapsed', 'resigned', 'expelled', 'deceased', 'other')"
+        },
+        "soci_members_account_state_check": {
+          "name": "soci_members_account_state_check",
+          "value": "\"soci_members\".\"account_state\" in ('active', 'pending_deletion', 'deleted')"
+        },
+        "soci_members_account_deleted_check": {
+          "name": "soci_members_account_deleted_check",
+          "value": "(\"soci_members\".\"account_state\" = 'deleted') = (\"soci_members\".\"account_deleted_on\" is not null)"
+        },
+        "soci_members_number_check": {
+          "name": "soci_members_number_check",
+          "value": "\"soci_members\".\"number\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.soci_numbers": {
+      "name": "soci_numbers",
+      "schema": "",
+      "columns": {
+        "number": {
+          "name": "number",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assigned_at": {
+          "name": "assigned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "soci_numbers_member_idx": {
+          "name": "soci_numbers_member_idx",
+          "columns": [
+            {
+              "expression": "member_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "soci_numbers_member_id_soci_members_id_fk": {
+          "name": "soci_numbers_member_id_soci_members_id_fk",
+          "tableFrom": "soci_numbers",
+          "tableTo": "soci_members",
+          "columnsFrom": [
+            "member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.tg_audit_log": {
       "name": "tg_audit_log",
       "schema": "",
@@ -3135,117 +3520,6 @@
         "web_guides_matricole_creator_check": {
           "name": "web_guides_matricole_creator_check",
           "value": "\"web_guides_matricole\".\"legacy_created_by_tg_id\" IS NOT NULL OR \"web_guides_matricole\".\"created_by_sub\" IS NOT NULL"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.web_project_resources": {
-      "name": "web_project_resources",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "identity": {
-            "type": "always",
-            "name": "web_project_resources_id_seq",
-            "schema": "public",
-            "increment": "1",
-            "startWith": "1",
-            "minValue": "1",
-            "maxValue": "2147483647",
-            "cache": "1",
-            "cycle": false
-          }
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "url": {
-          "name": "url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "order": {
-          "name": "order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "legacy_created_by_tg_id": {
-          "name": "legacy_created_by_tg_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "legacy_modified_by_tg_id": {
-          "name": "legacy_modified_by_tg_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_sub": {
-          "name": "created_by_sub",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "modified_by_sub": {
-          "name": "modified_by_sub",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp (0) with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (0) with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "web_project_resources_project_id_web_projects_id_fk": {
-          "name": "web_project_resources_project_id_web_projects_id_fk",
-          "tableFrom": "web_project_resources",
-          "tableTo": "web_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "web_project_resources_creator_check": {
-          "name": "web_project_resources_creator_check",
-          "value": "\"web_project_resources\".\"legacy_created_by_tg_id\" IS NOT NULL OR \"web_project_resources\".\"created_by_sub\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false

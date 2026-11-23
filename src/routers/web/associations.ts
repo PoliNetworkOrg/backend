@@ -1,5 +1,6 @@
 import { asc, eq } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
@@ -76,6 +77,7 @@ export default createTRPCRouter({
     }),
 
   addAssociation: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -99,10 +101,12 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.association", id: res.id, label: res.name }, after: res })
       return formatAssociation(res)
     }),
 
   editAssociation: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -120,22 +124,35 @@ export default createTRPCRouter({
         ? await uploadBlob(Buffer.from(await logo.arrayBuffer()), getImageExtension(logo), logo.type)
         : undefined
 
-      const [res] = await DB.update(ASSOCIATIONS)
-        .set({
-          name,
-          descriptionIt,
-          descriptionEn,
-          ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(ASSOCIATIONS.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(ASSOCIATIONS)
+          .set({
+            name,
+            descriptionIt,
+            descriptionEn,
+            ...(uploadedLogo ? { logo: uploadedLogo.url } : {}),
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(ASSOCIATIONS.id, id))
+          .returning()
 
+        return { before, res }
+      })
+
+      ctx.audit.set({
+        target: { type: "web.association", id, label: res?.name ?? before?.name },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return formatAssociation(res)
     }),
 
   editAssociationLinks: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -146,36 +163,50 @@ export default createTRPCRouter({
       const { id, links } = input
       const { email, website, facebook, instagram, tiktok, x, youtube, telegram, linkedin, spotify } = links
 
-      const [res] = await DB.update(ASSOCIATIONS)
-        .set({
-          email,
-          website,
-          facebook,
-          instagram,
-          tiktok,
-          x,
-          youtube,
-          telegram,
-          linkedin,
-          spotify,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(ASSOCIATIONS.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(ASSOCIATIONS)
+          .set({
+            email,
+            website,
+            facebook,
+            instagram,
+            tiktok,
+            x,
+            youtube,
+            telegram,
+            linkedin,
+            spotify,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(ASSOCIATIONS.id, id))
+          .returning()
 
+        return { before, res }
+      })
+
+      ctx.audit.set({
+        target: { type: "web.association", id, label: res?.name ?? before?.name },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return formatAssociation(res)
     }),
 
   deleteAssociation: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       const deleted = await DB.delete(ASSOCIATIONS).where(eq(ASSOCIATIONS.id, id)).returning()
+      ctx.audit.set({ target: { type: "web.association", id, label: deleted[0]?.name }, before: deleted[0] })
 
       if (deleted.length === 0) return { error: "NOT_FOUND" }
       return { error: null }

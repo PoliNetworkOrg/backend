@@ -38,6 +38,8 @@ export const env = createEnv({
     AZURE_CLIENT_ID: z.string().min(1).optional(),
     AZURE_CLIENT_SECRET: z.string().min(1).optional(),
     AZURE_EMAIL_SENDER: z.email().default("noreply@polinetwork.org"),
+    LIVE_MAILER_TOKEN: z.string().min(32).optional(),
+    LIVE_PUBLIC_URL: z.url().default("https://live.polinetwork.org"),
     AZURE_BLOB_STORAGE_ACCOUNT: z.string().default("polinetworksa"),
     AZURE_BLOB_STORAGE_CONTAINER: z.string().default("file-blobs"),
 
@@ -69,6 +71,13 @@ export const env = createEnv({
       ),
     /** Dashboard origin, for links in signature emails. */
     ESIGN_DASHBOARD_URL: z.url().default("https://admin.polinetwork.org"),
+    /** Where soci pay the association fee. Until both are set, no fee year is opened. */
+    SOCI_IBAN: z
+      .string()
+      .transform((value) => value.replace(/\s/g, "").toUpperCase())
+      .pipe(z.string().regex(/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/, "an IBAN"))
+      .optional(),
+    SOCI_BENEFICIARI: z.string().trim().min(1).optional(),
     /** Accept signing certificates not issued by the CIE CAs, e.g. the agent's development key. */
     ESIGN_ALLOW_TEST_CERTIFICATES: z
       .enum(["true", "false"])

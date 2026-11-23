@@ -88,9 +88,9 @@ describe("request update email", () => {
       by: "Anna Bianchi",
       reason: "Data sbagliata",
     })
-    expect(subject).toBe("Declined: Verbale CD")
-    expect(body).toContain("Hi Luca, Anna Bianchi declined to sign Verbale CD. “Data sbagliata”")
-    expect(body).toContain("Open the request https://admin.example.org/dashboard/esign/requests/1")
+    expect(subject).toBe("Firma rifiutata: Verbale CD")
+    expect(body).toContain("Ciao Luca, Anna Bianchi ha rifiutato di firmare Verbale CD. “Data sbagliata”")
+    expect(body).toContain("Apri la richiesta https://admin.example.org/dashboard/esign/requests/1")
   })
 
   it("says where the signed PDF went", async () => {
@@ -100,9 +100,9 @@ describe("request update email", () => {
       savedTo: { path: "Verbali/Verbale CD.pdf", url: null },
       emailedTo: ["archivio@example.org"],
     })
-    expect(subject).toBe("Signed by everyone: Verbale CD")
+    expect(subject).toBe("Tutte le firme sono state raccolte: Verbale CD")
     expect(body).toContain(
-      "Everyone signed Verbale CD. The signed PDF is saved in Verbali/Verbale CD.pdf and was emailed to archivio@example.org."
+      "Tutti hanno firmato Verbale CD. Il PDF firmato è salvato in Verbali/Verbale CD.pdf ed è stato inviato via email a archivio@example.org."
     )
   })
 
@@ -115,9 +115,9 @@ describe("request update email", () => {
       requestedBy: "Mario Rossi",
       canRetry: true,
     })
-    expect(subject).toBe("Not delivered: Verbale CD")
+    expect(subject).toBe("Il PDF firmato non è stato consegnato: Verbale CD")
     expect(body).toContain(
-      "The signed PDF of Mario Rossi’s request Verbale CD couldn’t be emailed to archivio@example.org. You can retry it from the request. Error: The email could not be sent"
+      "Non è stato possibile inviare a archivio@example.org il PDF firmato relativo alla richiesta di Mario Rossi, Verbale CD. Puoi riprovare dalla pagina della richiesta. Errore: The email could not be sent"
     )
   })
 
@@ -131,13 +131,18 @@ describe("request update email", () => {
       canRetry: false,
     })
     expect(body).toContain(
-      "Hi Luca, The signed PDF of Verbale CD couldn’t be saved to Firmati/Verbale CD.pdf. A manager can retry it. Error: Access denied"
+      "Ciao Luca, Non è stato possibile salvare in Firmati/Verbale CD.pdf il PDF firmato relativo alla richiesta, Verbale CD. Un responsabile può riprovare dalla pagina della richiesta. Errore: Access denied"
     )
   })
 })
 
 describe("sendEmail", () => {
   const mime = () => Buffer.from(String(post.mock.calls[0]?.[0]), "base64").toString()
+
+  it("uses an email address in From rather than a URL-encoded mailbox", async () => {
+    await sendEmail("archivio@example.org", "Documento firmato", createElement(SignedDocumentEmail, signed))
+    expect(mime()).toMatch(/^From: PoliNetwork APS <noreply@polinetwork\.org>\r?$/m)
+  })
 
   it("sets Reply-To when asked", async () => {
     await sendEmail(["archivio@example.org"], "Documento firmato", createElement(SignedDocumentEmail, signed), [], {
