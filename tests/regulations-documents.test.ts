@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { describe, expect, it } from "vitest"
 import { type RepoReader, readDocumentWith } from "@/regulations/compile/assets"
+import { fakeGitHub } from "@/regulations/emanation/github"
 import { appendDocumentEntry, ManifestError, parseManifest } from "@/regulations/legal-source"
 import { fillSkeleton, latexEscape, placementOf, TemplateError } from "@/regulations/templates"
 import { SEARCH_PATH } from "@/regulations/worker/xelatex"
@@ -101,6 +102,36 @@ describe("appending to documents.json", () => {
   })
 })
 
+describe("the in-memory GitHub", () => {
+  it("merges each pull request onto the base as it is, and leaves conflicting ones open and unmergeable", async () => {
+    const repo = fakeGitHub({ files: { "documents.json": "[]\n", "a.txt": "a" } })
+    const open = async (branch: string, files: Record<string, string>, manifest: boolean) => {
+      await repo.client.commitToBranch({
+        branch,
+        base: "main",
+        dir: branch,
+        sourceGlobs: [],
+        files,
+        edits: manifest ? [{ path: "documents.json", update: (c) => `${c}${branch}\n` }] : [],
+        message: branch,
+      })
+      const pr = await repo.client.openPullRequest({ branch, base: "main", title: branch, body: "" })
+      await repo.client.enableAutoMerge(pr.number)
+      return pr.number
+    }
+    // Three branches from the same base: two edit documents.json, one doesn't.
+    const one = await open("uno", { "x.tex": "1" }, true)
+    const two = await open("due", { "y.tex": "2" }, true)
+    const three = await open("tre", { "z.tex": "3" }, false)
+    expect((await repo.client.getPullRequest(one)).merged).toBe(true)
+    expect(await repo.client.getPullRequest(two)).toMatchObject({ merged: false, state: "open", mergeable: false })
+    expect((await repo.client.getPullRequest(three)).merged).toBe(true)
+    const main = repo.files()
+    expect([...main.keys()].sort()).toEqual(["a.txt", "documents.json", "tre/z.tex", "uno/x.tex"])
+    expect(main.get("documents.json")).toBe("[]\nuno\n")
+  })
+})
+
 describe("asset bundles", () => {
   const tree: Record<string, string> = {
     "generali/guida/guida.tex": "\\documentclass{polinetwork}",
@@ -164,6 +195,14 @@ describe("templates", () => {
     expect(Object.keys(filled.commit).sort()).toEqual(["latexmkrc", "logo.png", "parti/uno.tex", "statuto-x.tex"])
   })
 
+  it("inserts a title with replacement patterns ($&, $') literally", () => {
+    const filled = fillSkeleton(
+      { "main.tex": encode("\\documentclass{x}\\title{{{TITLE}}}\\end") },
+      { title: "Costi $' e $& $$", key: "k", date: "d" }
+    )
+    expect(filled.sources["main.tex"]).toBe("\\documentclass{x}\\title{Costi \\$' e \\$\\& \\$\\$}\\end")
+  })
+
   it("refuses a skeleton without a single main file", () => {
     expect(() => fillSkeleton({ "a.tex": encode("x") }, { title: "T", key: "k", date: "d" })).toThrow(TemplateError)
     expect(() =>
@@ -200,7 +239,7 @@ it.skipIf(!process.env.SEED_TEST_DB_PORT)(
         .split("\n")
         .findLast((line) => line.startsWith('{"checked"')) ?? "{}"
     )
-    expect(result.checked).toHaveLength(13)
+    expect(result.checked).toHaveLength(14)
   },
   95_000
 )

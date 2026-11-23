@@ -57,11 +57,12 @@ export function fillSkeleton(
   for (const [rawPath, bytes] of Object.entries(skeleton)) {
     const path = rawPath.replaceAll("{{KEY}}", values.key)
     if (path.endsWith(".tex")) {
+      // Callbacks, so `$&`, `$'` and the like in a title are inserted literally, not as replacement patterns.
       const text = new TextDecoder()
         .decode(bytes)
-        .replaceAll("{{TITLE}}", latexEscape(values.title))
-        .replaceAll("{{KEY}}", values.key)
-        .replaceAll("{{DATE}}", values.date)
+        .replaceAll("{{TITLE}}", () => latexEscape(values.title))
+        .replaceAll("{{KEY}}", () => values.key)
+        .replaceAll("{{DATE}}", () => values.date)
       sources[path] = text
       commit[path] = text
       continue

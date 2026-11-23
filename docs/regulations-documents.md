@@ -25,12 +25,17 @@ The wire contract is `src/regulations/contract.ts`, of which the admin dashboard
 - **`documento`**: bozza → pubblicata, published by `regulations:manage` with `emanation.start` ("Pubblica"). No
   delibera, no LLM differences, no notice. A repository document goes through the App exactly like an emanation
   (pull request, auto-merge after CI, tag `<tagPrefix>vYYYY.MM.DD` dated the day it was published, release); the
-  email and Telegram steps are `skipped` from the start. A second "Pubblica" while one runs is refused. A private one is published at once in the database: the version keeps its
+  email and Telegram steps are `skipped` from the start. A second "Pubblica" while one runs is refused. A private
+  publication compiles first, then writes the version, the draft's state and its record in one transaction under the
+  document's lock, checking again that no other draft was published from the same version meanwhile. A private one is published at once in the database: the version keeps its
   sources, the assets of its lineage and the PDF compiled by the worker (a text that doesn't compile is refused), and
   every emanation step is `skipped`. Drafts, merges, history and comments work as for the RRI; rettifiche don't exist.
 - **Sola consultazione**: `documents.sync` imports the repository's head as a version (sources and assets, the PDF
   compiled by the worker on demand), and imports it again when the sources change in the repository. Every mutation
   refuses it. Drafts closed before a document became read-only still open, with the procedure they ran.
+
+Sync doesn't change a document's procedure while it has open drafts or an unfinished emanation (an RRI draft is
+`emanata` before its notices go out).
 
 Reading needs `regulations:read` (private documents included). Creating documents and uploading PDFs needs
 `regulations:manage`, which the policy of `documents.create`, `documents.upload` and `versions.upload` carries too.
@@ -83,4 +88,4 @@ PDF of any version: official, uploaded, or compiled.
 
 Migration `0040_regulations_documents`: `regulations_documents` gains `storage`, `origin`, `template`, `status`,
 `creation` and a nullable `procedure`; `regulations_versions` gains `origin` (versions emanated from a draft become
-`draft`); drafts may be `pubblicata`.
+`draft`) and `entry`, the entry file a version compiles from (older rows use the document's); drafts may be `pubblicata`.

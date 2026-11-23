@@ -109,6 +109,8 @@ export const versions = createTable.regulations(
     tag: text(),
     label: text().notNull(),
     origin: text().$type<VersionOrigin>().notNull().default("import"),
+    /** The entry file it compiles from, at the time it was published; `null` for uploads and older rows. */
+    entry: text(),
     /** The editable sources; empty for an uploaded PDF. */
     files: jsonb().$type<Files>().notNull(),
     sourceHash: text("source_hash").notNull(),

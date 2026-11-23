@@ -24,7 +24,7 @@ import { type RegulationsDb, sha256 } from "../db"
 import type { DiffService } from "../diff/service"
 import type { Directory } from "../directory"
 import { applyDelibera, DeliberaMacroMissing, parseDocument } from "../latex"
-import { appendDocumentEntry, githubLegalSource, MANIFEST_PATH } from "../legal-source"
+import { appendDocumentEntry, githubLegalSource, MANIFEST_PATH, parseManifest } from "../legal-source"
 import { deadlineAt, emanateRule, todayInItaly } from "../procedure"
 import { fail, type RegulationsService, type Viewer } from "../service"
 import type { LegalGitHub } from "./github"
@@ -354,42 +354,49 @@ export function createEmanationService(deps: {
     }
 
     if (document.storage === "private") {
-      let versionId: string
       try {
-        versionId = await deps.regulations.internal.publishPrivate(draft, files)
+        // The emanation record is written in the same transaction as the version and the draft's state.
+        await deps.regulations.internal.publishPrivate(viewer, draft, files, async (tx, versionId) => {
+          await tx.insert(emanations).values({
+            draftId: draft.id,
+            status: "done",
+            files,
+            branch: "",
+            versionId,
+            steps: allSteps("skipped", "Documento privato: pubblicato solo nella dashboard"),
+            startedBy: viewer.person,
+            startedAt: now(),
+            finishedAt: now(),
+          })
+        })
       } catch (error) {
         await reopen()
         throw error
       }
-      await db.insert(emanations).values({
-        draftId: draft.id,
-        status: "done",
-        files,
-        branch: "",
-        versionId,
-        steps: allSteps("skipped", "Documento privato: pubblicato solo nella dashboard"),
-        startedBy: viewer.person,
-        startedAt: now(),
-        finishedAt: now(),
-      })
       await saveSnapshot(db, { draftId: draft.id, kind: "state", name: "Pubblicata", files, by: viewer.person })
       await deps.collab?.broadcast(draft.id, { type: "state", state: "pubblicata" }).catch(() => {})
       return view(draft.id)
     }
 
-    await db.insert(emanations).values({
-      draftId: draft.id,
-      status: "running",
-      files,
-      branch: `documenti/${draft.documentKey}-${draft.id}`,
-      steps: {
-        ...allSteps("pending", null),
-        email: skippedNotice(),
-        telegram: skippedNotice(),
-      },
-      startedBy: viewer.person,
-      startedAt: now(),
-    })
+    try {
+      await db.insert(emanations).values({
+        draftId: draft.id,
+        status: "running",
+        files,
+        branch: `documenti/${draft.documentKey}-${draft.id}`,
+        steps: {
+          ...allSteps("pending", null),
+          email: skippedNotice(),
+          telegram: skippedNotice(),
+        },
+        startedBy: viewer.person,
+        startedAt: now(),
+      })
+    } catch (error) {
+      // Without a record nothing can resume it: give the text back. With one (it committed), polling resumes it.
+      if (!(await emanationOf(draft.id))) await reopen()
+      throw error
+    }
     await saveSnapshot(db, {
       draftId: draft.id,
       kind: "state",
@@ -523,6 +530,7 @@ export function createEmanationService(deps: {
         tag,
         label: tag.slice(document.tagPrefix.length),
         origin: "draft",
+        entry: document.entry,
         files: e.files,
         sourceHash: await sourceHash({ entry: document.entry, files: e.files, assets: latest?.assetsBlob ?? "" }),
         commitSha: e.mergeSha,
@@ -979,7 +987,10 @@ export function createEmanationService(deps: {
       const manifest = JSON.parse(current) as { documents?: { key?: string }[] }
       if (manifest.documents?.some((d) => d.key === entry.key))
         throw new Error("La chiave è già usata nel repository dei documenti.")
-      return appendDocumentEntry(current, entry)
+      const next = appendDocumentEntry(current, entry)
+      // What the backend will read back must be valid (e.g. the template still exists at this base).
+      parseManifest(next)
+      return next
     }
   }
 
@@ -1149,6 +1160,7 @@ export function createEmanationService(deps: {
               tag: null,
               label: `import ${mergeSha.slice(0, 7)}`,
               origin: "import",
+              entry: merged.entry.entry,
               files: merged.sources,
               sourceHash: await sourceHash({
                 entry: merged.entry.entry,

@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { schema } from "@/db/schema"
-import { blobs, diffs, documents, drafts, notifications, versions, ydocs } from "@/db/schema/regulations"
+import { blobs, diffs, documents, drafts, emanations, notifications, versions, ydocs } from "@/db/schema/regulations"
 import type { CollabControl } from "@/regulations/collab/internal-client"
 import { createYjsPersistence } from "@/regulations/collab/persistence"
 import { decodeFiles, encodeFiles } from "@/regulations/collab/ydoc"
@@ -269,6 +269,8 @@ try {
   const seg = await as("segretario")
   const dir = await as("direttivo")
   const lettore = await as("lettore")
+  const emanationsOf = async (draftId: string) => db.select().from(emanations).where(eq(emanations.draftId, draftId))
+  const emanationCount = async (draftId: string) => (await emanationsOf(draftId)).length
   const bundleOf = async (hash: string | null) => {
     const [row] = await db
       .select()
@@ -385,6 +387,23 @@ try {
   assert.equal(statutoV2.origin, "import")
   assert.match(statutoV2.files["main.tex"], /Statuto v2/)
   assert.deepEqual((await service.syncDocuments(seg)).updated, [])
+  // Each version compiles with the entry it was published with, even after the repository renames it.
+  assert.equal(statutoV2.entry, "main.tex")
+  put(repo, "statuto/nuovo.tex", "\\documentclass{article}\n\\begin{document}Statuto v3\\end{document}\n")
+  writeManifest({
+    ...manifest,
+    documents: manifest.documents.map((d) =>
+      d.key === "statuto" ? { ...d, entry: "nuovo.tex", sources: ["nuovo.tex"] } : d
+    ),
+  })
+  clock = new Date("2026-11-10T11:10:00Z")
+  assert.deepEqual((await service.syncDocuments(seg)).updated, ["statuto"])
+  assert.equal((await versionOf("statuto"))[0].entry, "nuovo.tex")
+  const oldStatuto = (await service.listVersions(lettore, "statuto")).find((v) => v.id === statutoV2.id)
+  assert.equal(oldStatuto?.pdfAvailable, true)
+  await service.versionPdf(lettore, statutoV2.id)
+  assert.equal(compiled.at(-1)?.entry, "main.tex")
+  writeManifest(manifest)
   checked.push("read-only documents are imported with a PDF from the worker, follow the repository, and refuse drafts")
 
   // ---------------------------------------------------------------------------------------------------------------
@@ -473,6 +492,12 @@ try {
     ...manifest,
     documents: manifest.documents.map((d) => (d.key === "guida" ? { ...d, procedure: null } : d)),
   })
+  // Not while an emanation is still going (an RRI draft is `emanata` before its notices are sent).
+  await db.update(emanations).set({ status: "waiting" }).where(eq(emanations.draftId, guidaDraft.id))
+  const busy = await service.syncDocuments(seg)
+  assert.match(busy.skipped.find((x) => x.key === "guida")?.reason ?? "", /emanazione in corso/)
+  assert.equal((await service.getDocument(lettore, "guida")).procedureKey, "documento")
+  await db.update(emanations).set({ status: "done" }).where(eq(emanations.draftId, guidaDraft.id))
   await service.syncDocuments(seg)
   assert.equal((await service.getDocument(lettore, "guida")).kind, "consultazione")
   const closedView = await service.getDraft(seg, guidaDraft.id)
@@ -588,6 +613,25 @@ try {
   clock = new Date("2026-11-10T12:30:00Z")
   await emanation.start(seg, second.id)
   assert.equal((await versionOf("verbali"))[0].label, "v2026.11.10.2")
+  // Two drafts from the same version published at once: the second would drop the first's changes, so it's refused.
+  const sameBase = (await versionOf("verbali"))[0]
+  const fork = (title: string) =>
+    service.createDraft(dir, {
+      documentKey: "verbali",
+      title,
+      from: { kind: "version", id: sameBase.id },
+      kind: "modifica",
+    })
+  const [left, right] = [await fork("Sinistra"), await fork("Destra")]
+  clock = new Date("2026-11-10T12:45:00Z")
+  const race = await Promise.allSettled([emanation.start(seg, left.id), emanation.start(seg, right.id)])
+  assert.deepEqual(race.map((r) => r.status).sort(), ["fulfilled", "rejected"])
+  assert.match((race.find((r) => r.status === "rejected") as PromiseRejectedResult).reason.message, /superata/)
+  assert.equal((await versionOf("verbali")).filter((v) => v.publishedAt.getTime() === clock.getTime()).length, 1)
+  const loser = race[0].status === "rejected" ? left : right
+  const [loserRow] = await db.select().from(drafts).where(eq(drafts.id, loser.id))
+  assert.deepEqual([loserRow.state, loserRow.frozenFiles], ["bozza", null])
+  assert.equal(await emanationCount(loser.id), 0)
   // Nothing went out: no GitHub call, no LLM, no email or Telegram.
   assert.deepEqual(ghLog(), logBefore)
   assert.deepEqual(llmCalls, [])
@@ -886,6 +930,36 @@ try {
   assert.equal(fermo.status, "creating")
   assert.notEqual(fermo.creation?.prNumber, null)
   checked.push("a creation stuck without a pull request or behind a conflict is recovered, reported or replaced")
+
+  // The manifest the commit would write is validated first: a template removed at the base meanwhile stops it.
+  const errorsBefore = errors.length
+  const main = github.files()
+  const baseManifest = main.get("documents.json") as string
+  const parsedBase = JSON.parse(baseManifest)
+  main.set(
+    "documents.json",
+    JSON.stringify({
+      ...parsedBase,
+      templates: { regolamento: parsedBase.templates.regolamento },
+      documents: parsedBase.documents.filter((d: { template: string | null }) => d.template !== "generale"),
+    })
+  )
+  const invalid = await emanation.createDocument(seg, {
+    key: "invalido",
+    title: "X",
+    template: "generale",
+    storage: "repo",
+  })
+  assert.equal(invalid.status, "failed")
+  assert.match(invalid.creation?.error ?? "", /documents\.json non è valido.*unknown template generale/)
+  assert.equal(
+    github.prs.some((p) => p.title === "Nuovo documento: X"),
+    false
+  )
+  main.set("documents.json", baseManifest)
+  assert.equal(errors.length, errorsBefore + 1)
+  errors.splice(errorsBefore)
+  checked.push("a creation whose manifest would be invalid is stopped before the commit")
 
   assert.deepEqual(notices, [])
   assert.deepEqual(llmCalls, [])

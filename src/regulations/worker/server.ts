@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { existsSync } from "node:fs"
-import { mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import {
   type AssetBundle,
@@ -119,11 +119,20 @@ async function prepare(dir: string, request: CompileRequest) {
   }
   const listPath = join(dir, ".sources.json")
   const previous: string[] = JSON.parse(await readFile(listPath, "utf8").catch(() => "[]"))
-  for (const path of previous) if (!(path in request.files)) await rm(join(dir, path), { force: true })
+  for (const path of previous) {
+    if (path in request.files) continue
+    await rm(join(dir, path), { force: true })
+    // A source that shadowed an asset is gone: the asset comes back.
+    const asset = join(assetsDir(request.assets), path)
+    if (existsSync(asset)) await symlink(asset, join(dir, path))
+  }
   for (const [path, content] of Object.entries(request.files)) {
     const target = join(dir, path)
-    const current = await readFile(target, "utf8").catch(() => null)
-    if (current === content) continue
+    // A source at an asset's path replaces the link in this workdir: writing through it would change the cached
+    // bundle that other workdirs share under the same hash.
+    const link = await lstat(target).catch(() => null)
+    if (link?.isSymbolicLink()) await rm(target, { force: true })
+    else if ((await readFile(target, "utf8").catch(() => null)) === content) continue
     await mkdir(dirname(target), { recursive: true })
     await writeFile(target, content)
   }

@@ -1,5 +1,5 @@
 {
-  "id": "0df2232b-669f-4f2e-821a-2ad23044c190",
+  "id": "70a19b6e-a9d0-4fa3-be5b-884985195ad1",
   "prevId": "81933ec6-6410-441f-8f8d-77f4baeedae8",
   "version": "7",
   "dialect": "postgresql",
@@ -3559,6 +3559,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'import'"
+        },
+        "entry": {
+          "name": "entry",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "files": {
           "name": "files",

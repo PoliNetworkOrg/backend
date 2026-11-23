@@ -7,6 +7,7 @@ ALTER TABLE "regulations_documents" ADD COLUMN "status" text DEFAULT 'active' NO
 ALTER TABLE "regulations_documents" ADD COLUMN "creation" jsonb;--> statement-breakpoint
 ALTER TABLE "regulations_versions" ADD COLUMN "origin" text DEFAULT 'import' NOT NULL;--> statement-breakpoint
 UPDATE "regulations_versions" SET "origin" = 'draft' WHERE "draft_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "regulations_versions" ADD COLUMN "entry" text;--> statement-breakpoint
 ALTER TABLE "regulations_documents" ADD CONSTRAINT "regulations_documents_procedure_check" CHECK ("regulations_documents"."procedure" is null or "regulations_documents"."procedure" in ('rri', 'documento'));--> statement-breakpoint
 ALTER TABLE "regulations_documents" ADD CONSTRAINT "regulations_documents_storage_check" CHECK ("regulations_documents"."storage" in ('repo', 'private'));--> statement-breakpoint
 ALTER TABLE "regulations_documents" ADD CONSTRAINT "regulations_documents_origin_check" CHECK ("regulations_documents"."origin" in ('latex', 'upload'));--> statement-breakpoint

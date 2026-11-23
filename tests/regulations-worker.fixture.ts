@@ -111,6 +111,23 @@ try {
   assert.equal(stale.status === "done" && stale.ok, false)
   checked.push("relinking a workdir to another bundle removes the previous bundle's files")
 
+  // A source at the same path as an asset is written in the workdir, never through the link into the shared bundle.
+  const cachedSty = join(dir, "work/assets", assetsHash, "shared/esempio.sty")
+  const shadow = {
+    ...doc("ombra"),
+    "shared/esempio.sty": "\\newcommand\\esempio{Sovrascritto}\n",
+  }
+  const shadowed = await client.compile({
+    key: "d3",
+    hash: await sourceHash({ entry: "main.tex", files: shadow, assets: assetsHash }),
+    entry: "main.tex",
+    assets: assetsHash,
+    files: shadow,
+  })
+  assert.equal(shadowed.status === "done" && shadowed.ok, true)
+  assert.equal(readFileSync(cachedSty, "utf8"), "\\newcommand\\esempio{Esempio}\n")
+  checked.push("a source at an asset's path never changes the cached bundle")
+
   const unauthorized = await fetch(`http://127.0.0.1:${server.port}/compile`, { method: "POST", body: "{}" })
   assert.equal(unauthorized.status, 401)
   checked.push("refuses requests without the shared secret")

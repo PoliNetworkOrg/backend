@@ -392,11 +392,17 @@ export function fakeGitHub(options: {
   const encode = (v: string | Uint8Array): Stored =>
     typeof v === "string" ? v : { b64: Buffer.from(v).toString("base64") }
   const decode = (v: Stored) => (typeof v === "string" ? v : new Uint8Array(Buffer.from(v.b64, "base64")))
+  /** The commit each branch forked from, for merges. */
+  const forks = new Map<string, string>()
+  const same = (a: string | Uint8Array | undefined, b: string | Uint8Array | undefined) =>
+    a === b ||
+    (a !== undefined && b !== undefined && typeof a !== "string" && typeof b !== "string" && Buffer.from(a).equals(b))
   function save() {
     if (!options.stateFile) return
     const data = {
       counter,
       refs: [...refs],
+      forks: [...forks],
       commits: [...commits].map(([id, files]) => [id, [...files].map(([p, c]) => [p, encode(c)])]),
       prs,
       releases: releases.map((r) => ({ ...r, files: r.files.map((f) => ({ ...f, content: encode(f.content) })) })),
@@ -409,6 +415,8 @@ export function fakeGitHub(options: {
     counter = data.counter
     refs.clear()
     for (const [k, v] of data.refs) refs.set(k, v)
+    forks.clear()
+    for (const [k, v] of data.forks ?? []) forks.set(k, v)
     commits.clear()
     for (const [id, files] of data.commits)
       commits.set(id, new Map(files.map(([p, c]: [string, Stored]) => [p, decode(c)])))
@@ -430,9 +438,25 @@ export function fakeGitHub(options: {
     if (Date.now() - pr.openedAt < (options.ciDelayMs ?? 0)) return
     pr.checks = options.failChecks ? "failure" : "success"
     if (pr.checks === "success" && pr.autoMerge && pr.mergeable !== false) {
+      // Apply the branch's changes since it forked to the base as it is now; a file the base changed meanwhile too is
+      // a conflict: the pull request stays open and can't merge, as on GitHub.
       const head = commits.get(refs.get(`heads/${pr.branch}`) as string) as Snapshot
+      const current = commits.get(refs.get(`heads/${pr.base}`) as string) as Snapshot
+      const fork = commits.get(forks.get(pr.branch) ?? "") ?? current
+      const next = new Map(current)
+      for (const path of new Set([...fork.keys(), ...head.keys()])) {
+        if (same(fork.get(path), head.get(path))) continue
+        if (!same(fork.get(path), current.get(path)) && !same(head.get(path), current.get(path))) {
+          pr.mergeable = false
+          log.push(`conflict #${pr.number} ${path}`)
+          return
+        }
+        const value = head.get(path)
+        if (value === undefined) next.delete(path)
+        else next.set(path, value)
+      }
       const merged = sha()
-      commits.set(merged, new Map(head))
+      commits.set(merged, next)
       refs.set(`heads/${pr.base}`, merged)
       Object.assign(pr, { merged: true, state: "closed", mergeSha: merged })
       log.push(`merged #${pr.number}`)
@@ -454,6 +478,7 @@ export function fakeGitHub(options: {
     async commitToBranch(input) {
       const existing = refs.get(`heads/${input.branch}`)
       if (existing) return { sha: existing }
+      forks.set(input.branch, refs.get(`heads/${input.base}`) as string)
       const base = commits.get(refs.get(`heads/${input.base}`) as string) as Snapshot
       const next = new Map(base)
       const prefix = `${input.dir}/`

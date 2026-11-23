@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server"
-import { and, asc, count, desc, eq, gt, inArray, isNull, or } from "drizzle-orm"
+import { and, asc, count, desc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm"
 import { nanoid } from "nanoid"
 import {
   assignments,
@@ -271,7 +271,9 @@ export function createRegulationsService(deps: RegulationsDeps) {
       delibera,
       publishedAt: row.publishedAt.toISOString(),
       releaseUrl: row.releaseUrl,
-      pdfAvailable: row.pdfBlob !== null || (!!deps.compileVersion && row.assetsBlob !== null),
+      pdfAvailable:
+        row.pdfBlob !== null ||
+        (!!deps.compileVersion && row.assetsBlob !== null && (row.entry === null || row.entry in row.files)),
       draftId: row.draftId,
     }
   }
@@ -527,6 +529,15 @@ export function createRegulationsService(deps: RegulationsDeps) {
     return open
   }
 
+  async function unfinishedEmanations(documentKey: string) {
+    const [{ running }] = await db
+      .select({ running: count() })
+      .from(emanations)
+      .innerJoin(drafts, eq(drafts.id, emanations.draftId))
+      .where(and(eq(drafts.documentKey, documentKey), ne(emanations.status, "done")))
+    return running
+  }
+
   function kindOf(row: DocumentRow): C.DocumentKind {
     if (row.storage === "private") return "privato"
     if (!row.procedure) return "consultazione"
@@ -596,10 +607,16 @@ export function createRegulationsService(deps: RegulationsDeps) {
         result.skipped.push({ key: doc.key, reason: "La chiave è già di un documento privato." })
         continue
       }
-      if (existing && existing.procedure !== doc.procedure && (await openDraftCount(doc.key)) > 0) {
+      // Open drafts, or an emanation still running (an RRI one is `emanata` before its notices go out), keep the
+      // procedure they started with.
+      if (
+        existing &&
+        existing.procedure !== doc.procedure &&
+        ((await openDraftCount(doc.key)) > 0 || (await unfinishedEmanations(doc.key)) > 0)
+      ) {
         result.skipped.push({
           key: doc.key,
-          reason: `Ha bozze aperte: la procedura resta ${existing.procedure ?? "nessuna"} finché non si chiudono.`,
+          reason: `Ha bozze aperte o un'emanazione in corso: la procedura resta ${existing.procedure ?? "nessuna"} finché non si chiudono.`,
         })
         continue
       }
@@ -633,6 +650,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
           tag: null,
           label: head.label,
           origin: "import",
+          entry: doc.entry,
           files: sources,
           sourceHash: await sourceHash({ entry: doc.entry, files: sources, assets: assetsHash }),
           commitSha: head.sha,
@@ -708,10 +726,11 @@ export function createRegulationsService(deps: RegulationsDeps) {
       const [blob] = await db.select().from(blobs).where(eq(blobs.hash, version.pdfBlob))
       content = blob?.content ?? null
     } else if (deps.compileVersion && version.assetsBlob) {
-      const document = await loadDocument(version.documentKey)
+      // The entry it was published with (older rows have none: the document's).
+      const entry = version.entry ?? (await loadDocument(version.documentKey)).entry
       content = await deps.compileVersion({
         id: version.id,
-        entry: document.entry,
+        entry,
         files: version.files,
         assets: version.assetsBlob,
       })
@@ -1476,6 +1495,7 @@ export function createRegulationsService(deps: RegulationsDeps) {
           tag: null,
           label: "Modello",
           origin: "template",
+          entry: prepared.entry.entry,
           files: prepared.sources,
           sourceHash: await sourceHash({
             entry: prepared.entry.entry,
@@ -1590,46 +1610,66 @@ export function createRegulationsService(deps: RegulationsDeps) {
 
   /**
    * Publishes a private document's draft in the database (procedure `documento`): the version with its sources, the
-   * assets of its lineage and the compiled PDF. Nothing leaves the backend. The emanation service records it.
+   * assets of its lineage and the compiled PDF. Nothing leaves the backend. It compiles first, then, as one transaction
+   * holding the document's row lock, checks again that the draft isn't superseded, writes the version and the draft's
+   * new state, and lets the caller record the publication (`record`), so it either all happens or none of it does.
    */
-  async function publishPrivate(draft: DraftRow, files: C.Files): Promise<string> {
+  async function publishPrivate(
+    viewer: Viewer,
+    draft: DraftRow,
+    files: C.Files,
+    record: (tx: RegulationsTx, versionId: string) => Promise<void>
+  ): Promise<string> {
     const document = await loadDocument(draft.documentKey)
     if (document.storage !== "private") throw new Error(`${document.key} is not a private document`)
     const assets = (await rootVersion(draft)).assetsBlob
     const id = nanoid(16)
-    const at = now()
-    await db.insert(versions).values({
-      id,
-      documentKey: document.key,
-      tag: null,
-      label: await nextLabel(document.key),
-      origin: "draft",
-      files,
-      sourceHash: await sourceHash({ entry: document.entry, files, assets: assets ?? "" }),
-      draftId: draft.id,
-      publishedAt: at,
-      assetsBlob: assets,
-    })
+    let pdfBlob: string | null = null
     if (deps.compileVersion && assets) {
       let pdf: Uint8Array | null
       try {
+        // The version row doesn't exist yet: this only compiles and stores the PDF blob.
         pdf = await deps.compileVersion({ id, entry: document.entry, files, assets })
       } catch {
-        await db.delete(versions).where(eq(versions.id, id))
         fail("PRECONDITION_FAILED", "Il compilatore non è raggiungibile: riprova tra poco.")
       }
-      if (!pdf) {
-        await db.delete(versions).where(eq(versions.id, id))
+      if (!pdf)
         fail(
           "PRECONDITION_FAILED",
           "Il documento non compila: correggi gli errori dell'anteprima prima di pubblicarlo."
         )
-      }
+      pdfBlob = sha256(pdf)
+      await db
+        .insert(blobs)
+        .values({ hash: pdfBlob, contentType: "application/pdf", content: pdf })
+        .onConflictDoNothing()
     }
-    await db
-      .update(drafts)
-      .set({ state: "pubblicata", frozenFiles: files, emanatedAt: at, stateChangedAt: at, updatedAt: at })
-      .where(eq(drafts.id, draft.id))
+    await db.transaction(async (tx) => {
+      // One publication per document at a time: another draft published meanwhile makes this one superseded.
+      await tx.select({ key: documents.key }).from(documents).where(eq(documents.key, document.key)).for("update")
+      const superseded = await supersededReason(draft, viewer)
+      if (superseded) fail("PRECONDITION_FAILED", superseded)
+      const at = now()
+      await tx.insert(versions).values({
+        id,
+        documentKey: document.key,
+        tag: null,
+        label: await nextLabel(document.key, tx),
+        origin: "draft",
+        entry: document.entry,
+        files,
+        sourceHash: await sourceHash({ entry: document.entry, files, assets: assets ?? "" }),
+        draftId: draft.id,
+        publishedAt: at,
+        assetsBlob: assets,
+        pdfBlob,
+      })
+      await tx
+        .update(drafts)
+        .set({ state: "pubblicata", frozenFiles: files, emanatedAt: at, stateChangedAt: at, updatedAt: at })
+        .where(eq(drafts.id, draft.id))
+      await record(tx, id)
+    })
     return id
   }
 

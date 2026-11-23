@@ -162,11 +162,13 @@ export function githubLegalSource(gh: LegalGitHub, ref: string): LegalSource {
   const reader: RepoReader = {
     list: async (dir) => gh.listFiles(dir, await sha()),
     read: async (path) => {
-      const cached = cache.get(path)
+      // The cache of the commit this read started at: a `head()` meanwhile starts a new one, which this can't pollute.
+      const at = cache
+      const cached = at.get(path)
       if (cached) return cached
       const bytes = await gh.readBytes(path, await sha())
       if (!bytes) throw new Error(`${path} not found`)
-      cache.set(path, bytes)
+      if (at === cache) at.set(path, bytes)
       return bytes
     },
   }
