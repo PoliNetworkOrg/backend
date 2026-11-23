@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm"
+import { and, asc, eq, inArray, max } from "drizzle-orm"
 import z from "zod"
 import { uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
@@ -176,7 +176,7 @@ export default createTRPCRouter({
       const [project] = await DB.select({ id: PROJECTS.id }).from(PROJECTS).where(eq(PROJECTS.id, projectId))
       if (!project) return { error: "NOT_FOUND" }
 
-      const existing = await DB.select({ id: PROJECT_RESOURCES.id })
+      const [existing] = await DB.select({ maxOrder: max(PROJECT_RESOURCES.order) })
         .from(PROJECT_RESOURCES)
         .where(eq(PROJECT_RESOURCES.projectId, projectId))
 
@@ -185,7 +185,7 @@ export default createTRPCRouter({
           projectId,
           kind,
           url,
-          order: existing.length,
+          order: (existing?.maxOrder ?? -1) + 1,
           ...createdByColumns(authorOf(ctx.actor)),
         })
         .returning()
@@ -224,7 +224,17 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input }) => {
-      await DB.transaction(async (tx) => {
+      return DB.transaction(async (tx) => {
+        const targets = await tx
+          .select({ id: PROJECT_RESOURCES.id })
+          .from(PROJECT_RESOURCES)
+          .where(
+            and(eq(PROJECT_RESOURCES.projectId, input.projectId), inArray(PROJECT_RESOURCES.id, input.resourceIds))
+          )
+          .orderBy(asc(PROJECT_RESOURCES.id))
+          .for("no key update")
+        if (targets.length !== input.resourceIds.length) return { error: "NOT_FOUND" }
+
         await Promise.all(
           input.resourceIds.map((id, index) =>
             tx
@@ -233,9 +243,8 @@ export default createTRPCRouter({
               .where(and(eq(PROJECT_RESOURCES.id, id), eq(PROJECT_RESOURCES.projectId, input.projectId)))
           )
         )
+        return { error: null }
       })
-
-      return { error: null }
     }),
 
   deleteProjectResource: policy(dashboard("web:content:write"))
