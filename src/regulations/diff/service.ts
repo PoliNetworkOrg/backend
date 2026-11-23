@@ -13,7 +13,8 @@ import { type DiffSummarizer, normalizeCategories } from "./summarizer"
 /**
  * The smart diff (spec decision 9): the structural diff between the version in force and the draft's frozen text,
  * grouped by theme by an LLM, plus the differences PDF. Generated when a draft is sent to approval (or a rettifica is
- * emanated); not editable; `regulations:manage` may regenerate it until the notification goes out.
+ * emanated); not editable; `regulations:manage` may regenerate it until the notification goes out. Only for the `rri`
+ * procedure's repository documents: a private document's text never reaches the LLM.
  */
 export function createDiffService(deps: {
   db: RegulationsDb
@@ -26,6 +27,9 @@ export function createDiffService(deps: {
   const now = deps.now ?? (() => new Date())
   const { loadDraft, loadDocument, currentFiles, access, emanationOf } = deps.regulations.internal
   const running = new Map<string, Promise<void>>()
+  /** The rri procedure on a repository document: never a private one, never a documento. */
+  const llmAllowed = (document: { procedure: string | null; storage: string }) =>
+    document.procedure === "rri" && document.storage === "repo"
 
   async function latestRow(draftId: string) {
     const [row] = await db
@@ -95,6 +99,7 @@ export function createDiffService(deps: {
       const [row] = await db.select().from(diffs).where(eq(diffs.id, rowId))
       const draft = await loadDraft(draftId)
       const document = await loadDocument(draft.documentKey)
+      if (!llmAllowed(document)) throw new Error(`${document.key}: no LLM for this document`)
       if (!deps.summarizer) throw new Error("Nessun modello configurato per il riassunto (REGULATIONS_LLM_PROVIDER).")
       const categories = normalizeCategories(
         await deps.summarizer.summarize({
@@ -123,6 +128,8 @@ export function createDiffService(deps: {
   async function generate(draftId: string, by: C.PersonRef | null) {
     const draft = await loadDraft(draftId)
     const document = await loadDocument(draft.documentKey)
+    if (!llmAllowed(document))
+      fail("PRECONDITION_FAILED", "Le differenze si generano solo per i regolamenti del repository (procedura RRI).")
     const base = await versionInForce(draft.documentKey, draft.id)
     if (!base) fail("PRECONDITION_FAILED", "Non c'è una versione pubblicata con cui confrontare.")
     const files = await currentFiles(draft)

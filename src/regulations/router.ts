@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { audit } from "@/audit/option"
-import { SCOPE } from "@/idp/policies"
+import { dashboard, SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
 import type { DiffService } from "./diff/service"
@@ -33,7 +33,8 @@ const AUDITED_FIELDS = [
 /**
  * `regulations.*`: every procedure is open to dashboard users (scope `backend:admin`), and the service checks the
  * rest: `regulations:read|write|manage|rectify` from the IdP, per-draft assignments, and deleghe. People with only
- * an assignment use the dashboard too, so nothing here needs a permission at the policy level.
+ * an assignment use the dashboard too, so most procedures need no permission at the policy level; creating and
+ * uploading documents is only for `regulations:manage`, which the policy carries as well.
  */
 export function createRegulationsRouter(
   service: RegulationsService,
@@ -51,8 +52,24 @@ export function createRegulationsRouter(
       const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
       return next({ ctx: { viewer } })
     })
+  const manager = policy(dashboard(C.REGULATION_PERMISSIONS.manage))
+    .meta(audit.full({ fields: AUDITED_FIELDS }))
+    .use(async ({ ctx, next }) => {
+      if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN" })
+      const viewer: Viewer = { sub: ctx.actor.sub, can: ctx.can, person: await directory.person(ctx.actor.sub) }
+      return next({ ctx: { viewer } })
+    })
   const draftRef = C.draftRefInputSchema
   const ok = z.void()
+  const pdf = z.instanceof(File).refine((f) => f.size <= C.MAX_UPLOAD_BYTES, "Il PDF supera i 20 MB.")
+  const uploadDocument = z
+    .instanceof(FormData)
+    .transform((fd) => ({ key: fd.get("key"), title: fd.get("title"), file: fd.get("file") }))
+    .pipe(C.uploadDocumentFieldsSchema.extend({ file: pdf }))
+  const uploadVersion = z
+    .instanceof(FormData)
+    .transform((fd) => ({ documentKey: fd.get("documentKey"), file: fd.get("file") }))
+    .pipe(C.uploadVersionFieldsSchema.extend({ file: pdf }))
 
   return createTRPCRouter({
     me: createTRPCRouter({
@@ -70,9 +87,22 @@ export function createRegulationsRouter(
         .input(z.object({ documentKey: C.documentKeySchema }))
         .output(C.documentSchema)
         .query(({ ctx, input }) => service.getDocument(ctx.viewer, input.documentKey)),
-      sync: user
-        .output(z.object({ documents: z.array(z.string()), imported: z.array(z.string()) }))
-        .mutation(({ ctx }) => service.syncDocuments(ctx.viewer)),
+      sync: user.output(C.syncResultSchema).mutation(({ ctx }) => service.syncDocuments(ctx.viewer)),
+      create: manager
+        .input(C.createDocumentInputSchema)
+        .output(C.documentSchema)
+        .mutation(({ ctx, input }) =>
+          input.storage === "private"
+            ? service.createPrivateDocument(ctx.viewer, input)
+            : emanation().createDocument(ctx.viewer, input)
+        ),
+      upload: manager
+        .input(uploadDocument)
+        .output(C.documentSchema)
+        .mutation(({ ctx, input }) => service.uploadDocument(ctx.viewer, input)),
+    }),
+    templates: createTRPCRouter({
+      list: user.output(C.templateSchema.array()).query(({ ctx }) => service.listTemplates(ctx.viewer)),
     }),
     versions: createTRPCRouter({
       list: user
@@ -83,6 +113,10 @@ export function createRegulationsRouter(
         .input(z.object({ versionId: z.string().min(1) }))
         .output(C.binaryFileSchema)
         .query(({ ctx, input }) => service.versionPdf(ctx.viewer, input.versionId)),
+      upload: manager
+        .input(uploadVersion)
+        .output(C.versionSummarySchema)
+        .mutation(({ ctx, input }) => service.uploadVersion(ctx.viewer, input)),
     }),
     drafts: createTRPCRouter({
       list: user

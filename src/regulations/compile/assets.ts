@@ -5,7 +5,7 @@ import type { AssetBundle } from "./protocol"
 /** Build products and outputs: never part of the assets. */
 const BUILD_ARTIFACT = /\.(aux|log|out|toc|fls|fdb_latexmk|xdv|synctex\.gz|bbl|blg|lof|lot)$/
 
-/** Whether `path` matches a legal.json source glob (`*` within one path segment, `**` across segments). */
+/** Whether `path` matches a documents.json source glob (`*` within one path segment, `**` across segments). */
 export function matchesGlob(path: string, glob: string): boolean {
   const pattern = glob
     .split("**")
@@ -20,15 +20,18 @@ export function matchesGlob(path: string, glob: string): boolean {
 }
 
 export type DocumentLayout = {
-  /** Directory of the document, relative to the repository root (legal.json `dir`). */
+  /** Directory of the document, relative to the repository root (documents.json `dir`). */
   dir: string
   entry: string
   sources: string[]
   /** Release asset names: built outputs to leave out. */
   outputs: Record<string, string>
-  /** legal.json `shared`: the class directory. */
-  shared: string
+  /** The template's `shared` directory (class, styles, fonts, images), or `null` for a self-contained document. */
+  shared: string | null
 }
+
+/** Reads a repository: a checkout or GitHub. Paths are relative to the repository root. */
+export type RepoReader = { list: (dir: string) => Promise<string[]>; read: (path: string) => Promise<Uint8Array> }
 
 /** Files under `root`, relative to it, skipping dot files and dot directories. */
 export async function listTree(root: string): Promise<string[]> {
@@ -46,9 +49,9 @@ export async function listTree(root: string): Promise<string[]> {
 }
 
 /**
- * Splits a document directory of a legal checkout into editable sources (matching `sources`) and the asset bundle the
- * compile needs: everything else in the directory (fonts, images, included PDFs) plus the shared class, which goes
- * under `shared/` and is linked next to the entry file by the worker.
+ * Splits a document directory of a documents checkout into editable sources (matching `sources`) and the asset bundle
+ * the compile needs: everything else in the directory (fonts, images, included PDFs) plus the template's whole shared
+ * tree, which goes under `shared/` (the worker puts it next to the entry file, on TEXINPUTS, TTFONTS and OPENTYPEFONTS).
  */
 export async function readDocument(
   repoRoot: string,
@@ -63,9 +66,9 @@ export async function readDocument(
   )
 }
 
-/** The same split over any repository reader (a checkout, or GitHub). Paths are relative to the repository root. */
+/** The same split over any repository reader (a checkout, or GitHub). */
 export async function readDocumentWith(
-  repo: { list: (dir: string) => Promise<string[]>; read: (path: string) => Promise<Uint8Array> },
+  repo: RepoReader,
   layout: DocumentLayout
 ): Promise<{ sources: Record<string, string>; assets: AssetBundle }> {
   const outputs = new Set([...Object.values(layout.outputs), layout.entry.replace(/\.tex$/, ".pdf")])
@@ -76,12 +79,36 @@ export async function readDocumentWith(
       sources[path] = new TextDecoder().decode(await repo.read(`${layout.dir}/${path}`))
       continue
     }
-    if (BUILD_ARTIFACT.test(path) || outputs.has(path) || path.endsWith(".tex") || path === "latexmkrc") continue
+    if (!isAsset(path) || outputs.has(path) || path.endsWith(".tex")) continue
     files[path] = Buffer.from(await repo.read(`${layout.dir}/${path}`)).toString("base64")
   }
-  for (const path of await repo.list(layout.shared)) {
-    if ((!path.endsWith(".cls") && !path.endsWith(".sty")) || path.includes("/")) continue
-    files[`shared/${path}`] = Buffer.from(await repo.read(`${layout.shared}/${path}`)).toString("base64")
-  }
+  if (layout.shared) Object.assign(files, sharedAssets(await readTreeWith(repo, layout.shared)))
   return { sources, assets: { version: 1, files } }
+}
+
+/** Every file under `dir` that `keep` accepts (by default: no dot files, build products, latexmkrc), relative to it. */
+export async function readTreeWith(
+  repo: RepoReader,
+  dir: string,
+  keep: (path: string) => boolean = isAsset
+): Promise<Record<string, Uint8Array>> {
+  const out: Record<string, Uint8Array> = {}
+  for (const path of await repo.list(dir)) if (keep(path)) out[path] = await repo.read(`${dir}/${path}`)
+  return out
+}
+
+/** Not a dot file or inside a dot directory. */
+export const notHidden = (path: string) => !path.split("/").some((part) => part.startsWith("."))
+
+/** A template's shared tree as bundle entries under `shared/`, in base64. */
+export function sharedAssets(shared: Record<string, Uint8Array>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(shared).map(([path, bytes]) => [`shared/${path}`, Buffer.from(bytes).toString("base64")])
+  )
+}
+
+/** Not a build product, a latexmk configuration, or a dot file. */
+export function isAsset(path: string): boolean {
+  const name = path.split("/").pop() ?? path
+  return !BUILD_ARTIFACT.test(path) && name !== "latexmkrc" && notHidden(path)
 }

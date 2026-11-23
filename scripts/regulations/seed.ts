@@ -1,6 +1,6 @@
 /**
  * Seeds the local regulations stack through the real API, as the dev accounts:
- * imports legal.json and the RRI from REGULATIONS_LEGAL_DIR, creates two drafts that change the same comma (a merge
+ * imports documents.json (the RRI and every other document) from REGULATIONS_LEGAL_DIR, creates two drafts that change the same comma (a merge
  * conflict) and one with a clean change, assigns the editor and commenter accounts, and waits for the first PDF.
  *   bun run regulations:seed
  */
@@ -37,7 +37,10 @@ const collab = createCollabControl({
 const SEG = "dev-segretario"
 const DIR = "dev-direttivo"
 
-const sync = await call<{ documents: string[]; imported: string[] }>(SEG, "regulations.documents.sync")
+const sync = await call<{ documents: string[]; imported: string[]; updated: string[]; skipped: unknown[] }>(
+  SEG,
+  "regulations.documents.sync"
+)
 console.log("documents:", sync)
 const versions = await call<{ id: string; label: string }[]>(
   SEG,

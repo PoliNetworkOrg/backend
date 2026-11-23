@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { desc, eq } from "drizzle-orm"
 import { DB } from "@/db"
 import { blobs, documents, versions } from "@/db/schema/regulations"
@@ -16,7 +18,7 @@ import { anthropicSummarizer, type DiffSummarizer, fakeSummarizer } from "./diff
 import { createDirectory } from "./directory"
 import { fakeGitHub, githubAppClient, type LegalGitHub } from "./emanation/github"
 import { createEmanationService, type EmanationService } from "./emanation/service"
-import { githubLegalSource, type LegalSource, localLegalSource } from "./legal-source"
+import { githubLegalSource, type LegalSource, localLegalSource, MANIFEST_PATH } from "./legal-source"
 import { createRegulationsService, type RegulationsHooks } from "./service"
 
 export const regulationsDirectory = createDirectory(idp?.directory ?? null)
@@ -58,7 +60,11 @@ function summarizer(): DiffSummarizer | null {
 
 const hooks: RegulationsHooks = {}
 
-/** The legal repository: the GitHub App, or (outside production) an in-memory one whose "CI" compiles with the worker. */
+/**
+ * The documents repository (`REGULATIONS_GITHUB_REPO`): the GitHub App, or (outside production) an in-memory one whose
+ * "CI" compiles with the worker. The in-memory one starts from the local checkout's documents.json, so documents can
+ * be created against it.
+ */
 function legalGitHub(): LegalGitHub | null {
   const mode = config.REGULATIONS_GITHUB_MODE ?? (env.NODE_ENV === "production" ? "app" : "fake")
   if (mode === "app") {
@@ -73,12 +79,25 @@ function legalGitHub(): LegalGitHub | null {
     })
   }
   logger.warn("[REGULATIONS] Using an in-memory GitHub: emanations go nowhere")
+  let manifest: string | null = null
+  if (config.REGULATIONS_LEGAL_DIR)
+    try {
+      manifest = readFileSync(join(config.REGULATIONS_LEGAL_DIR, MANIFEST_PATH), "utf8")
+    } catch (err) {
+      logger.warn({ err }, `[REGULATIONS] No ${MANIFEST_PATH} to start the in-memory GitHub from`)
+    }
   return fakeGitHub({
+    repo: config.REGULATIONS_GITHUB_REPO,
+    files: manifest ? { [MANIFEST_PATH]: manifest } : {},
     stateFile: config.REGULATIONS_FAKE_GITHUB_STATE,
     ciDelayMs: 3000,
     releaseDelayMs: 3000,
     async buildRelease(tag, files) {
-      const [document] = (await DB.select().from(documents)).filter((d) => tag.startsWith(d.tagPrefix))
+      // The repository document whose tag prefix is the longest match (private documents never have releases).
+      const [document] = (await DB.select().from(documents).where(eq(documents.storage, "repo")))
+        .filter((d) => tag.startsWith(d.tagPrefix))
+        .sort((a, b) => b.tagPrefix.length - a.tagPrefix.length)
+      if (!document) return []
       const [latest] = await DB.select()
         .from(versions)
         .where(eq(versions.documentKey, document.key))
@@ -153,9 +172,9 @@ if (env.NODE_ENV !== "test")
       .refreshAssets()
       .then(({ updated }) => {
         if (updated.length)
-          logger.warn({ documents: updated }, "[REGULATIONS] assets refreshed from the legal repository")
+          logger.warn({ documents: updated }, "[REGULATIONS] assets refreshed from the documents repository")
       })
-      .catch((err) => logger.error({ err }, "[REGULATIONS] could not refresh the assets from the legal repository"))
+      .catch((err) => logger.error({ err }, "[REGULATIONS] could not refresh the assets from the documents repository"))
   }, 5_000)
 
 export const regulationsDiff = createDiffService({
