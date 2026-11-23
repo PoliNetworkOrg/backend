@@ -27,6 +27,7 @@ import { applyDelibera, DeliberaMacroMissing, parseDocument } from "../latex"
 import { appendDocumentEntry, githubLegalSource, MANIFEST_PATH, parseManifest } from "../legal-source"
 import { deadlineAt, emanateRule, todayInItaly } from "../procedure"
 import { fail, type RegulationsService, type Viewer } from "../service"
+import { strayFiles, strayFilesMessage } from "../sources"
 import type { LegalGitHub } from "./github"
 import { sendOnce, telegramEscape } from "./notify"
 
@@ -236,6 +237,11 @@ export function createEmanationService(deps: {
         await undo()
         fail("PRECONDITION_FAILED", "Il testo non è valido: correggi gli errori prima di emanare.")
       }
+      const stray = strayFiles(files, document.sources)
+      if (stray.length) {
+        await undo()
+        fail("PRECONDITION_FAILED", strayFilesMessage(stray, document.sources))
+      }
       await db.update(drafts).set({ frozenFiles: files, parses, updatedAt: now() }).where(eq(drafts.id, draft.id))
       await db
         .insert(delibere)
@@ -351,6 +357,11 @@ export function createEmanationService(deps: {
     if (!parses) {
       await reopen()
       fail("PRECONDITION_FAILED", "Il testo non è valido: correggi gli errori prima di pubblicare.")
+    }
+    const stray = strayFiles(files, document.sources)
+    if (stray.length) {
+      await reopen()
+      fail("PRECONDITION_FAILED", strayFilesMessage(stray, document.sources))
     }
 
     if (document.storage === "private") {
