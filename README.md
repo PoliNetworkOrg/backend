@@ -85,7 +85,9 @@ permission `audit:read` read the log with `audit.list`, newest first, paged by `
 target, actor, date or text.
 
 Changes made outside the backend's tRPC procedures are not in the log: directly in Telegram or WhatsApp, the cron jobs,
-the e-signing agent endpoints (each request keeps its own history) and roles and permissions in the IdP.
+the e-signing agent endpoints (each request keeps its own history), the GitHub webhook (regulations publications and
+document creations completing when their pull request merges, which keep their emanation record and the document's
+`creation` state) and roles and permissions in the IdP.
 
 ## People
 
