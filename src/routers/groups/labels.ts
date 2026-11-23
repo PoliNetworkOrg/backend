@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm"
 import { z } from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { authorOf } from "@/idp/author"
 import { dashboard } from "@/idp/policies"
@@ -32,6 +33,7 @@ export default createTRPCRouter({
   }),
 
   create: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         label,
@@ -52,23 +54,29 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "groups.label", id: result[0].id, label }, after: result[0] })
       return result
     }),
 
   delete: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         label,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { label } = input
 
       const labelRow = await DB.select({ id: GROUP_LABELS.id })
         .from(GROUP_LABELS)
         .where(eq(GROUP_LABELS.label, label))
         .limit(1)
-      if (!labelRow.length) return []
+      if (!labelRow.length) {
+        // Nothing to delete, so nothing changed.
+        ctx.audit.skip()
+        return []
+      }
       const labelId = labelRow[0].id
 
       const [[tgCount], [waCount]] = await Promise.all([
@@ -83,10 +91,12 @@ export default createTRPCRouter({
       }
 
       const result = await DB.delete(GROUP_LABELS).where(eq(GROUP_LABELS.label, label)).returning()
+      ctx.audit.set({ target: { type: "groups.label", id: labelId, label }, before: result[0] })
       return result
     }),
 
   modify: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         label,
@@ -102,6 +112,7 @@ export default createTRPCRouter({
       const { label, newLabel, description, color } = input
       const author = authorOf(ctx.actor)
 
+      const [before] = await DB.select().from(GROUP_LABELS).where(eq(GROUP_LABELS.label, label)).limit(1)
       const result = await DB.update(GROUP_LABELS)
         .set({
           label: newLabel,
@@ -114,10 +125,18 @@ export default createTRPCRouter({
         .where(eq(GROUP_LABELS.label, label))
         .returning()
 
+      // An unknown label changed nothing.
+      if (result.length === 0) ctx.audit.skip()
+      ctx.audit.set({
+        target: { type: "groups.label", id: result[0]?.id ?? before?.id ?? null, label: newLabel ?? label },
+        before,
+        after: result[0],
+      })
       return result
     }),
 
   tagGroup: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         groupId: z.number(),
@@ -125,8 +144,9 @@ export default createTRPCRouter({
         label,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { groupId, type, label } = input
+      ctx.audit.set({ target: { type: `${type}.group`, id: groupId } })
 
       await assertGroupExists(groupId, type)
       const labelIdResult = await DB.select({ id: GROUP_LABELS.id })
@@ -136,25 +156,16 @@ export default createTRPCRouter({
       if (!labelIdResult.length) throw new Error("Label not found")
       const labelId = labelIdResult[0].id
 
-      if (type === "tg") {
-        const result = await DB.insert(TG_RELATIONS)
-          .values({
-            groupId,
-            labelId,
-          })
-          .returning()
-        return result
-      }
-
-      return DB.insert(WA_RELATIONS)
-        .values({
-          groupId,
-          labelId,
-        })
-        .returning()
+      const result =
+        type === "tg"
+          ? await DB.insert(TG_RELATIONS).values({ groupId, labelId }).returning()
+          : await DB.insert(WA_RELATIONS).values({ groupId, labelId }).returning()
+      ctx.audit.set({ after: { label } })
+      return result
     }),
 
   untagGroup: policy(dashboard("groups:labels:write"))
+    .meta(audit.full())
     .input(
       z.object({
         groupId: z.number(),
@@ -162,8 +173,9 @@ export default createTRPCRouter({
         label,
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { groupId, type, label } = input
+      ctx.audit.set({ target: { type: `${type}.group`, id: groupId } })
 
       await assertGroupExists(groupId, type)
 
@@ -174,12 +186,17 @@ export default createTRPCRouter({
       if (!labelIdResult.length) throw new Error("Label not found")
       const labelId = labelIdResult[0].id
 
-      return type === "tg"
-        ? DB.delete(TG_RELATIONS)
-            .where(and(eq(TG_RELATIONS.groupId, groupId), eq(TG_RELATIONS.labelId, labelId)))
-            .returning()
-        : DB.delete(WA_RELATIONS)
-            .where(and(eq(WA_RELATIONS.groupId, groupId), eq(WA_RELATIONS.labelId, labelId)))
-            .returning()
+      const result =
+        type === "tg"
+          ? await DB.delete(TG_RELATIONS)
+              .where(and(eq(TG_RELATIONS.groupId, groupId), eq(TG_RELATIONS.labelId, labelId)))
+              .returning()
+          : await DB.delete(WA_RELATIONS)
+              .where(and(eq(WA_RELATIONS.groupId, groupId), eq(WA_RELATIONS.labelId, labelId)))
+              .returning()
+      // The group may not have had the label: then nothing changed.
+      if (result.length === 0) ctx.audit.skip()
+      else ctx.audit.set({ before: { label } })
+      return result
     }),
 })

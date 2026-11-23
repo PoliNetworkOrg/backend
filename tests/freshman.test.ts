@@ -18,6 +18,9 @@ vi.hoisted(() => {
   })
 })
 
+const events = vi.hoisted(() => ({ write: vi.fn() }))
+vi.mock("@/audit/store", () => ({ writeAuditEvent: events.write }))
+
 const db = vi.hoisted(() => ({ transaction: vi.fn(), set: vi.fn(), update: vi.fn() }))
 vi.mock("@/db", async () => ({
   DB: { transaction: db.transaction, update: db.update },
@@ -48,6 +51,12 @@ beforeEach(() => {
   const chain = { where: () => ({ returning: async () => [{ id: "featured-1" }] }) }
   db.set.mockReturnValue(chain)
   db.update.mockReturnValue({ set: db.set })
+  db.transaction.mockImplementation(async (run) =>
+    run({
+      select: () => ({ from: () => ({ where: () => ({ for: async () => [{ id: "featured-1", title: "Before" }] }) }) }),
+      update: db.update,
+    })
+  )
 })
 
 describe("Freshman validation", () => {
@@ -126,6 +135,70 @@ describe("Freshman authorization", () => {
   it("takes authorship from the token and clears a legacy modifier", async () => {
     await freshman.createCaller(context(editor, ["web:content:write"])).updateCard({ id: "featured-1", ...fields })
     expect(db.set).toHaveBeenCalledWith({ ...fields, legacyModifiedByTgId: null, modifiedBySub: "editor" })
+    expect(events.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetType: "web.freshmanCard",
+        targetId: "featured-1",
+        before: { id: "featured-1", title: "Before" },
+        after: { id: "featured-1" },
+      })
+    )
+  })
+
+  it("records both rows of a card swap from the transaction results", async () => {
+    const before = [
+      { id: "featured-1", ...fields },
+      { id: "featured-2", ...fields, title: "Second" },
+    ]
+    const after = [
+      { ...before[0], title: "Second" },
+      { ...before[1], title: "Title" },
+    ]
+    const returning = vi.fn().mockResolvedValueOnce([after[0]]).mockResolvedValueOnce([after[1]])
+    db.transaction.mockImplementation(async (run) =>
+      run({
+        select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ for: async () => before }) }) }) }),
+        update: () => ({ set: () => ({ where: () => ({ returning }) }) }),
+      })
+    )
+    await freshman.createCaller(context(editor, ["web:content:write"])).moveCard({ id: "featured-1", direction: 1 })
+    expect(returning).toHaveBeenCalledTimes(2)
+    expect(events.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetId: "featured-1",
+        before,
+        after,
+      })
+    )
+  })
+
+  it("records both FAQ slots when selecting an already featured FAQ", async () => {
+    const rows = Array.from({ length: 5 }, (_, position) => ({ position, faqId: position + 1 }))
+    const after = [
+      { position: 0, faqId: 2 },
+      { position: 1, faqId: 1 },
+    ]
+    let reads = 0
+    db.transaction.mockImplementation(async (run) =>
+      run({
+        execute: async () => {},
+        select: () => ({
+          from: () =>
+            ++reads === 1 ? { orderBy: async () => rows } : { where: () => ({ for: async () => [{ id: 2 }] }) },
+        }),
+        delete: () => ({ where: async () => {} }),
+        insert: () => ({ values: () => ({ returning: async () => after }) }),
+      })
+    )
+    await freshman.createCaller(context(editor, ["web:content:write"])).selectFaq({ position: 0, faqId: 2 })
+    expect(events.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetType: "web.freshmanFaq",
+        targetId: "0",
+        before: rows.slice(0, 2),
+        after,
+      })
+    )
   })
 
   it("rejects a client-supplied author", async () => {

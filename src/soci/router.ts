@@ -1,10 +1,22 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import { type AuditTargetOf, audit } from "@/audit/option"
 import { dashboard } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
 import { MAX_RECEIPT_BYTES } from "./fees"
 import type { SociService } from "./service"
+
+/** The socio a call names by member number, or the one it created; a socio's own `me.*` calls name nobody else. */
+const socioTarget: AuditTargetOf = ({ input, data }) => {
+  const numberOf = (value: unknown) =>
+    C.memberNumberSchema.safeParse(
+      value && typeof value === "object" ? (value as { number?: unknown }).number : undefined
+    )
+  const fromInput = numberOf(input)
+  const number = fromInput.success ? fromInput : numberOf(data)
+  return { type: "soci.member", id: number.success ? number.data : null }
+}
 
 /**
  * The Libro Soci. Every `members.*` and `fees.*` procedure needs `admin:access` and a `soci:*` permission; the policy
@@ -13,21 +25,27 @@ import type { SociService } from "./service"
  * databases and Microsoft 365.
  */
 export function createSociRouter(soci: SociService) {
+  // The Libro Soci keeps each record's history in `soci_activity`, and its inputs carry personal data: the audit log
+  // only says who changed which socio, and whether it worked.
   const direttivo = (permission: string) =>
-    policy(dashboard(permission)).use(({ ctx, next }) => {
-      if (ctx.actor.kind !== "user" || !ctx.can("admin:access"))
-        throw new TRPCError({ code: "FORBIDDEN", message: "Missing admin:access" })
-      return next({ ctx: { sub: ctx.actor.sub } })
-    })
+    policy(dashboard(permission))
+      .meta(audit.minimal({ target: socioTarget }))
+      .use(({ ctx, next }) => {
+        if (ctx.actor.kind !== "user" || !ctx.can("admin:access"))
+          throw new TRPCError({ code: "FORBIDDEN", message: "Missing admin:access" })
+        return next({ ctx: { sub: ctx.actor.sub } })
+      })
   const read = direttivo("soci:read")
   const write = direttivo("soci:write")
-  const me = policy(dashboard("people:self")).use(({ ctx, next }) => {
-    if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN", message: "Only for signed-in soci" })
-    const entraObjectId = ctx.access?.current()?.bySub(ctx.actor.sub)?.entraObjectId ?? null
-    if (!entraObjectId)
-      throw new TRPCError({ code: "FORBIDDEN", message: "Sign in with your PoliNetwork Microsoft 365 account." })
-    return next({ ctx: { sub: ctx.actor.sub, entraObjectId } })
-  })
+  const me = policy(dashboard("people:self"))
+    .meta(audit.minimal({ target: () => ({ type: "soci.member", id: null }) }))
+    .use(({ ctx, next }) => {
+      if (ctx.actor.kind !== "user") throw new TRPCError({ code: "FORBIDDEN", message: "Only for signed-in soci" })
+      const entraObjectId = ctx.access?.current()?.bySub(ctx.actor.sub)?.entraObjectId ?? null
+      if (!entraObjectId)
+        throw new TRPCError({ code: "FORBIDDEN", message: "Sign in with your PoliNetwork Microsoft 365 account." })
+      return next({ ctx: { sub: ctx.actor.sub, entraObjectId } })
+    })
   const receipt = z
     .instanceof(FormData)
     .transform(

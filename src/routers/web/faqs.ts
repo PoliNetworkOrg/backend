@@ -1,5 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
 import { dashboard, publicData } from "@/idp/policies"
@@ -55,6 +56,7 @@ export default createTRPCRouter({
     }),
 
   addFaqs: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         titleIt: z.string(),
@@ -78,10 +80,12 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.faq", id: res.id, label: res.titleIt }, after: res })
       return res
     }),
 
   addFaqsCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         titleIt: z.string(),
@@ -101,10 +105,12 @@ export default createTRPCRouter({
         })
         .returning()
 
+      ctx.audit.set({ target: { type: "web.faqCategory", id: res.id, label: res.titleIt }, after: res })
       return res
     }),
 
   editFaqs: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -118,23 +124,32 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, descriptionIt, descriptionEn, categoryId } = input
 
-      const [res] = await DB.update(FAQS)
-        .set({
-          titleIt,
-          titleEn,
-          descriptionIt,
-          descriptionEn,
-          categoryId,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(FAQS.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(FAQS).where(eq(FAQS.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(FAQS)
+          .set({
+            titleIt,
+            titleEn,
+            descriptionIt,
+            descriptionEn,
+            categoryId,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(FAQS.id, id))
+          .returning()
 
+        return { before, res }
+      })
+
+      ctx.audit.set({ target: { type: "web.faq", id, label: res?.titleIt ?? before?.titleIt }, before, after: res })
       if (!res) return { error: "NOT_FOUND" }
       return res
     }),
 
   editFaqsCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
@@ -146,27 +161,40 @@ export default createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { id, titleIt, titleEn, icon } = input
 
-      const [res] = await DB.update(FAQ_CATEGORIES)
-        .set({
-          titleIt,
-          titleEn,
-          icon,
-          ...modifiedByColumns(authorOf(ctx.actor)),
-        })
-        .where(eq(FAQ_CATEGORIES.id, id))
-        .returning()
+      const { before, res } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).limit(1).for("update")
+        if (!before) return { before, res: undefined }
+        const [res] = await tx
+          .update(FAQ_CATEGORIES)
+          .set({
+            titleIt,
+            titleEn,
+            icon,
+            ...modifiedByColumns(authorOf(ctx.actor)),
+          })
+          .where(eq(FAQ_CATEGORIES.id, id))
+          .returning()
 
+        return { before, res }
+      })
+
+      ctx.audit.set({
+        target: { type: "web.faqCategory", id, label: res?.titleIt ?? before?.titleIt },
+        before,
+        after: res,
+      })
       if (!res) return { error: "NOT_FOUND" }
       return res
     }),
 
   deleteFaqs: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       return DB.transaction(async (tx) => {
         // Match selectFaq's lock order so a FAQ cannot become selected between this check and deletion.
@@ -178,6 +206,7 @@ export default createTRPCRouter({
           .limit(1)
         if (featured) return { error: "FEATURED_FAQ" }
         const deleted = await tx.delete(FAQS).where(eq(FAQS.id, id)).returning()
+        ctx.audit.set({ target: { type: "web.faq", id, label: deleted[0]?.titleIt }, before: deleted[0] })
 
         if (deleted.length === 0) return { error: "NOT_FOUND" }
         return { error: null }
@@ -185,12 +214,13 @@ export default createTRPCRouter({
     }),
 
   deleteFaqsCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { id } = input
       return DB.transaction(async (tx) => {
         await tx.execute(sql`LOCK TABLE ${FEATURED} IN SHARE ROW EXCLUSIVE MODE`)
@@ -202,6 +232,7 @@ export default createTRPCRouter({
           .limit(1)
         if (featured) return { error: "FEATURED_FAQ" }
         const deleted = await tx.delete(FAQ_CATEGORIES).where(eq(FAQ_CATEGORIES.id, id)).returning()
+        ctx.audit.set({ target: { type: "web.faqCategory", id, label: deleted[0]?.titleIt }, before: deleted[0] })
 
         if (deleted.length === 0) return { error: "NOT_FOUND" }
         return { error: null }

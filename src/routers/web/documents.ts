@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { and, asc, desc, eq, inArray, max, ne, sql } from "drizzle-orm"
 import { PDFDocument } from "pdf-lib"
 import z from "zod"
+import { audit } from "@/audit/option"
 import { deleteBlob, uploadBlob } from "@/azure/blob"
 import { DB, SCHEMA } from "@/db"
 import { authorOf, createdByColumns, modifiedByColumns } from "@/idp/author"
@@ -197,6 +198,14 @@ async function nextDocumentPosition(tx: Tx, categoryId: number) {
   return last === null ? 0 : last + 1
 }
 
+const categoryTarget = (row: { id: number; title: string }) => ({
+  type: "web.documentCategory",
+  id: row.id,
+  label: row.title,
+})
+const documentTarget = (row: { id: number; title: string }) => ({ type: "web.document", id: row.id, label: row.title })
+
+// Audit states are set once a transaction has committed, and only for calls that changed something.
 export default createTRPCRouter({
   getCatalog: policy(publicData)
     .output(
@@ -269,9 +278,10 @@ export default createTRPCRouter({
     .query(async () => readCatalog()),
 
   createCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(z.object({ slug: slugSchema, title: titleSchema, description: descriptionSchema }))
     .mutation(async ({ input, ctx }) => {
-      return DB.transaction(async (tx) => {
+      const result = await DB.transaction(async (tx) => {
         await lockCategoryList(tx)
         const [{ last }] = await tx.select({ last: max(CATEGORIES.position) }).from(CATEGORIES)
         const [row] = await tx
@@ -282,9 +292,12 @@ export default createTRPCRouter({
         if (!row) return { error: "DUPLICATE_SLUG" as const }
         return row
       })
+      if (!("error" in result)) ctx.audit.set({ target: categoryTarget(result), after: result })
+      return result
     }),
 
   updateCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: idSchema,
@@ -295,7 +308,9 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { id, ...fields } = input
-      return DB.transaction(async (tx) => {
+      const result = await DB.transaction(async (tx) => {
+        const [before] = await tx.select(categoryColumns).from(CATEGORIES).where(eq(CATEGORIES.id, id)).for("update")
+        if (!before) return { error: "NOT_FOUND" as const }
         if (fields.slug !== undefined && (await slugTaken(tx, CATEGORIES, fields.slug, id)))
           return { error: "DUPLICATE_SLUG" as const }
         const [row] = await tx
@@ -304,14 +319,18 @@ export default createTRPCRouter({
           .where(eq(CATEGORIES.id, id))
           .returning(categoryColumns)
         if (!row) return { error: "NOT_FOUND" as const }
-        return row
+        return { before, row }
       }).catch(duplicateSlug("web_document_categories"))
+      if (result.error) return { error: result.error }
+      ctx.audit.set({ target: categoryTarget(result.row), before: result.before, after: result.row })
+      return result.row
     }),
 
   deleteCategory: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(z.object({ id: idSchema }))
-    .mutation(async ({ input }) => {
-      return DB.transaction(async (tx) => {
+    .mutation(async ({ input, ctx }) => {
+      const result = await DB.transaction(async (tx) => {
         if (!(await lockCategories(tx, [input.id])).has(input.id)) return { error: "NOT_FOUND" as const }
         const [document] = await tx
           .select({ id: DOCUMENTS.id })
@@ -319,15 +338,22 @@ export default createTRPCRouter({
           .where(eq(DOCUMENTS.categoryId, input.id))
           .limit(1)
         if (document) return { error: "CATEGORY_NOT_EMPTY" as const }
-        await tx.delete(CATEGORIES).where(eq(CATEGORIES.id, input.id))
-        return { error: null }
+        const [deleted] = await tx.delete(CATEGORIES).where(eq(CATEGORIES.id, input.id)).returning(categoryColumns)
+        return { deleted }
       })
+      if (result.error) return { error: result.error }
+      ctx.audit.set({
+        target: { type: "web.documentCategory", id: input.id, label: result.deleted?.title },
+        before: result.deleted,
+      })
+      return { error: null }
     }),
 
   reorderCategories: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(z.object({ ids: orderSchema }))
-    .mutation(async ({ input }) => {
-      return DB.transaction(async (tx) => {
+    .mutation(async ({ input, ctx }) => {
+      const result = await DB.transaction(async (tx) => {
         await lockCategoryList(tx)
         const current = await tx
           .select({ id: CATEGORIES.id })
@@ -341,13 +367,27 @@ export default createTRPCRouter({
           )
         )
           return { error: "INVALID_ORDER" as const }
+        const order = () =>
+          tx
+            .select({ id: CATEGORIES.id, title: CATEGORIES.title, position: CATEGORIES.position })
+            .from(CATEGORIES)
+            .orderBy(asc(CATEGORIES.position), asc(CATEGORIES.id))
+        const before = await order()
         for (const [position, id] of input.ids.entries())
           await tx.update(CATEGORIES).set({ position }).where(eq(CATEGORIES.id, id))
-        return { error: null }
+        return { before, after: await order() }
       })
+      if (result.error) return { error: result.error }
+      ctx.audit.set({
+        target: { type: "web.documentCategories", id: "order", label: "Document categories order" },
+        before: result.before,
+        after: result.after,
+      })
+      return { error: null }
     }),
 
   createDocument: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         categoryId: idSchema,
@@ -357,7 +397,7 @@ export default createTRPCRouter({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      return DB.transaction(async (tx) => {
+      const result = await DB.transaction(async (tx) => {
         if (!(await lockCategories(tx, [input.categoryId])).has(input.categoryId))
           return { error: "CATEGORY_NOT_FOUND" as const }
         const [row] = await tx
@@ -373,9 +413,12 @@ export default createTRPCRouter({
         if (!row) return { error: "DUPLICATE_SLUG" as const }
         return row
       })
+      if (!("error" in result)) ctx.audit.set({ target: documentTarget(result), after: result })
+      return result
     }),
 
   updateDocument: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z.object({
         id: idSchema,
@@ -387,16 +430,13 @@ export default createTRPCRouter({
     )
     .mutation(async ({ input, ctx }) => {
       const { id, categoryId, description, ...fields } = input
-      return DB.transaction(async (tx) => {
+      const result = await DB.transaction(async (tx) => {
         await lockDocument(tx, id)
-        const [current] = await tx
-          .select({ categoryId: DOCUMENTS.categoryId })
-          .from(DOCUMENTS)
-          .where(eq(DOCUMENTS.id, id))
-        if (!current) return { error: "NOT_FOUND" as const }
-        const locked = await lockCategories(tx, [current.categoryId, categoryId ?? current.categoryId])
+        const [before] = await tx.select(documentColumns).from(DOCUMENTS).where(eq(DOCUMENTS.id, id))
+        if (!before) return { error: "NOT_FOUND" as const }
+        const locked = await lockCategories(tx, [before.categoryId, categoryId ?? before.categoryId])
         if (categoryId !== undefined && !locked.has(categoryId)) return { error: "CATEGORY_NOT_FOUND" as const }
-        const moving = categoryId !== undefined && categoryId !== current.categoryId
+        const moving = categoryId !== undefined && categoryId !== before.categoryId
         if (fields.slug !== undefined && (await slugTaken(tx, DOCUMENTS, fields.slug, id)))
           return { error: "DUPLICATE_SLUG" as const }
         const [row] = await tx
@@ -410,59 +450,74 @@ export default createTRPCRouter({
           })
           .where(eq(DOCUMENTS.id, id))
           .returning(documentColumns)
-        return row
+        if (!row) return { error: "NOT_FOUND" as const }
+        return { before, row }
       }).catch(duplicateSlug("web_documents"))
+      if (result.error) return { error: result.error }
+      ctx.audit.set({ target: documentTarget(result.row), before: result.before, after: result.row })
+      return result.row
     }),
 
   deleteDocument: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(z.object({ id: idSchema }))
-    .mutation(async ({ input }) => {
-      const files = await DB.transaction(async (tx) => {
+    .mutation(async ({ input, ctx }) => {
+      const deleted = await DB.transaction(async (tx) => {
         await lockDocument(tx, input.id)
-        const [document] = await tx
-          .select({ categoryId: DOCUMENTS.categoryId })
-          .from(DOCUMENTS)
-          .where(eq(DOCUMENTS.id, input.id))
+        const [document] = await tx.select(documentColumns).from(DOCUMENTS).where(eq(DOCUMENTS.id, input.id))
         if (!document) return null
         await lockCategories(tx, [document.categoryId])
         // Wait for in-flight version uploads before removing their document.
         await tx.select({ id: DOCUMENTS.id }).from(DOCUMENTS).where(eq(DOCUMENTS.id, input.id)).for("update")
-        const versions = await tx
-          .delete(VERSIONS)
-          .where(eq(VERSIONS.documentId, input.id))
-          .returning({ file: VERSIONS.file })
+        const versions = await tx.delete(VERSIONS).where(eq(VERSIONS.documentId, input.id)).returning(versionColumns)
         await tx.delete(DOCUMENTS).where(eq(DOCUMENTS.id, input.id))
-        return versions.map((version) => version.file)
+        return { document, versions }
       })
-      if (!files) return { error: "NOT_FOUND" as const }
-      await deleteBlobs(files)
+      if (!deleted) return { error: "NOT_FOUND" as const }
+      ctx.audit.set({
+        target: documentTarget(deleted.document),
+        before: { ...deleted.document, versions: deleted.versions },
+      })
+      await deleteBlobs(deleted.versions.map((version) => version.file))
       return { error: null }
     }),
 
   reorderDocuments: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(z.object({ categoryId: idSchema, ids: orderSchema }))
-    .mutation(async ({ input }) => {
-      return DB.transaction(async (tx) => {
+    .mutation(async ({ input, ctx }) => {
+      const result = await DB.transaction(async (tx) => {
         if (!(await lockCategories(tx, [input.categoryId])).has(input.categoryId))
           return { error: "INVALID_ORDER" as const }
-        const current = await tx
-          .select({ id: DOCUMENTS.id })
-          .from(DOCUMENTS)
-          .where(eq(DOCUMENTS.categoryId, input.categoryId))
+        const order = () =>
+          tx
+            .select({ id: DOCUMENTS.id, title: DOCUMENTS.title, position: DOCUMENTS.position })
+            .from(DOCUMENTS)
+            .where(eq(DOCUMENTS.categoryId, input.categoryId))
+            .orderBy(asc(DOCUMENTS.position), asc(DOCUMENTS.id))
+        const before = await order()
         if (
           !sameIds(
-            current.map((row) => row.id),
+            before.map((row) => row.id),
             input.ids
           )
         )
           return { error: "INVALID_ORDER" as const }
         for (const [position, id] of input.ids.entries())
           await tx.update(DOCUMENTS).set({ position }).where(eq(DOCUMENTS.id, id))
-        return { error: null }
+        return { before, after: await order() }
       })
+      if (result.error) return { error: result.error }
+      ctx.audit.set({
+        target: { type: "web.documentCategory", id: input.categoryId, label: "Documents order" },
+        before: result.before,
+        after: result.after,
+      })
+      return { error: null }
     }),
 
   addVersion: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(
       z
         .instanceof(FormData)
@@ -474,8 +529,11 @@ export default createTRPCRouter({
       const author = createdByColumns(authorOf(ctx.actor))
       const bytes = await readPdf(file)
 
-      const [document] = await DB.select({ id: DOCUMENTS.id }).from(DOCUMENTS).where(eq(DOCUMENTS.id, documentId))
+      const [document] = await DB.select({ id: DOCUMENTS.id, title: DOCUMENTS.title })
+        .from(DOCUMENTS)
+        .where(eq(DOCUMENTS.id, documentId))
       if (!document) return { error: "NOT_FOUND" as const }
+      ctx.audit.set({ target: documentTarget(document) })
       const [existing] = await DB.select({ id: VERSIONS.id })
         .from(VERSIONS)
         .where(and(eq(VERSIONS.documentId, documentId), eq(VERSIONS.version, version)))
@@ -502,14 +560,19 @@ export default createTRPCRouter({
         throw error
       })
       if ("error" in result) await deleteBlobs([uploadedFile.url])
+      else ctx.audit.set({ after: result })
       return result
     }),
 
   deleteVersion: policy(dashboard("web:content:write"))
+    .meta(audit.full())
     .input(z.object({ id: idSchema }))
-    .mutation(async ({ input }) => {
-      const [deleted] = await DB.delete(VERSIONS).where(eq(VERSIONS.id, input.id)).returning({ file: VERSIONS.file })
+    .mutation(async ({ input, ctx }) => {
+      const [deleted] = await DB.delete(VERSIONS)
+        .where(eq(VERSIONS.id, input.id))
+        .returning({ ...versionColumns, documentId: VERSIONS.documentId })
       if (!deleted) return { error: "NOT_FOUND" as const }
+      ctx.audit.set({ target: { type: "web.document", id: deleted.documentId }, before: deleted })
       await deleteBlobs([deleted.file])
       return { error: null }
     }),
