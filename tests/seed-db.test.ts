@@ -133,10 +133,12 @@ describe.skipIf(!testPort)("database seed", () => {
       query(`SELECT 'users' AS name, count(*)::int AS count FROM tg_users
         UNION ALL SELECT 'messages', count(*)::int FROM tg_messages
         UNION ALL SELECT 'faqs', count(*)::int FROM web_faqs
+        UNION ALL SELECT 'acknowledgements', count(*)::int FROM web_acknowledgements
         UNION ALL SELECT 'document_versions', count(*)::int FROM web_document_versions
         UNION ALL SELECT 'grants', count(*)::int FROM tg_grants
         ORDER BY name`)
     const expected = [
+      { name: "acknowledgements", count: 17 },
       { name: "document_versions", count: 3 },
       { name: "faqs", count: 9 },
       { name: "grants", count: 11 },
@@ -148,6 +150,8 @@ describe.skipIf(!testPort)("database seed", () => {
       query(`SELECT tablename, data AS fingerprint FROM (
         SELECT 'tg_messages' AS tablename, md5(string_agg(row_to_json(m)::text, ',' ORDER BY chat_id, message_id)) AS data
           FROM tg_messages m
+        UNION ALL SELECT 'web_acknowledgements', md5(string_agg(row_to_json(a)::text, ',' ORDER BY id))
+          FROM web_acknowledgements a
         UNION ALL SELECT 'web_faqs', md5(string_agg(row_to_json(f)::text, ',' ORDER BY id)) FROM web_faqs f
         UNION ALL SELECT 'tg_grants', md5(string_agg(row_to_json(g)::text, ',' ORDER BY id)) FROM tg_grants g
       ) t ORDER BY tablename`)
@@ -161,7 +165,8 @@ describe.skipIf(!testPort)("database seed", () => {
     await query(`UPDATE tg_users SET first_name = 'replace-me';
       UPDATE web_faq_categories SET title_it = 'replace-me';
       UPDATE web_projects SET title = 'replace-me';
-      UPDATE web_document_categories SET title = 'replace-me'`)
+      UPDATE web_document_categories SET title = 'replace-me';
+      UPDATE web_acknowledgement_groups SET title = 'replace-me'`)
     await seed(true)
 
     expect(await counts()).toEqual(expected)
@@ -169,5 +174,6 @@ describe.skipIf(!testPort)("database seed", () => {
     expect(await query("SELECT * FROM web_faq_categories WHERE title_it = 'replace-me'")).toEqual([])
     expect(await query("SELECT * FROM web_projects WHERE title = 'replace-me'")).toEqual([])
     expect(await query("SELECT * FROM web_document_categories WHERE title = 'replace-me'")).toEqual([])
+    expect(await query("SELECT * FROM web_acknowledgement_groups WHERE title = 'replace-me'")).toEqual([])
   }, 30_000)
 })

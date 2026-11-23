@@ -792,6 +792,71 @@ else {
   console.log(`SEED: web_document_categories → ${DOCUMENT_CONTENT.length} rows, with sample documents`)
 }
 
+// The acknowledgements page's sample credits, in the layout of its design: role groups for the website, then the
+// people behind the projects. Groups and people are seeded (or replaced) together.
+const ACKNOWLEDGEMENT_GROUPS: {
+  title: string
+  icon: (typeof SCHEMA.WEB.acknowledgementGroups.$inferInsert)["icon"]
+  people: [name: string, detail?: string][]
+}[] = [
+  { title: "Project manager", icon: "settings", people: [["Mario Rossi"]] },
+  {
+    title: "Designer",
+    icon: "palette",
+    people: [["Giulia Bianchi", "Design system"], ["Luca Verdi"], ["Sara Neri"], ["Marco Gallo"]],
+  },
+  {
+    title: "Developer",
+    icon: "code",
+    people: [["Paolo Conti", "Responsabile"], ["Elena Ricci", "Backend"], ["Andrea Greco"], ["Chiara Bruno"]],
+  },
+  { title: "Altri contributi", icon: "smile", people: [["Davide Costa"], ["Francesca Moretti"]] },
+]
+const ACKNOWLEDGED_PROJECTS: [name: string, project: string][] = [
+  ["Matteo Romano", "PoliAule"],
+  ["Laura Colombo", "Orario"],
+  ["Simone Marino", "MyPoliFile"],
+  ["Alessia Ferrari", "PoliMi Schedule"],
+  ["Federico Esposito", "Graduatorie"],
+  ["Martina Rizzo", "The TOL Project"],
+]
+const [firstAcknowledgementGroup] = await DB.select().from(SCHEMA.WEB.acknowledgementGroups).limit(1)
+const [firstAcknowledgement] = await DB.select().from(SCHEMA.WEB.acknowledgements).limit(1)
+if ((firstAcknowledgementGroup || firstAcknowledgement) && !force)
+  console.log("SEED: web_acknowledgements already contains data, skipping")
+else {
+  await DB.transaction(async (tx) => {
+    await tx.delete(SCHEMA.WEB.acknowledgementGroups) // Their people are deleted with them.
+    await tx.delete(SCHEMA.WEB.acknowledgements)
+    for (const [position, { people, ...group }] of ACKNOWLEDGEMENT_GROUPS.entries()) {
+      const [{ id: groupId }] = await tx
+        .insert(SCHEMA.WEB.acknowledgementGroups)
+        .values({ ...group, position, ...seedAuthor })
+        .returning({ id: SCHEMA.WEB.acknowledgementGroups.id })
+      await tx.insert(SCHEMA.WEB.acknowledgements).values(
+        people.map(([name, detail], index) => ({
+          section: "website" as const,
+          groupId,
+          name,
+          detail: detail ?? null,
+          position: index,
+          ...seedAuthor,
+        }))
+      )
+    }
+    await tx.insert(SCHEMA.WEB.acknowledgements).values(
+      ACKNOWLEDGED_PROJECTS.map(([name, detail], position) => ({
+        section: "projects" as const,
+        name,
+        detail,
+        position,
+        ...seedAuthor,
+      }))
+    )
+  })
+  console.log(`SEED: web_acknowledgement_groups → ${ACKNOWLEDGEMENT_GROUPS.length} rows, with sample people`)
+}
+
 const waGroupIds = (await DB.select({ id: SCHEMA.WA.waGroups.id }).from(SCHEMA.WA.waGroups)).map((g) => g.id)
 const tgCourseGroupIds = [...tgGroupIdByLink.values()]
 await seedTable("web_group_link_reports", SCHEMA.WEB.groupLinkReports, () => {
