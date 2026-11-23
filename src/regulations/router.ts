@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
-import { audit } from "@/audit/option"
+import { type AuditTargetOf, audit } from "@/audit/option"
 import { dashboard, SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
@@ -28,7 +28,21 @@ const AUDITED_FIELDS = [
   "title",
   "name",
   "expiresAt",
+  "template",
+  "storage",
 ] as const
+
+/**
+ * The document `documents.create` and `documents.upload` add. They name it `key`, which audit copies hide as a secret,
+ * so the event names it as its target. The raw input is JSON for `create` and `FormData` for `upload`.
+ */
+const newDocument: AuditTargetOf = ({ input }) => {
+  const fields = input instanceof FormData ? Object.fromEntries(input.entries()) : input
+  if (fields === null || typeof fields !== "object") return null
+  const { key, title } = fields as Record<string, unknown>
+  if (typeof key !== "string") return null
+  return { type: "regulations.document", id: key, label: typeof title === "string" ? title : null }
+}
 
 /**
  * `regulations.*`: every procedure is open to dashboard users (scope `backend:admin`), and the service checks the
@@ -87,8 +101,14 @@ export function createRegulationsRouter(
         .input(z.object({ documentKey: C.documentKeySchema }))
         .output(C.documentSchema)
         .query(({ ctx, input }) => service.getDocument(ctx.viewer, input.documentKey)),
-      sync: user.output(C.syncResultSchema).mutation(({ ctx }) => service.syncDocuments(ctx.viewer)),
+      sync: user.output(C.syncResultSchema).mutation(async ({ ctx }) => {
+        const result = await service.syncDocuments(ctx.viewer)
+        // Sync takes no input: what it imported, updated and skipped is the only trace of what it changed.
+        ctx.audit.set({ after: { imported: result.imported, updated: result.updated, skipped: result.skipped } })
+        return result
+      }),
       create: manager
+        .meta(audit.full({ fields: AUDITED_FIELDS, target: newDocument }))
         .input(C.createDocumentInputSchema)
         .output(C.documentSchema)
         .mutation(({ ctx, input }) =>
@@ -97,6 +117,7 @@ export function createRegulationsRouter(
             : emanation().createDocument(ctx.viewer, input)
         ),
       upload: manager
+        .meta(audit.full({ fields: AUDITED_FIELDS, target: newDocument }))
         .input(uploadDocument)
         .output(C.documentSchema)
         .mutation(({ ctx, input }) => service.uploadDocument(ctx.viewer, input)),
