@@ -30,6 +30,13 @@ export type Person = {
   createdAt: string
   updatedBy: string
   updatedAt: string
+  /** Their Politecnico course (`courses`), or null. */
+  courseCode: number | null
+  campus: C.CampusId | null
+  otherAssociations: string[]
+  representativeRoles: C.RepresentativeRole[]
+  /** The seat, with the `other` role. */
+  representativeOther: string | null
 }
 
 export type Assignment = {
@@ -101,6 +108,8 @@ export type PeopleState = {
   commands: Record<string, StoredCommand>
   invites: Record<string, Invite>
   mail: Record<string, Mail>
+  /** Politecnico's courses by code: reference data People reads and never writes. */
+  courses: Record<string, C.Course>
   /**
    * `roleRevision` advances whenever Auth confirms or refuses a role change; `person` is the last person ID
    * given; `directoryReadAt` is when the last directory read applied to the register started, in milliseconds.
@@ -113,6 +122,7 @@ export const emptyState = (): PeopleState => ({
   commands: {},
   invites: {},
   mail: {},
+  courses: {},
   counters: {},
 })
 

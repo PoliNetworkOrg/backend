@@ -120,6 +120,13 @@ The backend checks every role change with the same rules as Auth (`src/people/ru
 role's permissions. A concept with no role bound in Auth, or with more than one, can't be assigned. Writes are
 serialized by one transaction lock. Grant `idp:people:roles` to the backend's OAuth client to let it change roles.
 
+A record's profile: their Politecnico course (`course_code`, from `polimi_courses`), campus, other associations, and
+student representative seats (CCS, school, Senate, Board, or Other with the seat's name). Which CCS and which school
+follow from the course and are never stored. Rows carry the course and campus; associations and seats are personal data,
+returned only with `people:read` (`courses.list` and `associations.suggest` need it too) and kept out of the audit log.
+On update an omitted profile field is left unchanged, so a client that predates them never erases them. The course
+list is updated once a year from Polimi's manifesti: see `scripts/polimi-courses/README.md`.
+
 ## Soci
 
 The `soci` router is the Libro Soci: one record per admission in `soci_members`, keyed on the Microsoft 365 account

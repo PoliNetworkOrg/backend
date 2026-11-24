@@ -194,6 +194,43 @@ try {
   const { id: next } = await people.createPerson(hr, input("Giulia"))
   assert.ok(next > absorbedId, `${next} reuses or precedes the absorbed ${absorbedId}`)
   checked.push("a record made and absorbed in one transaction keeps its history, and its ID isn't given again")
+
+  // The profile round-trips, with the course read from the course list the migrations loaded.
+  const { id: chiara } = await people.createPerson(hr, {
+    ...input("Chiara"),
+    courseCode: 531,
+    campus: "cremona",
+    otherAssociations: ["Svoltastudenti", "POuL"],
+    representativeRoles: ["ccs", "other"],
+    representativeOther: "Comitato Sportivo",
+  })
+  const profiled = personRecordSchema.parse(await people.getPerson(hr, { id: chiara }))
+  assert.deepEqual(
+    {
+      course: profiled.course && { code: profiled.course.code, school: profiled.course.school },
+      campus: profiled.campus,
+      otherAssociations: profiled.otherAssociations,
+      representativeRoles: profiled.representativeRoles,
+      representativeOther: profiled.representativeOther,
+    },
+    {
+      course: { code: 531, school: "3i" },
+      campus: "cremona",
+      otherAssociations: ["Svoltastudenti", "POuL"],
+      representativeRoles: ["ccs", "other"],
+      representativeOther: "Comitato Sportivo",
+    }
+  )
+  await assert.rejects(db.update(persons).set({ representativeOther: null }).where(eq(persons.id, chiara)))
+  await assert.rejects(db.update(persons).set({ courseCode: null }).where(eq(persons.id, chiara)))
+  await assert.rejects(db.update(persons).set({ courseCode: 99999 }).where(eq(persons.id, chiara)))
+  await assert.rejects(
+    db
+      .update(persons)
+      .set({ campus: "como" as never })
+      .where(eq(persons.id, chiara))
+  )
+  checked.push("the profile round-trips, and the database refuses what the rules refuse")
   console.log(JSON.stringify({ checked }))
 } finally {
   await client.close()

@@ -2,6 +2,7 @@ import { pgTableCreator } from "drizzle-orm/pg-core"
 
 export const createTable = {
   people: pgTableCreator((tableName) => `people_${tableName}`),
+  polimi: pgTableCreator((tableName) => `polimi_${tableName}`),
   common: pgTableCreator((tableName) => `common_${tableName}`),
   esign: pgTableCreator((tableName) => `esign_${tableName}`),
   regulations: pgTableCreator((tableName) => `regulations_${tableName}`),

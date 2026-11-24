@@ -12,32 +12,65 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
-import type { TeamFields } from "@/people/contract"
+import type { CampusId, RepresentativeRole, TeamFields } from "@/people/contract"
 import type { RoleCommand } from "@/people/roles"
 import { createTable } from "../create-table"
+import { courses } from "../polimi"
 
 const at = (name: string) => timestamp(name, { withTimezone: true, mode: "date" })
 
 /** One record per person. Linked to a login account through `account_sub`, never through the contact email. */
-export const persons = createTable.people("persons", {
-  id: text().primaryKey(),
-  firstName: text("first_name").notNull(),
-  lastName: text("last_name").notNull(),
-  /** Only for sending invites. */
-  contactEmail: text("contact_email"),
-  phone: text(),
-  /** Informational only. */
-  telegramUsername: text("telegram_username"),
-  notes: text(),
-  accountSub: text("account_sub").unique(),
-  linkedAt: at("linked_at"),
-  linkedBy: text("linked_by"),
-  linkMethod: text("link_method").$type<"invite" | "manual" | "auth">(),
-  createdBy: text("created_by").notNull(),
-  createdAt: at("created_at").notNull(),
-  updatedBy: text("updated_by").notNull(),
-  updatedAt: at("updated_at").notNull(),
-})
+export const persons = createTable.people(
+  "persons",
+  {
+    id: text().primaryKey(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    /** Only for sending invites. */
+    contactEmail: text("contact_email"),
+    phone: text(),
+    /** Informational only. */
+    telegramUsername: text("telegram_username"),
+    notes: text(),
+    accountSub: text("account_sub").unique(),
+    linkedAt: at("linked_at"),
+    linkedBy: text("linked_by"),
+    linkMethod: text("link_method").$type<"invite" | "manual" | "auth">(),
+    createdBy: text("created_by").notNull(),
+    createdAt: at("created_at").notNull(),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: at("updated_at").notNull(),
+    /** Their degree course; the school, and the CCS and school a representative sits on, follow from it. */
+    courseCode: integer("course_code").references(() => courses.code),
+    campus: text().$type<CampusId>(),
+    otherAssociations: text("other_associations").array().notNull().default(sql`'{}'::text[]`),
+    representativeRoles: text("representative_roles")
+      .array()
+      .$type<RepresentativeRole[]>()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** The seat, with the `other` role. */
+    representativeOther: text("representative_other"),
+  },
+  (t) => [
+    check(
+      "people_persons_campus_check",
+      sql`${t.campus} in ('leonardo', 'bovisa', 'lecco', 'cremona', 'mantova', 'piacenza', 'external')`
+    ),
+    check(
+      "people_persons_representative_roles_check",
+      sql`${t.representativeRoles} <@ array['ccs', 'school', 'senate', 'board', 'other']::text[]`
+    ),
+    check(
+      "people_persons_representative_other_check",
+      sql`(${t.representativeOther} is not null) = ('other' = any(${t.representativeRoles}))`
+    ),
+    check(
+      "people_persons_representative_course_check",
+      sql`${t.courseCode} is not null or not (${t.representativeRoles} && array['ccs', 'school']::text[])`
+    ),
+  ]
+)
 
 /** Role commands sent, or to be sent, to PoliNetwork Auth. Auth applies each `id` at most once. */
 export const roleCommands = createTable.people(

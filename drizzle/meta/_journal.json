@@ -309,6 +309,20 @@
       "when": 1795467932198,
       "tag": "0043_web_acknowledgements",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795562629821,
+      "tag": "0044_people_profile_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1795563193696,
+      "tag": "0045_polimi_courses_2026_27",
+      "breakpoints": true
     }
   ]
 }

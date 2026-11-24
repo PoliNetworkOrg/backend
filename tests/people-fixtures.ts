@@ -1,4 +1,5 @@
 import { vi } from "vitest"
+import type { Course } from "@/people/contract"
 import { log, newPerson } from "@/people/model"
 import { createPeopleService, type PeopleOptions } from "@/people/service"
 import { type Account, type Activity, emptyState, type UnitOfWork, type Viewer } from "@/people/types"
@@ -16,6 +17,39 @@ export const profile = (firstName = "Mario", lastName = "Rossi") => ({
   phone: "+3902000000",
   telegramUsername: `${firstName.toLowerCase()}_test`,
 })
+/** Two versions of Ingegneria Informatica (the older one no longer offered), and a design course. */
+export const COURSES: Course[] = [
+  {
+    code: 531,
+    name: "Ingegneria Informatica",
+    level: "bachelor",
+    school: "3i",
+    regulation: "96/23",
+    campuses: ["Milano Leonardo", "Cremona"],
+    languages: ["Italiano"],
+    active: true,
+  },
+  {
+    code: 358,
+    name: "Ingegneria Informatica",
+    level: "bachelor",
+    school: "3i",
+    regulation: "270",
+    campuses: ["Milano Leonardo", "Cremona"],
+    languages: ["Italiano"],
+    active: false,
+  },
+  {
+    code: 1162,
+    name: "Design della Comunicazione",
+    level: "bachelor",
+    school: "design",
+    regulation: "96/23",
+    campuses: ["Milano Bovisa"],
+    languages: ["Italiano"],
+    active: true,
+  },
+]
 export const viewer = (sub: string, permissions: string[], roles: string[] = []): Viewer => ({
   sub,
   telegramId: null,
@@ -36,6 +70,7 @@ export const master = viewer("president", permissions)
 /** A rollback-capable serialized unit of work; production concurrency is tested separately against PostgreSQL. */
 export function harness(overrides: Partial<PeopleOptions> = {}) {
   let state = emptyState()
+  for (const course of COURSES) state.courses[course.code] = course
   let history: Activity[] = []
   let tail: Promise<unknown> = Promise.resolve()
   let clock = new Date("2026-10-18T10:00:00Z")
