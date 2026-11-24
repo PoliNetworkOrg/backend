@@ -4,6 +4,7 @@ import { uploadBlob } from "@/azure/blob"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
+import type { createHomeService } from "./home"
 import type { createPromotionService } from "./promotions"
 import type { createAssociationService } from "./service"
 
@@ -38,7 +39,8 @@ function need<T>(part: T | undefined): T {
 export function createAssociationRouter(
   service: ReturnType<typeof createAssociationService>,
   identity: (sub: string) => Promise<{ name: string; email?: string }> = async (sub) => ({ name: sub }),
-  promotions?: ReturnType<typeof createPromotionService>
+  promotions?: ReturnType<typeof createPromotionService>,
+  home?: ReturnType<typeof createHomeService>
 ) {
   // Being authenticated admits an applicant; membership is checked afresh by the service, never trusted from input.
   const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
@@ -82,6 +84,7 @@ export function createAssociationRouter(
         return storeImage(input.file, "Choose a valid PNG or JPEG poster")
       }),
     list: user.output(C.dashboardSchema).query(({ ctx }) => service.list(ctx.viewer)),
+    home: user.output(C.homeSchema).query(({ ctx }) => need(home).home(ctx.viewer)),
     directory: user.output(C.directorySchema).query(({ ctx }) => service.directory(ctx.viewer)),
     catalogue: user.output(C.catalogueSchema).query(({ ctx }) => service.catalogue(ctx.viewer)),
     saveCatalogue: user

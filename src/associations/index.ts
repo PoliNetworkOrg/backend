@@ -5,6 +5,7 @@ import { sendAssociationEmail } from "@/emails/mailer"
 import { env } from "@/env"
 import { idp } from "@/idp"
 import { logger } from "@/logger"
+import { createHomeService } from "./home"
 import { createPromotionService } from "./promotions"
 import { createPromotionStore } from "./promotions-pg"
 import { createAssociationService } from "./service"
@@ -13,7 +14,9 @@ import { createAssociationStore } from "./store-pg"
 const dashboardUrl = env.ESIGN_DASHBOARD_URL.replace(/\/$/, "")
 export const associationStore = createAssociationStore(DB)
 export const associationPortal = createAssociationService(associationStore, dashboardUrl)
-export const associationPromotions = createPromotionService(createPromotionStore(DB), associationStore, dashboardUrl)
+const promotionStore = createPromotionStore(DB)
+export const associationPromotions = createPromotionService(promotionStore, associationStore, dashboardUrl)
+export const associationHome = createHomeService(associationStore, promotionStore)
 
 const LEASE_MS = 5 * 60_000
 const MAX_ATTEMPTS = 20

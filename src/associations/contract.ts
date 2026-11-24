@@ -317,6 +317,47 @@ export type PromotionContent = z.infer<typeof promotionContentSchema>
 export type PromotionCommand = z.infer<typeof promotionCommandSchema>
 export type PromotionStatus = z.infer<typeof promotionStatus>
 export type PromotionTransition = z.infer<typeof promotionTransitionSchema>
+// The portal home: what needs the viewer's attention, computed on the server. `kind` is open (a newer backend may add
+// kinds the admin renders generically); `homeActionKinds` lists the ones this version produces.
+export const homeActionKinds = [
+  "request_changes",
+  "profile_changes",
+  "profile_draft",
+  "contacts_to_publish",
+  "stale_contacts",
+  "profile_unpublished",
+  "promotion_changes",
+  "promotion_to_submit",
+  "promotion_draft",
+  "promotion_scheduled",
+  "promotion_published",
+] as const
+export const homeSchema = z.object({
+  operator: z.boolean(),
+  actions: z.array(
+    z.object({
+      kind: z.string(),
+      associationId: z.uuid(),
+      associationName: z.string(),
+      /** The request, promotion or event the action is about. */
+      targetId: z.string().nullable(),
+      /** Its title, or the labels of the contacts to update. */
+      title: z.string(),
+      at: z.string().nullable(),
+      urgent: z.boolean(),
+    })
+  ),
+  /** Operators only: items waiting in each queue. */
+  counters: z
+    .object({
+      profiles: z.number().int(),
+      access: z.number().int(),
+      promotions: z.number().int(),
+      events: z.number().int(),
+      handovers: z.number().int(),
+    })
+    .nullable(),
+})
 export type Profile = z.infer<typeof profileSchema>
 export type Request = z.infer<typeof requestSchema>
 export type Detail = z.infer<typeof detailSchema>
