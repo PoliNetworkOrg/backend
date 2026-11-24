@@ -73,7 +73,7 @@ describe("Portal home", () => {
     await p.command(staff, changes, { action: "changes", note: "Aggiungi il link" })
     const scheduled = await draft()
     await p.command(owner, scheduled, { action: "submit" })
-    await p.command(staff, scheduled, { action: "approve", note: "" })
+    await p.command(staff, scheduled, { action: "approve", note: "", cost: null })
     await p.command(staff, scheduled, {
       action: "schedule",
       scheduledAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),

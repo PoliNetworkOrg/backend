@@ -331,7 +331,13 @@ export const promotionCommandSchema = z.discriminatedUnion("action", [
   z.object({ ...promotionBase, action: z.literal("withdraw"), note: text }),
   z.object({ ...promotionBase, action: z.literal("comment"), note: reason, internal: z.boolean() }),
   z.object({ ...promotionBase, action: z.literal("changes"), note: reason }),
-  z.object({ ...promotionBase, action: z.literal("approve"), note: text }),
+  z.object({
+    ...promotionBase,
+    action: z.literal("approve"),
+    note: text,
+    /** With credits on: the cost PoliNetwork sets when a channel has none fixed (hundredths). */
+    cost: z.number().int().min(0).max(100_000).nullable().default(null),
+  }),
   z.object({ ...promotionBase, action: z.literal("reject"), note: reason }),
   z.object({
     ...promotionBase,
@@ -403,6 +409,111 @@ export type CalendarEventContent = z.infer<typeof calendarEventContentSchema>
 export type CalendarEventCommand = z.infer<typeof calendarEventCommandSchema>
 export type EventStatus = z.infer<typeof eventStatus>
 export type Collaboration = z.infer<typeof collaborationSchema>
+
+// Credits (RRI art. 4.7). Amounts are hundredths of a credit, so the rules' 0.5 and 0.25 stay integers.
+export const creditEntryKind = z.enum(["credit", "debit", "reversal", "adjustment"])
+export const creditConfigSchema = z.object({
+  /** Off until PoliNetwork turns it on: no debits, nothing shown to representatives. */
+  enabled: z.boolean(),
+  /** Credits granted each semester (RRI: 3, i.e. 300). */
+  semesterGrant: z.number().int().min(0).max(100_000),
+  /** Cost of one send on each channel; null where PoliNetwork evaluates each case (RRI: "other"). */
+  costs: z.object({
+    poliassociazioni: z.number().int().min(0).max(100_000).nullable(),
+    course_broadcast: z.number().int().min(0).max(100_000).nullable(),
+    exam_group: z.number().int().min(0).max(100_000).nullable(),
+    level_group: z.number().int().min(0).max(100_000).nullable(),
+    course_groups: z.number().int().min(0).max(100_000).nullable(),
+    other: z.number().int().min(0).max(100_000).nullable(),
+  }),
+  /** Percentage of the cost charged when the association lists the channel's programme (RRI: 50). */
+  ownProgrammePercent: z.number().int().min(0).max(100),
+  allowNegative: z.boolean(),
+  /** Days between two messages in the same group (RRI: 15); operators are warned, not blocked. */
+  cooldownDays: z.number().int().min(0).max(365),
+})
+/** The rules in RRI art. 4.7, seeded by the migration; operators can change them. */
+export const RRI_CREDIT_RULES: z.infer<typeof creditConfigSchema> = {
+  enabled: false,
+  semesterGrant: 300,
+  costs: {
+    poliassociazioni: 0,
+    course_broadcast: 100,
+    exam_group: 50,
+    level_group: 200,
+    course_groups: 300,
+    other: null,
+  },
+  ownProgrammePercent: 50,
+  allowNegative: false,
+  cooldownDays: 15,
+}
+export const creditEntrySchema = z.object({
+  id: z.uuid(),
+  kind: creditEntryKind,
+  amount: z.number().int(),
+  reason: z.string(),
+  authorName: z.string(),
+  promotionId: z.uuid().nullable(),
+  reversesId: z.uuid().nullable(),
+  period: z.string().nullable(),
+  createdAt: z.string(),
+})
+export const creditAccountSchema = z.object({
+  enabled: z.boolean(),
+  balance: z.number().int(),
+  /** Estimated cost of the requests waiting for PoliNetwork's decision. */
+  expected: z.number().int(),
+  entries: z.array(creditEntrySchema),
+  config: creditConfigSchema,
+  /** The association's programmes, which make their course channels cheaper. */
+  programmes: z.array(catalogueSlug),
+})
+export const creditOperationSchema = z.object({
+  associationId: z.uuid(),
+  kind: z.enum(["credit", "adjustment"]),
+  amount: z
+    .number()
+    .int()
+    .min(-100_000)
+    .max(100_000)
+    .refine((n) => n !== 0, "Use a non-zero amount"),
+  reason: reason,
+  commandId: z.uuid(),
+})
+export const creditSemesterSchema = z.object({
+  /** e.g. "2026-27 S1"; one grant per association and period. */
+  period: z.string().trim().min(1).max(40),
+  amount: z.number().int().min(1).max(100_000),
+  /** RRI: credits do not accumulate, so unused ones expire when the new semester's arrive. */
+  resetUnused: z.boolean(),
+  reason: reason,
+})
+export type CreditConfig = z.infer<typeof creditConfigSchema>
+export type CreditEntry = z.infer<typeof creditEntrySchema>
+
+/**
+ * The estimated cost of a request: the sum over its channels, with the own-programme reduction. `unknown` is true when
+ * a channel has no fixed cost (PoliNetwork sets it on approval).
+ */
+export function estimateCost(
+  channels: { channel: keyof CreditConfig["costs"]; programme: string | null }[],
+  programmes: string[],
+  config: CreditConfig
+) {
+  let total = 0
+  let unknown = false
+  for (const c of channels) {
+    const cost = config.costs[c.channel]
+    if (cost === null) {
+      unknown = true
+      continue
+    }
+    const own = !!c.programme && programmes.includes(c.programme)
+    total += own ? Math.round((cost * config.ownProgrammePercent) / 100) : cost
+  }
+  return { total, unknown }
+}
 
 // The portal home: what needs the viewer's attention, computed on the server. `kind` is open (a newer backend may add
 // kinds the admin renders generically); `homeActionKinds` lists the ones this version produces.

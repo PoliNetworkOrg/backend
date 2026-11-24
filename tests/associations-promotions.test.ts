@@ -93,7 +93,9 @@ describe("Promotion requests", () => {
     const { p, draft } = await setup()
     const pid = await draft()
     await p.command(owner, pid, { action: "submit" })
-    await expect(p.command(owner, pid, { action: "approve", note: "" })).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(p.command(owner, pid, { action: "approve", note: "", cost: null })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
     await p.command(staff, pid, { action: "changes", note: "Aggiungi il link al modulo" })
     expect(await p.service.get(collaborator, pid)).toMatchObject({ status: "changes_requested", canEdit: true })
     await p.command(collaborator, pid, { action: "save", content: content({ link: "https://example.org/form" }) })
@@ -107,7 +109,7 @@ describe("Promotion requests", () => {
         note: "",
       })
     ).rejects.toMatchObject({ code: "CONFLICT" })
-    await p.command(staff, pid, { action: "approve", note: "" })
+    await p.command(staff, pid, { action: "approve", note: "", cost: null })
     await p.command(staff, pid, {
       action: "schedule",
       scheduledAt: `${tomorrow}T10:00:00+01:00`,
@@ -159,7 +161,7 @@ describe("Promotion requests", () => {
     const { p, draft } = await setup()
     const a = await draft()
     await p.command(owner, a, { action: "submit" })
-    await p.command(staff, a, { action: "approve", note: "" })
+    await p.command(staff, a, { action: "approve", note: "", cost: null })
     await expect(p.command(collaborator, a, { action: "withdraw", note: "" })).rejects.toMatchObject({
       code: "FORBIDDEN",
     })
@@ -167,7 +169,7 @@ describe("Promotion requests", () => {
     expect((await p.service.get(owner, a)).status).toBe("withdrawn")
     const b = await draft()
     await p.command(owner, b, { action: "submit" })
-    await p.command(staff, b, { action: "approve", note: "" })
+    await p.command(staff, b, { action: "approve", note: "", cost: null })
     await p.command(staff, b, { action: "reject", note: "Contenuto non conforme" })
     expect((await p.service.get(owner, b)).status).toBe("rejected")
     await expect(p.command(owner, b, { action: "withdraw", note: "" })).rejects.toMatchObject({ code: "FORBIDDEN" })
@@ -190,7 +192,7 @@ describe("Promotion requests", () => {
     await p.service.command(owner, submit)
     expect(p.rows.get(pid)?.transitions.filter((t) => t.to === "submitted")).toHaveLength(1)
     await expect(
-      p.service.command(staff, { ...submit, commandId: randomUUID(), action: "approve", note: "" })
+      p.service.command(staff, { ...submit, commandId: randomUUID(), action: "approve", note: "", cost: null })
     ).rejects.toMatchObject({ code: "CONFLICT" })
     const key = randomUUID()
     const first = await p.service.create(collaborator, {

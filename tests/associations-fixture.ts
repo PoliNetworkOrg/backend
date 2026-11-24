@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto"
-import type { CalendarEventCommand, CatalogueEntry, Command, Profile, PromotionCommand } from "@/associations/contract"
+import {
+  type CalendarEventCommand,
+  type CatalogueEntry,
+  type Command,
+  type Profile,
+  type PromotionCommand,
+  RRI_CREDIT_RULES,
+} from "@/associations/contract"
+import type { CreditStore, Ledger, NewCreditEntry, StoredCreditEntry } from "@/associations/credits"
 import { type CalendarEvent, createEventService, type EventStore } from "@/associations/events"
 import { createPromotionService, type Promotion, type PromotionStore } from "@/associations/promotions"
 import { createAssociationService, type Mail, type Record, type Store, type Viewer } from "@/associations/service"
@@ -109,9 +117,86 @@ export function harness() {
 }
 
 /** In-memory promotion store over a registry harness, with the same key and locking semantics as the SQL store. */
+/** In-memory credit ledger and rules, shared by the promotion harness; entries are kept only if the operation succeeds. */
+export function creditHarness(h: ReturnType<typeof harness>) {
+  const state = { config: structuredClone(RRI_CREDIT_RULES), entries: [] as StoredCreditEntry[] }
+  const keys = new Set<string>()
+  let clock = Date.now()
+  function ledgerFor(associationId: string) {
+    const posted: NewCreditEntry[] = []
+    const ledger: Ledger = {
+      config: structuredClone(state.config),
+      entries: structuredClone(state.entries.filter((e) => e.associationId === associationId)),
+      post: (entry) => {
+        posted.push(entry)
+      },
+    }
+    const flush = () => {
+      for (const e of posted) {
+        // The same guarantees as the SQL unique indexes.
+        if (e.kind === "debit" && state.entries.some((x) => x.kind === "debit" && x.promotionId === e.promotionId))
+          throw new Error("duplicate debit")
+        if (e.reversesId && state.entries.some((x) => x.reversesId === e.reversesId))
+          throw new Error("duplicate reversal")
+        state.entries.push({ ...e, id: randomUUID(), associationId, createdAt: new Date(clock++).toISOString() })
+      }
+    }
+    return { ledger, flush }
+  }
+  const store: CreditStore = {
+    config: async () => structuredClone(state.config),
+    async saveConfig(config) {
+      state.config = structuredClone(config)
+    },
+    entries: async (associationId) => structuredClone(state.entries.filter((e) => e.associationId === associationId)),
+    async post(associationId, key, operation) {
+      if (keys.has(key)) return associationId
+      const { ledger, flush } = ledgerFor(associationId)
+      operation(ledger, structuredClone(h.rows.get(associationId) as Record))
+      flush()
+      keys.add(key)
+      return associationId
+    },
+    async semester(input, author, ids) {
+      let granted = 0
+      for (const associationId of ids) {
+        const { ledger, flush } = ledgerFor(associationId)
+        if (ledger.entries.some((e) => e.kind === "credit" && e.period === input.period)) continue
+        const balance = ledger.entries.reduce((sum, e) => sum + e.amount, 0)
+        if (input.resetUnused && balance > 0)
+          ledger.post({
+            kind: "adjustment",
+            amount: -balance,
+            reason: "scaduti",
+            authorSub: author.sub,
+            authorName: author.name,
+            promotionId: null,
+            reversesId: null,
+            period: null,
+          })
+        ledger.post({
+          kind: "credit",
+          amount: input.amount,
+          reason: input.reason,
+          authorSub: author.sub,
+          authorName: author.name,
+          promotionId: null,
+          reversesId: null,
+          period: input.period,
+        })
+        flush()
+        granted++
+      }
+      return granted
+    },
+  }
+  return { state, store, ledgerFor }
+}
+
 export function promotionHarness(
   h: ReturnType<typeof harness>,
-  eventAssociation?: (eventId: string) => Promise<string | null>
+  eventAssociation?: (eventId: string) => Promise<string | null>,
+  credits = creditHarness(h)
 ) {
   const rows = new Map<string, Promotion>()
   const keys = new Map<string, string>()
@@ -147,7 +232,9 @@ export function promotionHarness(
       if (!stored) throw new Error("missing promotion")
       const p = structuredClone(stored)
       const mail: Mail[] = []
-      operation(p, structuredClone(h.rows.get(p.associationId) as Record), mail)
+      const { ledger, flush } = credits.ledgerFor(p.associationId)
+      operation(p, structuredClone(h.rows.get(p.associationId) as Record), mail, ledger)
+      flush()
       rows.set(id, p)
       keys.set(key, id)
       mails.push(...mail)
@@ -172,7 +259,7 @@ export function promotionHarness(
     const revision = rows.get(id)?.revision ?? 0
     return service.command(v, { ...action, id, revision, commandId: randomUUID() } as PromotionCommand)
   }
-  return { service, rows, mails, command }
+  return { service, store, rows, mails, command, credits }
 }
 
 /** In-memory event store over a registry harness, with the same key semantics as the SQL store. */

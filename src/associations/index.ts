@@ -5,6 +5,8 @@ import { sendAssociationEmail } from "@/emails/mailer"
 import { env } from "@/env"
 import { idp } from "@/idp"
 import { logger } from "@/logger"
+import { createCreditService } from "./credits"
+import { createCreditStore } from "./credits-pg"
 import { createEventService } from "./events"
 import { createEventStore } from "./events-pg"
 import { createHomeService } from "./home"
@@ -26,6 +28,7 @@ export const associationPromotions = createPromotionService(
   async (id) => (await associationEventStore.event(id))?.associationId ?? null
 )
 export const associationHome = createHomeService(associationStore, promotionStore, associationEventStore)
+export const associationCredits = createCreditService(createCreditStore(DB), associationStore, promotionStore)
 
 const LEASE_MS = 5 * 60_000
 const MAX_ATTEMPTS = 20

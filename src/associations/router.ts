@@ -4,6 +4,7 @@ import { uploadBlob } from "@/azure/blob"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
+import type { createCreditService } from "./credits"
 import type { createEventService } from "./events"
 import type { createHomeService } from "./home"
 import type { createPromotionService } from "./promotions"
@@ -42,7 +43,8 @@ export function createAssociationRouter(
   identity: (sub: string) => Promise<{ name: string; email?: string }> = async (sub) => ({ name: sub }),
   promotions?: ReturnType<typeof createPromotionService>,
   home?: ReturnType<typeof createHomeService>,
-  events?: ReturnType<typeof createEventService>
+  events?: ReturnType<typeof createEventService>,
+  credits?: ReturnType<typeof createCreditService>
 ) {
   // Being authenticated admits an applicant; membership is checked afresh by the service, never trusted from input.
   const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
@@ -159,6 +161,28 @@ export function createAssociationRouter(
         .input(C.calendarEventCommandSchema)
         .output(C.refSchema)
         .mutation(({ ctx, input }) => need(events).command(ctx.viewer, input)),
+    }),
+    credits: createTRPCRouter({
+      account: user
+        .input(C.refSchema)
+        .output(C.creditAccountSchema)
+        .query(({ ctx, input }) => need(credits).account(ctx.viewer, input.id)),
+      config: user.output(C.creditConfigSchema).query(({ ctx }) => need(credits).config(ctx.viewer)),
+      saveConfig: user
+        .input(C.creditConfigSchema)
+        .output(z.object({ ok: z.literal(true) }))
+        .mutation(async ({ ctx, input }) => {
+          await need(credits).saveConfig(ctx.viewer, input)
+          return { ok: true as const }
+        }),
+      operate: user
+        .input(C.creditOperationSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(credits).operate(ctx.viewer, input)),
+      semester: user
+        .input(C.creditSemesterSchema)
+        .output(z.object({ granted: z.number().int() }))
+        .mutation(({ ctx, input }) => need(credits).semester(ctx.viewer, input)),
     }),
     lookup: user
       .input(C.refSchema)

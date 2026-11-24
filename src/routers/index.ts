@@ -1,4 +1,5 @@
 import {
+  associationCredits,
   associationEvents,
   associationHome,
   associationIdentity,
@@ -29,7 +30,8 @@ export const appRouter = createTRPCRouter({
     associationIdentity,
     associationPromotions,
     associationHome,
-    associationEvents
+    associationEvents,
+    associationCredits
   ),
   azure: azureRouter,
   esign: esignRouter,

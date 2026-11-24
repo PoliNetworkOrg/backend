@@ -10,6 +10,7 @@ import {
   type promotionCreateSchema,
   type promotionQueueSchema,
 } from "./contract"
+import { type Ledger, settle } from "./credits"
 import { activeMember, fail, type Mail, type Record, type Viewer } from "./service"
 
 /** A promotion request as stored: one row per request plus its append-only transitions. */
@@ -49,10 +50,11 @@ export type PromotionStore = {
    * Locks the association (shared) and the promotion (exclusive), runs `operation`, stores the row, inserts the new
    * transitions and the mail, and records `key`. A replayed key returns the stored id without running `operation`.
    */
+  /** `ledger` is the association's credit ledger, locked for this operation (debits on approval, reversals). */
   changePromotion(
     id: string,
     key: string,
-    operation: (promotion: Promotion, record: Record, mail: Mail[]) => void
+    operation: (promotion: Promotion, record: Record, mail: Mail[], ledger: Ledger) => void
   ): Promise<string>
 }
 
@@ -253,7 +255,7 @@ export function createPromotionService(
     async command(v: Viewer, c: PromotionCommand) {
       const catalogue = c.action === "save" || c.action === "submit" ? await registry.catalogue() : []
       const owner = c.action === "save" ? await eventOwner(c.content) : null
-      const id = await store.changePromotion(c.id, `${v.sub}:${c.commandId}`, (p, r, mail) => {
+      const id = await store.changePromotion(c.id, `${v.sub}:${c.commandId}`, (p, r, mail, ledger) => {
         // Authorization is checked under the locks, before anything else: a revoked representative cannot act.
         if (!readable(r, v)) fail("NOT_FOUND", "Promotion request not found")
         if (p.revision !== c.revision) fail("CONFLICT", "The request changed. Reload before continuing.")
@@ -284,6 +286,7 @@ export function createPromotionService(
             break
           case "withdraw":
             if (!view.canWithdraw) fail("FORBIDDEN", "You cannot withdraw this request")
+            settle(ledger, r, v, p, { action: "release" })
             move("withdrawn", c.note, `${v.name} ha ritirato la richiesta.`)
             break
           case "comment":
@@ -300,11 +303,13 @@ export function createPromotionService(
             operatorOnly()
             from("submitted")
             if (r.status !== "active") fail("CONFLICT", "Reactivate the association before approving")
+            settle(ledger, r, v, p, { action: "approve", cost: c.cost })
             move("approved", c.note, "PoliNetwork ha approvato la richiesta. Ti scriveremo quando sarà programmata.")
             break
           case "reject":
             operatorOnly()
             from("submitted", "approved", "scheduled")
+            settle(ledger, r, v, p, { action: "release" })
             move("rejected", c.note, "PoliNetwork ha respinto la richiesta.")
             break
           case "schedule": {

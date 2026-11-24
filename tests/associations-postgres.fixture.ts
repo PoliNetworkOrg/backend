@@ -7,6 +7,8 @@ import { SQL } from "bun"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
+import { createCreditService } from "@/associations/credits"
+import { createCreditStore } from "@/associations/credits-pg"
 import { createEventService } from "@/associations/events"
 import { createEventStore } from "@/associations/events-pg"
 import { createPromotionService } from "@/associations/promotions"
@@ -18,6 +20,7 @@ import { schema } from "@/db/schema"
 import { groupLabels } from "@/db/schema/common/group-labels"
 import {
   associationCatalogue,
+  associationCreditEntry,
   associationEvent,
   associationEventTransition,
   associationMail,
@@ -281,7 +284,14 @@ try {
     promotions.command(userWithMail, { id: p1.id, revision: 0, commandId: submitKey, action: "submit" }),
   ])
   const decisions = await Promise.allSettled([
-    promotions.command(staff, { id: p1.id, revision: 1, commandId: randomUUID(), action: "approve", note: "" }),
+    promotions.command(staff, {
+      id: p1.id,
+      revision: 1,
+      commandId: randomUUID(),
+      action: "approve",
+      note: "",
+      cost: null,
+    }),
     promotions.command(staff, { id: p1.id, revision: 1, commandId: randomUUID(), action: "reject", note: "No" }),
   ])
   assert.equal(decisions.filter((d) => d.status === "fulfilled").length, 1)
@@ -350,6 +360,90 @@ try {
     `SELECT count(*)::int AS n FROM web_association_registry WHERE NOT state ? 'collaboration'`
   )
   assert.equal(backfilled.n, 0)
+  // Credits: seeded rules are off; with them on, concurrent approvals never overspend nor debit twice.
+  const creditStore = createCreditStore(db)
+  const credits = createCreditService(creditStore, store, createPromotionStore(db))
+  assert.equal((await credits.config(staff)).enabled, false)
+  assert.equal((await credits.config(staff)).semesterGrant, 300)
+  await credits.saveConfig(staff, { ...(await credits.config(staff)), enabled: true })
+  await credits.operate(staff, {
+    associationId: a.id,
+    kind: "credit",
+    amount: 100,
+    reason: "Prova",
+    commandId: randomUUID(),
+  })
+  const paid = {
+    ...promotionContent,
+    channels: [
+      { channel: "course_broadcast" as const, programme: "didattica.design.triennale.design-della-moda", note: "" },
+    ],
+  }
+  const pair = await Promise.all(
+    [1, 2].map(async () => {
+      const { id } = await promotions.create(userWithMail, {
+        associationId: a.id,
+        content: paid,
+        commandId: randomUUID(),
+      })
+      await promotions.command(userWithMail, { id, revision: 0, commandId: randomUUID(), action: "submit" })
+      return id
+    })
+  )
+  const approvals = await Promise.allSettled(
+    [...pair, pair[0]].map((id) =>
+      promotions.command(staff, { id, revision: 1, commandId: randomUUID(), action: "approve", note: "", cost: null })
+    )
+  )
+  assert.equal(approvals.filter((r) => r.status === "fulfilled").length, 1, "100 credits pay for one approval only")
+  const ledger = await creditStore.entries(a.id)
+  assert.deepEqual(
+    ledger.map((e) => [e.kind, e.amount]),
+    [
+      ["credit", 100],
+      ["debit", -100],
+    ]
+  )
+  const debited = ledger[1]
+  let secondDebit = false
+  try {
+    await db.insert(associationCreditEntry).values({
+      id: randomUUID(),
+      associationId: a.id,
+      kind: "debit",
+      amount: -1,
+      reason: "x",
+      authorSub: "x",
+      authorName: "x",
+      promotionId: debited.promotionId,
+    })
+  } catch {
+    secondDebit = true
+  }
+  assert(secondDebit, "a second debit for the same request must be rejected by the database")
+  let ledgerAppendOnly = false
+  try {
+    await db.update(associationCreditEntry).set({ amount: 1000 })
+  } catch {
+    ledgerAppendOnly = true
+  }
+  assert(ledgerAppendOnly, "the ledger must reject UPDATE")
+  const winner = debited.promotionId as string
+  const winning = await promotions.get(staff, winner)
+  await promotions.command(staff, {
+    id: winner,
+    revision: winning.revision,
+    commandId: randomUUID(),
+    action: "reject",
+    note: "No",
+  })
+  assert.equal((await credits.account(staff, a.id)).balance, 100, "rejection after approval reverses the debit")
+  // Every active registered association gets the semester's credits, once per period.
+  const semester = { period: "S1", amount: 300, resetUnused: true, reason: "S" }
+  const active = (await store.list()).filter((r) => r.registered && r.status === "active").length
+  assert.deepEqual(await credits.semester(staff, semester), { granted: active })
+  assert.deepEqual(await credits.semester(staff, semester), { granted: 0 })
+  assert.equal((await credits.account(staff, a.id)).balance, 300)
   const visible = async (viewer: { sub: string; name: string; operator: boolean }) =>
     ((await service.directory(viewer)).find((r) => r.id === a.id)?.contacts ?? []).map((c) => c.label).sort()
   assert.deepEqual(await visible({ sub: "nobody", name: "Nobody", operator: false }), ["public"])
@@ -384,6 +478,7 @@ try {
         "contact visibility",
         "promotion idempotency and concurrent decisions",
         "event publication and append-only transitions",
+        "concurrent debits and append-only ledger",
       ],
     })
   )

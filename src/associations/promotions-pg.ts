@@ -8,6 +8,7 @@ import {
   associationPromotionTransition,
   associationRegistry,
 } from "@/db/schema/web/association-portal"
+import { openLedger } from "./credits-pg"
 import type { Promotion, PromotionStore } from "./promotions"
 import { type Mail, normalizeRecord } from "./service"
 
@@ -188,8 +189,10 @@ export function createPromotionStore(db: typeof DB): PromotionStore {
           .orderBy(asc(associationPromotionTransition.at))
         const p = toPromotion(row, stored)
         const mail: Mail[] = []
-        operation(p, record, mail)
+        const { ledger, flush } = await openLedger(tx, head.associationId)
+        operation(p, record, mail, ledger)
         if (!(await claimKey(tx, key, id))) return id
+        await flush()
         await tx.update(associationPromotion).set(toRow(p)).where(eq(associationPromotion.id, id))
         const transitions = transitionRows(p, new Set(stored.map((t) => t.id)))
         if (transitions.length) await tx.insert(associationPromotionTransition).values(transitions)
