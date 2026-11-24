@@ -5,6 +5,7 @@ import { env } from "@/env"
 import type { RequestUpdate } from "@/esign/service"
 import { logger } from "@/logger"
 import type { FeeMailKind, SociMail } from "@/soci/types"
+import type { ProblemReport } from "./problem-report-routes"
 import { renderEmail } from "./render"
 import type { SecretSantaEmailRequest } from "./secret-santa-routes"
 import BirthdayEmail, { birthdaySubject } from "./templates/birthday"
@@ -13,6 +14,7 @@ import FeeOpeningEmail, { feeOpeningSubject } from "./templates/fee-opening"
 import FeeRejectedEmail, { feeRejectedSubject } from "./templates/fee-rejected"
 import FeeReminderEmail, { feeReminderSubject } from "./templates/fee-reminder"
 import MemberNumberChanged, { memberNumberChangedSubject } from "./templates/member-number-changed"
+import ProblemReportEmail from "./templates/problem-report"
 import RegulationDelegaEmail, { delegaSubject, type RegulationDelegaProps } from "./templates/regulation-delega"
 import RegulationEmanatedEmail, { type RegulationEmanatedProps } from "./templates/regulation-emanated"
 import RequestUpdateEmail, { requestUpdateSubject } from "./templates/request-update"
@@ -238,4 +240,17 @@ export async function sendRegulationDelegaEmail(
     from: input.from,
     messageId: input.messageId,
   })
+}
+
+export async function sendProblemReportEmail(report: ProblemReport) {
+  await sendEmail(
+    "it@polinetwork.org",
+    makeSubject(`Segnalazione sito: ${report.subject}`),
+    <ProblemReportEmail {...report} />,
+    [],
+    {
+      replyTo: { name: report.email, address: report.email },
+      throwOnError: true,
+    }
+  )
 }
