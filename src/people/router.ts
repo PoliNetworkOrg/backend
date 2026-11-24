@@ -81,6 +81,12 @@ export function createPeopleRouter(people: PeopleService) {
         return people.setNote(ctx.viewer, input)
       }),
     }),
+    courses: createTRPCRouter({
+      list: read.output(C.courseSchema.array()).query(({ ctx }) => people.listCourses(ctx.viewer)),
+    }),
+    associations: createTRPCRouter({
+      suggest: read.output(z.string().array()).query(({ ctx }) => people.suggestAssociations(ctx.viewer)),
+    }),
     admins: createTRPCRouter({
       list: read.output(C.adminSummarySchema.array()).query(({ ctx }) => people.listAdmins(ctx.viewer)),
       assign: write.input(C.assignAdminInputSchema).mutation(({ ctx, input }) => {

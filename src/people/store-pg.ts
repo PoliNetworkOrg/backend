@@ -2,6 +2,7 @@ import { desc, eq, sql } from "drizzle-orm"
 import type { PgTable } from "drizzle-orm/pg-core"
 import type { DB } from "@/db"
 import { activity, assignments, counters, invites, mail, persons, roleCommands } from "@/db/schema/people"
+import { courses } from "@/db/schema/polimi"
 import { emptyState, type PeopleState, type PeopleStore, type UnitOfWork } from "./types"
 
 type Database = typeof DB
@@ -95,6 +96,18 @@ async function loadState(tx: Transaction): Promise<PeopleState> {
     for (const r of rows) Object.assign(state[kind], { [r.id]: (load as (r: unknown) => unknown)(r) })
   }
   for (const r of await tx.select().from(counters)) state.counters[r.key] = r.value
+  // Reference data: read with the register, never written back.
+  for (const c of await tx.select().from(courses))
+    state.courses[c.code] = {
+      code: c.code,
+      name: c.name,
+      level: c.level,
+      school: c.school,
+      regulation: c.regulation,
+      campuses: c.campuses,
+      languages: c.languages,
+      active: c.active,
+    }
   return state
 }
 

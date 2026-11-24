@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import * as C from "./contract"
 import {
+  applyProfile,
   assignmentsOf,
   clearCapoReferences,
   confirmed,
@@ -488,7 +489,9 @@ export function createPeopleService(options: PeopleOptions) {
       requireGeneral(v, "people:write")
       return tx((u) => {
         const p = newPerson(u.state, input, v.sub, now())
+        const profile = applyProfile(u.state, p, input)
         log(u, p.id, v.sub, "Created the record", now())
+        for (const text of profile) log(u, p.id, v.sub, text, now())
         return { id: p.id }
       })
     },
@@ -503,9 +506,45 @@ export function createPeopleService(options: PeopleOptions) {
           phone: input.phone || null,
           telegramUsername: input.telegramUsername || null,
         })
+        const profile = applyProfile(u.state, p, input)
         touch(p, v.sub, now())
         log(u, p.id, v.sub, "Updated the record", now())
+        for (const text of profile) log(u, p.id, v.sub, text, now())
       })
+    },
+    /** Every course, active or not: records may still point to one no longer offered. */
+    async listCourses(v: Viewer): Promise<C.Course[]> {
+      requireGeneral(v, "people:read")
+      const courses = await store.transaction(async (u) => Object.values(u.state.courses))
+      return courses.sort(
+        (a, b) =>
+          C.SCHOOL_IDS.indexOf(a.school) - C.SCHOOL_IDS.indexOf(b.school) ||
+          C.COURSE_LEVELS.indexOf(a.level) - C.COURSE_LEVELS.indexOf(b.level) ||
+          a.name.localeCompare(b.name, "it") ||
+          a.code - b.code
+      )
+    },
+    /** The association names on records, most used first, so the dashboard suggests one spelling of each. */
+    async suggestAssociations(v: Viewer): Promise<string[]> {
+      requireGeneral(v, "people:read")
+      const names = await store.transaction(async (u) =>
+        Object.values(u.state.persons).flatMap((p) => p.otherAssociations)
+      )
+      // Names that differ only in case are one association, shown with its most used spelling.
+      const groups = new Map<string, { uses: number; spellings: Map<string, number> }>()
+      for (const name of names) {
+        const group = groups.get(name.toLowerCase()) ?? { uses: 0, spellings: new Map<string, number>() }
+        group.uses++
+        group.spellings.set(name, (group.spellings.get(name) ?? 0) + 1)
+        groups.set(name.toLowerCase(), group)
+      }
+      return [...groups.values()]
+        .map(({ uses, spellings }) => ({
+          uses,
+          name: [...spellings].reduce((best, next) => (next[1] > best[1] ? next : best))[0],
+        }))
+        .sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name, "it"))
+        .map(({ name }) => name)
     },
     async setNote(v: Viewer, input: C.SetNoteInput) {
       requireGeneral(v, "people:write")

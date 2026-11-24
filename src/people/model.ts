@@ -103,6 +103,11 @@ export function newPerson(s: PeopleState, input: C.PersonInput, actor: string, n
     phone: blank(input.phone),
     telegramUsername: blank(input.telegramUsername),
     notes: null,
+    courseCode: null,
+    campus: null,
+    otherAssociations: [],
+    representativeRoles: [],
+    representativeOther: null,
     accountSub: null,
     linkedAt: null,
     linkedBy: null,
@@ -115,6 +120,75 @@ export function newPerson(s: PeopleState, input: C.PersonInput, actor: string, n
   s.persons[p.id] = p
   return p
 }
+const ROLE_LABELS = {
+  ccs: "CCS",
+  school: "School",
+  senate: "Senate",
+  board: "Board (CdA)",
+  other: "Other",
+} satisfies Record<C.RepresentativeRole, string>
+const courseLabel = (s: PeopleState, code: number) => {
+  const course = s.courses[code]
+  return course ? `${course.name} (${code})` : String(code)
+}
+const rolesLabel = (roles: C.RepresentativeRole[], other: string | null) =>
+  roles.map((role) => (role === "other" && other ? `${ROLE_LABELS[role]} (${other})` : ROLE_LABELS[role])).join(", ")
+/** "Course set to …", "Campus changed to …", "Other associations cleared". */
+const change = (what: string, before: unknown, after: string | null) =>
+  after === null ? `${what} cleared` : `${what} ${before === null ? "set" : "changed"} to ${after}`
+
+/**
+ * Applies the profile fields of a create or update input to the record, as `C.personInputSchema` describes them
+ * (omitted: unchanged), after checking the rules on the record as it will be saved. Returns the activity to log.
+ */
+export function applyProfile(s: PeopleState, p: Person, input: C.PersonInput): string[] {
+  const courseCode = input.courseCode === undefined ? p.courseCode : input.courseCode
+  if (courseCode !== null && courseCode !== p.courseCode) {
+    const course = s.courses[courseCode] ?? fail("BAD_REQUEST", "Choose a course from the list")
+    if (!course.active) fail("BAD_REQUEST", "That course is no longer offered: choose one from the list")
+  }
+  const roles = input.representativeRoles ?? p.representativeRoles
+  const named = input.representativeOther === undefined ? undefined : input.representativeOther || null
+  let other: string | null = null
+  if (roles.includes("other")) {
+    other = named === undefined ? p.representativeOther : named
+    if (!other) fail("BAD_REQUEST", "Name the other seat")
+  } else if (named) fail("BAD_REQUEST", "Only an Other seat takes a name")
+  if (courseCode === null && roles.some((role) => role === "ccs" || role === "school"))
+    fail("BAD_REQUEST", "A CCS or school seat needs the person's course")
+  const campus = input.campus === undefined ? p.campus : input.campus
+  const associations = input.otherAssociations ?? p.otherAssociations
+
+  const log: string[] = []
+  if (courseCode !== p.courseCode)
+    log.push(change("Course", p.courseCode, courseCode === null ? null : courseLabel(s, courseCode)))
+  if (campus !== p.campus) log.push(change("Campus", p.campus, campus === null ? null : C.CAMPUSES[campus]))
+  if (JSON.stringify(associations) !== JSON.stringify(p.otherAssociations))
+    log.push(
+      change(
+        "Other associations",
+        p.otherAssociations.length ? p.otherAssociations : null,
+        associations.length ? associations.join(", ") : null
+      )
+    )
+  if (JSON.stringify(roles) !== JSON.stringify(p.representativeRoles) || other !== p.representativeOther)
+    log.push(
+      change(
+        "Representative roles",
+        p.representativeRoles.length ? p.representativeRoles : null,
+        roles.length ? rolesLabel(roles, other) : null
+      )
+    )
+  Object.assign(p, {
+    courseCode,
+    campus,
+    otherAssociations: associations,
+    representativeRoles: roles,
+    representativeOther: other,
+  })
+  return log
+}
+
 export function touch(p: Person, actor: string, now: Date) {
   p.updatedBy = actor
   p.updatedAt = now.toISOString()
@@ -225,6 +299,8 @@ export function row(s: PeopleState, p: Person, v: Viewer, scopedContacts = false
     telegramUsername: p.telegramUsername,
     account: self || read ? account(s, p) : { status: "none" },
     assignments: assignmentsOf(s, p.id).map((a) => assignmentView(s, a)),
+    course: p.courseCode === null ? null : (s.courses[p.courseCode] ?? null),
+    campus: p.campus,
   })
 }
 export function record(s: PeopleState, p: Person, v: Viewer, activity: Activity[]): C.PersonRecord {
@@ -233,6 +309,10 @@ export function record(s: PeopleState, p: Person, v: Viewer, activity: Activity[
     ...row(s, p, v),
     notes: read ? p.notes : null,
     activity: read ? activity.map(({ actor, text, at }) => ({ actor, text, at })) : [],
+    // Associations and representative seats are personal data: People readers only, like notes.
+    otherAssociations: read ? p.otherAssociations : [],
+    representativeRoles: read ? p.representativeRoles : [],
+    representativeOther: read ? p.representativeOther : null,
     createdBy: p.createdBy,
     createdAt: p.createdAt,
     updatedBy: p.updatedBy,

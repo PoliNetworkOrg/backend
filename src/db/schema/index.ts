@@ -1,6 +1,7 @@
 import { schema as commonSchema } from "./common"
 import { schema as esignSchema } from "./esign"
 import { schema as peopleSchema } from "./people"
+import { schema as polimiSchema } from "./polimi"
 import { schema as regulationsSchema } from "./regulations"
 import { schema as sociSchema } from "./soci"
 import { schema as tgSchema } from "./tg"
@@ -12,6 +13,7 @@ export const schema = {
   ...commonSchema,
   ...esignSchema,
   ...peopleSchema,
+  ...polimiSchema,
   ...regulationsSchema,
   ...sociSchema,
   ...tgSchema,

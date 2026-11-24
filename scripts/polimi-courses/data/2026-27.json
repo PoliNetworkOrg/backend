@@ -1,0 +1,2647 @@
+{
+  "academicYear": 2026,
+  "courses": [
+    {
+      "code": 1030,
+      "name": "Ingegneria Edile e delle Costruzioni",
+      "level": "bachelor",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-23 - Scienze e tecniche dell'edilizia",
+      "active": true
+    },
+    {
+      "code": 1031,
+      "name": "Progettazione dell'Architettura",
+      "level": "bachelor",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo",
+        "Mantova",
+        "Piacenza"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-17 - Scienze dell'architettura",
+      "active": true
+    },
+    {
+      "code": 1032,
+      "name": "Urbanistica: Citta' Ambiente Paesaggio",
+      "level": "bachelor",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-21 - Scienze della pianificazione territoriale, urbanistica, paesaggistica e ambientale",
+      "active": true
+    },
+    {
+      "code": 497,
+      "name": "Ingegneria Edile e delle Costruzioni",
+      "level": "bachelor",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-23 - Scienze e tecniche dell'edilizia",
+      "active": true
+    },
+    {
+      "code": 1094,
+      "name": "Progettazione dell'Architettura",
+      "level": "bachelor",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo",
+        "Mantova",
+        "Piacenza"
+      ],
+      "languages": [],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-17 - Scienze dell'architettura",
+      "active": true
+    },
+    {
+      "code": 1093,
+      "name": "Urbanistica: Citta' Ambiente Paesaggio",
+      "level": "bachelor",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-21 - Scienze della pianificazione territoriale, urbanistica, paesaggistica e ambientale",
+      "active": true
+    },
+    {
+      "code": 1033,
+      "name": "Ingegneria Edile - Architettura",
+      "level": "single-cycle",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": true
+    },
+    {
+      "code": 1144,
+      "name": "Ingegneria Edile - Architettura",
+      "level": "single-cycle",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3,
+        4,
+        5
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": true
+    },
+    {
+      "code": 1034,
+      "name": "Architectural Design and History",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Mantova"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": true
+    },
+    {
+      "code": 1035,
+      "name": "Architectural Engineering",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
+      "active": true
+    },
+    {
+      "code": 1015,
+      "name": "Architettura",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": true
+    },
+    {
+      "code": 1036,
+      "name": "Building Engineering for Sustainability",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
+      "active": true
+    },
+    {
+      "code": 1037,
+      "name": "Landscape Architecture. Land Landscape Heritage",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Piacenza"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-3 - Architettura del paesaggio",
+      "active": true
+    },
+    {
+      "code": 1038,
+      "name": "Management of Built Environment",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
+      "active": true
+    },
+    {
+      "code": 1039,
+      "name": "Sustainable Architecture and Landscape Design - Architettura Sostenibile e Progetto del Paesaggio",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Piacenza"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": true
+    },
+    {
+      "code": 1040,
+      "name": "Urban Planning and Policy Design",
+      "level": "master",
+      "school": "auic",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-48 - Pianificazione territoriale urbanistica e ambientale",
+      "active": true
+    },
+    {
+      "code": 1086,
+      "name": "Architectural Design and History - Progettazione Architettonica e Storia",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Mantova"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": false
+    },
+    {
+      "code": 1076,
+      "name": "Architectural Engineering",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
+      "active": false
+    },
+    {
+      "code": 1195,
+      "name": "Architettura - Ambiente Costruito - Interni - Architecture - Built Environment - Interiors",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": false
+    },
+    {
+      "code": 1017,
+      "name": "Architettura - Architettura delle Costruzioni",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": false
+    },
+    {
+      "code": 1217,
+      "name": "Architettura e Disegno Urbano - Architecture and Urban Design",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": false
+    },
+    {
+      "code": 1013,
+      "name": "Building Engineering for Sustainability",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
+      "active": false
+    },
+    {
+      "code": 1187,
+      "name": "Landscape Architecture. Land Landscape Heritage",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-3 - Architettura del paesaggio",
+      "active": false
+    },
+    {
+      "code": 1096,
+      "name": "Management of Built Environment - Gestione del Costruito",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
+      "active": false
+    },
+    {
+      "code": 1085,
+      "name": "Sustainable Architecture and Landscape Design - Architettura Sostenibile e Progetto del Paesaggio",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Piacenza"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
+      "active": false
+    },
+    {
+      "code": 1098,
+      "name": "Urban Planning and Policy Design - Pianificazione Urbana e Politiche Territoriali",
+      "level": "master",
+      "school": "auic",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-48 - Pianificazione territoriale urbanistica e ambientale",
+      "active": false
+    },
+    {
+      "code": 1019,
+      "name": "Design degli Interni",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1020,
+      "name": "Design del Prodotto Industriale",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1021,
+      "name": "Design della Comunicazione",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1022,
+      "name": "Design della Moda",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1014,
+      "name": "Interaction Design",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Inglese"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1087,
+      "name": "Design degli Interni",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1090,
+      "name": "Design del Prodotto Industriale",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1088,
+      "name": "Design della Comunicazione",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1089,
+      "name": "Design della Moda",
+      "level": "bachelor",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-4 - Disegno industriale",
+      "active": true
+    },
+    {
+      "code": 1023,
+      "name": "Design & Engineering - Progetto e Ingegnerizzazione del Prodotto Industriale",
+      "level": "master",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": true
+    },
+    {
+      "code": 1024,
+      "name": "Design della Comunicazione",
+      "level": "master",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": true
+    },
+    {
+      "code": 1025,
+      "name": "Design for the Fashion System",
+      "level": "master",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": true
+    },
+    {
+      "code": 1026,
+      "name": "Digital and Interaction Design",
+      "level": "master",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": true
+    },
+    {
+      "code": 1027,
+      "name": "Integrated Product Design",
+      "level": "master",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": true
+    },
+    {
+      "code": 1028,
+      "name": "Interior and Spatial Design",
+      "level": "master",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": true
+    },
+    {
+      "code": 1029,
+      "name": "Product Service System Design",
+      "level": "master",
+      "school": "design",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": true
+    },
+    {
+      "code": 1091,
+      "name": "Design & Engineering - Progetto e Ingegnerizzazione del Prodotto Industriale",
+      "level": "master",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": false
+    },
+    {
+      "code": 1162,
+      "name": "Design della Comunicazione",
+      "level": "master",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": false
+    },
+    {
+      "code": 1097,
+      "name": "Design for the Fashion System - Design per il Sistema Moda",
+      "level": "master",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": false
+    },
+    {
+      "code": 1262,
+      "name": "Digital and Interaction Design",
+      "level": "master",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": false
+    },
+    {
+      "code": 1261,
+      "name": "Integrated Product Design",
+      "level": "master",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": false
+    },
+    {
+      "code": 1260,
+      "name": "Interior and Spatial Design",
+      "level": "master",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": false
+    },
+    {
+      "code": 1159,
+      "name": "Product Service System Design - Design per il Sistema Prodotto Servizio",
+      "level": "master",
+      "school": "design",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-12 - Design",
+      "active": false
+    },
+    {
+      "code": 507,
+      "name": "Ingegneria Civile",
+      "level": "bachelor",
+      "school": "icat",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-7 - Ingegneria civile e ambientale",
+      "active": true
+    },
+    {
+      "code": 508,
+      "name": "Ingegneria per l'Ambiente e il Territorio",
+      "level": "bachelor",
+      "school": "icat",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-7 - Ingegneria civile e ambientale",
+      "active": true
+    },
+    {
+      "code": 503,
+      "name": "Ingegneria Civile",
+      "level": "bachelor",
+      "school": "icat",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-7 - Ingegneria civile e ambientale",
+      "active": true
+    },
+    {
+      "code": 346,
+      "name": "Ingegneria per l'Ambiente e il Territorio",
+      "level": "bachelor",
+      "school": "icat",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-7 - Ingegneria civile e ambientale",
+      "active": true
+    },
+    {
+      "code": 306,
+      "name": "Ingegneria Civile per La Mitigazione del Rischio",
+      "level": "bachelor",
+      "school": "icat",
+      "regulation": "270",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-7 - Ingegneria civile e ambientale",
+      "active": false
+    },
+    {
+      "code": 509,
+      "name": "Civil Engineering for Risk Mitigation",
+      "level": "master",
+      "school": "icat",
+      "regulation": "96/23",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-23 - Ingegneria civile",
+      "active": true
+    },
+    {
+      "code": 512,
+      "name": "Ingegneria Civile - Civil Engineering",
+      "level": "master",
+      "school": "icat",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-23 - Ingegneria civile",
+      "active": true
+    },
+    {
+      "code": 513,
+      "name": "Ingegneria per l'Ambiente e il Territorio - Environmental and Land Planning Engineering",
+      "level": "master",
+      "school": "icat",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo",
+        "Piacenza"
+      ],
+      "languages": [],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-35 - Ingegneria per l'ambiente e il territorio",
+      "active": true
+    },
+    {
+      "code": 437,
+      "name": "Civil Engineering for Risk Mitigation",
+      "level": "master",
+      "school": "icat",
+      "regulation": "270",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-23 - Ingegneria civile",
+      "active": false
+    },
+    {
+      "code": 488,
+      "name": "Ingegneria Civile - Civil Engineering",
+      "level": "master",
+      "school": "icat",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-23 - Ingegneria civile",
+      "active": false
+    },
+    {
+      "code": 489,
+      "name": "Ingegneria per l'Ambiente e il Territorio - Environmental and Land Planning Engineering",
+      "level": "master",
+      "school": "icat",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo",
+        "Piacenza"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-35 - Ingegneria per l'ambiente e il territorio",
+      "active": false
+    },
+    {
+      "code": 571,
+      "name": "Engineering Science",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Inglese"
+      ],
+      "activeYears": [
+        1
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 572,
+      "name": "Industrial Engineering",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Piacenza"
+      ],
+      "languages": [
+        "Inglese"
+      ],
+      "activeYears": [
+        1
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 514,
+      "name": "Ingegneria Aerospaziale",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 516,
+      "name": "Ingegneria Biomedica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 517,
+      "name": "Ingegneria Chimica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 518,
+      "name": "Ingegneria dei Materiali e delle Nanotecnologie",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 519,
+      "name": "Ingegneria dell'Automazione",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 521,
+      "name": "Ingegneria della Produzione Industriale",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 522,
+      "name": "Ingegneria Elettrica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 523,
+      "name": "Ingegneria Elettronica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-8 - Ingegneria dell'informazione",
+      "active": true
+    },
+    {
+      "code": 524,
+      "name": "Ingegneria Energetica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 526,
+      "name": "Ingegneria Fisica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 530,
+      "name": "Ingegneria Gestionale - BV",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 528,
+      "name": "Ingegneria Gestionale - CR",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Cremona"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 531,
+      "name": "Ingegneria Informatica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo",
+        "Cremona"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-8 - Ingegneria dell'informazione",
+      "active": true
+    },
+    {
+      "code": 532,
+      "name": "Ingegneria Matematica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 534,
+      "name": "Ingegneria Meccanica - BV",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 535,
+      "name": "Ingegneria Meccanica - PC",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Piacenza"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        1,
+        2,
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 573,
+      "name": "Process Engineering",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Cremona"
+      ],
+      "languages": [
+        "Inglese"
+      ],
+      "activeYears": [
+        1
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 350,
+      "name": "Ingegneria Aerospaziale",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 363,
+      "name": "Ingegneria Biomedica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 347,
+      "name": "Ingegneria Chimica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 348,
+      "name": "Ingegneria dei Materiali e delle Nanotecnologie",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 355,
+      "name": "Ingegneria dell'Automazione",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 367,
+      "name": "Ingegneria della Produzione Industriale",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 349,
+      "name": "Ingegneria Elettrica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 357,
+      "name": "Ingegneria Elettronica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-8 - Ingegneria dell'informazione",
+      "active": true
+    },
+    {
+      "code": 352,
+      "name": "Ingegneria Energetica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 366,
+      "name": "Ingegneria Fisica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 394,
+      "name": "Ingegneria Gestionale - BV",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 368,
+      "name": "Ingegneria Gestionale - CR",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Cremona"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 358,
+      "name": "Ingegneria Informatica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo",
+        "Cremona"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-8 - Ingegneria dell'informazione",
+      "active": true
+    },
+    {
+      "code": 365,
+      "name": "Ingegneria Matematica",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 353,
+      "name": "Ingegneria Meccanica - BV",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 354,
+      "name": "Ingegneria Meccanica - PC",
+      "level": "bachelor",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Piacenza"
+      ],
+      "languages": [
+        "Italiano"
+      ],
+      "activeYears": [
+        3
+      ],
+      "degreeClass": "L-9 - Ingegneria industriale",
+      "active": true
+    },
+    {
+      "code": 536,
+      "name": "Aeronautical Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
+      "active": true
+    },
+    {
+      "code": 537,
+      "name": "Agricultural Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Cremona"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-26 - Ingegneria della sicurezza",
+      "active": true
+    },
+    {
+      "code": 538,
+      "name": "Automation and Control Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-25 - Ingegneria dell'automazione",
+      "active": true
+    },
+    {
+      "code": 1077,
+      "name": "Biomedical Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-21 - Ingegneria biomedica",
+      "active": true
+    },
+    {
+      "code": 541,
+      "name": "Chemical Engineering - Ingegneria Chimica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-22 - Ingegneria chimica",
+      "active": true
+    },
+    {
+      "code": 542,
+      "name": "Computer Science and Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-32 - Ingegneria informatica",
+      "active": true
+    },
+    {
+      "code": 544,
+      "name": "Electrical Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-28 - Ingegneria elettrica",
+      "active": true
+    },
+    {
+      "code": 545,
+      "name": "Electronics Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-29 - Ingegneria elettronica",
+      "active": true
+    },
+    {
+      "code": 546,
+      "name": "Energy Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa",
+        "Piacenza"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
+      "active": true
+    },
+    {
+      "code": 547,
+      "name": "Engineering Physics",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
+      "active": true
+    },
+    {
+      "code": 548,
+      "name": "Food Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-22 - Ingegneria chimica",
+      "active": true
+    },
+    {
+      "code": 511,
+      "name": "Geoinformatics Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "",
+      "active": true
+    },
+    {
+      "code": 550,
+      "name": "High Performance Computing Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-32 - Ingegneria informatica",
+      "active": true
+    },
+    {
+      "code": 551,
+      "name": "Industrial Safety and Risk Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-26 - Ingegneria della sicurezza",
+      "active": true
+    },
+    {
+      "code": 552,
+      "name": "Management Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-31 - Ingegneria gestionale",
+      "active": true
+    },
+    {
+      "code": 562,
+      "name": "Materials Engineering and Nanotechnology",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-53 - Ingegneria dei materiali",
+      "active": true
+    },
+    {
+      "code": 553,
+      "name": "Mathematical Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
+      "active": true
+    },
+    {
+      "code": 554,
+      "name": "Mechanical Engineering - BV,PC",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa",
+        "Piacenza"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-33 - Ingegneria meccanica",
+      "active": true
+    },
+    {
+      "code": 555,
+      "name": "Mechanical Engineering - LC",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-33 - Ingegneria meccanica",
+      "active": true
+    },
+    {
+      "code": 556,
+      "name": "Mobility Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-26 - Ingegneria della sicurezza",
+      "active": true
+    },
+    {
+      "code": 557,
+      "name": "Music and Acoustic Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Cremona"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-32 - Ingegneria informatica",
+      "active": true
+    },
+    {
+      "code": 558,
+      "name": "Nuclear Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
+      "active": true
+    },
+    {
+      "code": 559,
+      "name": "Space Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
+      "active": true
+    },
+    {
+      "code": 560,
+      "name": "Telecommunication Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "96/23",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        1,
+        2
+      ],
+      "degreeClass": "LM-27 - Ingegneria delle telecomunicazioni",
+      "active": true
+    },
+    {
+      "code": 469,
+      "name": "Aeronautical Engineering - Ingegneria Aeronautica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
+      "active": false
+    },
+    {
+      "code": 504,
+      "name": "Agricultural Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Cremona"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-26 - Ingegneria della sicurezza",
+      "active": false
+    },
+    {
+      "code": 473,
+      "name": "Automation and Control Engineering - Ingegneria dell'Automazione",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-25 - Ingegneria dell'automazione",
+      "active": false
+    },
+    {
+      "code": 471,
+      "name": "Biomedical Engineering - Ingegneria Biomedica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-21 - Ingegneria biomedica",
+      "active": false
+    },
+    {
+      "code": 472,
+      "name": "Chemical Engineering - Ingegneria Chimica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-22 - Ingegneria chimica",
+      "active": false
+    },
+    {
+      "code": 481,
+      "name": "Computer Science and Engineering - Ingegneria Informatica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-32 - Ingegneria informatica",
+      "active": false
+    },
+    {
+      "code": 475,
+      "name": "Electrical Engineering - Ingegneria Elettrica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-28 - Ingegneria elettrica",
+      "active": false
+    },
+    {
+      "code": 476,
+      "name": "Electronics Engineering - Ingegneria Elettronica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-29 - Ingegneria elettronica",
+      "active": false
+    },
+    {
+      "code": 477,
+      "name": "Energy Engineering - Ingegneria Energetica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa",
+        "Piacenza"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
+      "active": false
+    },
+    {
+      "code": 486,
+      "name": "Engineering Physics - Ingegneria Fisica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
+      "active": false
+    },
+    {
+      "code": 498,
+      "name": "Food Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-22 - Ingegneria chimica",
+      "active": false
+    },
+    {
+      "code": 495,
+      "name": "Geoinformatics Engineering - Ingegneria Geoinformatica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "",
+      "active": false
+    },
+    {
+      "code": 425,
+      "name": "High Performance Computing Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-32 - Ingegneria informatica",
+      "active": false
+    },
+    {
+      "code": 385,
+      "name": "Industrial Safety and Risk Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-26 - Ingegneria della sicurezza",
+      "active": false
+    },
+    {
+      "code": 479,
+      "name": "Management Engineering - Ingegneria Gestionale",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-31 - Ingegneria gestionale",
+      "active": false
+    },
+    {
+      "code": 505,
+      "name": "Materials Engineering and Nanotechnology - Ingegneria dei Materiali e delle Nanotecnologie",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-53 - Ingegneria dei materiali",
+      "active": false
+    },
+    {
+      "code": 487,
+      "name": "Mathematical Engineering - Ingegneria Matematica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
+      "active": false
+    },
+    {
+      "code": 483,
+      "name": "Mechanical Engineering - Ingegneria Meccanica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa",
+        "Piacenza"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-33 - Ingegneria meccanica",
+      "active": false
+    },
+    {
+      "code": 485,
+      "name": "Mechanical Engineering - Ingegneria Meccanica",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Lecco"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-33 - Ingegneria meccanica",
+      "active": false
+    },
+    {
+      "code": 499,
+      "name": "Mobility Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-26 - Ingegneria della sicurezza",
+      "active": false
+    },
+    {
+      "code": 263,
+      "name": "Music and Acoustic Engineering",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Cremona"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-32 - Ingegneria informatica",
+      "active": false
+    },
+    {
+      "code": 478,
+      "name": "Nuclear Engineering - Ingegneria Nucleare",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
+      "active": false
+    },
+    {
+      "code": 470,
+      "name": "Space Engineering - Ingegneria Spaziale",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Bovisa"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
+      "active": false
+    },
+    {
+      "code": 474,
+      "name": "Telecommunication Engineering - Ingegneria delle Telecomunicazioni",
+      "level": "master",
+      "school": "3i",
+      "regulation": "270",
+      "campuses": [
+        "Milano Leonardo"
+      ],
+      "languages": [
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      ],
+      "activeYears": [
+        2
+      ],
+      "degreeClass": "LM-27 - Ingegneria delle telecomunicazioni",
+      "active": false
+    }
+  ]
+}
