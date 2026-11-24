@@ -94,7 +94,9 @@ app.route(
 app.route("/esign/agent", agentRoutes(esign))
 
 // Access-changed events from the IdP (RFC v3 §5.6). Authenticated by the event's own signature.
-app.post("/internal/events", (c) => (idp?.events ? idp.events(c.req.raw) : c.body(null, 404)))
+app.post("/internal/events", (c): Response | Promise<Response> =>
+  idp?.events ? idp.events(c.req.raw) : c.body(null, 404)
+)
 
 app.all(`${WS_PATH}/`, async (c) => {
   const req = await limitRequestBody(c.req.raw, wssEngine.opts.maxHttpBufferSize)
