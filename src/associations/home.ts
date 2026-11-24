@@ -64,6 +64,14 @@ export function createHomeService(
         )
         if (staleIds.size && member)
           push(r, { kind: "stale_contacts", targetId: null, title: [...staleIds].join(", "), at: null, urgent: true })
+        if (r.handover && member?.role === "responsible")
+          push(r, {
+            kind: "handover_open",
+            targetId: r.handover.id,
+            title: r.handover.startedByName,
+            at: r.handover.startedAt,
+            urgent: r.handover.startedBy === v.sub,
+          })
         if (responsible && r.registered && !r.published && !working)
           push(r, { kind: "profile_unpublished", targetId: null, title: "", at: null, urgent: false })
 
@@ -103,7 +111,7 @@ export function createHomeService(
           access: submitted.filter((q) => q.kind === "access" || q.kind === "membership").length,
           promotions: queue.length,
           events: (await events.events({ status: "submitted" })).length,
-          handovers: 0,
+          handovers: records.filter((r) => r.handover).length,
         }
       }
       actions.sort((a, b) => Number(b.urgent) - Number(a.urgent) || (a.at ?? "9999").localeCompare(b.at ?? "9999"))

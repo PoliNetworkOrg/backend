@@ -34,6 +34,15 @@ export type Record = {
   contacts: Contact[]
   /** Shown in the portal directory only, so it needs no review. */
   collaboration: Collaboration
+  /** The handover in progress, if any; its steps are recorded in `events`. */
+  handover: Handover | null
+}
+export type Handover = {
+  id: string
+  startedAt: string
+  startedBy: string
+  startedByName: string
+  confirmedContacts: string[]
 }
 /**
  * An outbox message. `text` is the plain fallback; `template` names a React Email template in `src/emails/` and its
@@ -82,6 +91,7 @@ export function normalizeRecord(r: Record): Record {
   for (const q of r.requests) if (q.profile) q.profile = normalizeProfile(q.profile)
   r.contacts ??= []
   r.collaboration ??= { open: false, contactId: null }
+  r.handover ??= null
   return r
 }
 const openContent = (r: Record) =>
@@ -133,6 +143,22 @@ function describeContacts(before: Contact[], after: Contact[]) {
   ]
     .filter(Boolean)
     .join(". ")
+}
+/** Contacts the outgoing responsible should look at: personal data, or linked to them. */
+function handoverContacts(r: Record, h: Handover) {
+  const working = openContent(r)?.profile ?? r.profile
+  return [...working.contacts, ...r.contacts].filter((c) => c.name || c.phone || c.holderSub === h.startedBy)
+}
+export function presentHandover(r: Record) {
+  const h = r.handover
+  if (!h) return null
+  return {
+    ...h,
+    successorReady: r.members.some((m) => m.active && m.role === "responsible" && m.sub !== h.startedBy),
+    contactsToReview: handoverContacts(r, h)
+      .filter((c) => !h.confirmedContacts.includes(c.id))
+      .map((c) => c.id),
+  }
 }
 function flagContactsOf(r: Record, v: Viewer, sub: string) {
   const working = openContent(r)?.profile ?? r.profile
@@ -191,6 +217,7 @@ function summary(r: Record, v: Viewer) {
     role: activeMember(r, v)?.role ?? null,
     pending: r.requests.filter((q) => q.status === "submitted" && (v.operator || q.by === v.sub)).length,
     unrepresented: !r.members.some((m) => m.active && m.role === "responsible"),
+    handover: !!r.handover && (v.operator || !!activeMember(r, v)),
   }
 }
 export function present(r: Record, v: Viewer) {
@@ -210,6 +237,7 @@ export function present(r: Record, v: Viewer) {
     publishedProfile: r.published,
     contacts: v.operator || member ? r.contacts : [],
     collaboration: r.collaboration,
+    handoverState: v.operator || member ? presentHandover(r) : null,
     staleContacts: v.operator || member ? staleContacts(r).map((c) => c.id) : [],
     members: v.operator || member ? r.members : [],
     requests,
@@ -299,6 +327,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
         commands: [],
         contacts: [],
         collaboration: { open: false, contactId: null },
+        handover: null,
       }
       if (v.operator && input.submit) {
         r.registered = true
@@ -571,6 +600,49 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
             fail("BAD_REQUEST", "Choose one of the association's contacts")
           r.collaboration = { open: c.open, contactId: c.open ? c.contactId : null }
           event(r, v, c.open ? "Open to collaborations" : "Closed to collaborations")
+        } else if (c.action === "handoverStart") {
+          if (!r.registered || r.status !== "active" || activeMember(r, v)?.role !== "responsible")
+            fail("FORBIDDEN", "Only a responsible can start a handover")
+          if (r.handover) fail("CONFLICT", "A handover is already in progress")
+          r.handover = {
+            id: randomUUID(),
+            startedAt: new Date().toISOString(),
+            startedBy: v.sub,
+            startedByName: v.name,
+            confirmedContacts: [],
+          }
+          event(r, v, "Handover started")
+        } else if (c.action === "handoverConfirm" || c.action === "handoverComplete" || c.action === "handoverCancel") {
+          const h = r.handover
+          if (!h) fail("CONFLICT", "No handover is in progress")
+          // The outgoing responsible runs it; PoliNetwork can close a stalled one.
+          if (h.startedBy !== v.sub && !(v.operator && c.action === "handoverCancel"))
+            fail("FORBIDDEN", "Only the outgoing responsible can continue the handover")
+          if (c.action === "handoverConfirm") {
+            const known = new Set(handoverContacts(r, h).map((x) => x.id))
+            if (c.contactIds.some((id) => !known.has(id))) fail("BAD_REQUEST", "Confirm only the contacts to review")
+            h.confirmedContacts = [...new Set([...h.confirmedContacts, ...c.contactIds])]
+            event(r, v, "Handover contacts reviewed", `${c.contactIds.length}`)
+          } else if (c.action === "handoverCancel") {
+            r.handover = null
+            event(r, v, "Handover cancelled")
+          } else {
+            const state = presentHandover(r)
+            if (!state?.successorReady)
+              fail("CONFLICT", "Get a new responsible approved before completing the handover")
+            if (state.contactsToReview.length)
+              fail("CONFLICT", "Review the personal contacts before completing the handover")
+            r.handover = null
+            event(r, v, "Handover completed")
+            if (c.leave) {
+              const outgoing = r.members.find((m) => m.sub === v.sub && m.active)
+              if (outgoing) {
+                outgoing.active = false
+                event(r, v, "Representative left", "Passaggio di consegne completato")
+                flagContactsOf(r, v, outgoing.sub)
+              }
+            }
+          }
         } else if (c.action === "leave" || c.action === "revoke") {
           if (c.action === "revoke") operator(v)
           const member = r.members.find((m) => m.sub === (c.action === "leave" ? v.sub : c.sub) && m.active)
@@ -590,6 +662,10 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
             }
           event(r, v, c.action === "leave" ? "Representative left" : "Representative revoked", c.reason)
           flagContactsOf(r, v, member.sub)
+          if (r.handover?.startedBy === member.sub) {
+            r.handover = null
+            event(r, v, "Handover cancelled")
+          }
         }
         r.commands.push(commandKey)
         // Retries only matter for a short window; keep the aggregate from growing without bound.

@@ -105,6 +105,18 @@ export const eventSchema = z.object({
   action: z.string(),
   detail: z.string(),
 })
+/** A guided change of responsible, opened by the outgoing one. Absent when none is in progress. */
+export const handoverSchema = z.object({
+  id: z.uuid(),
+  startedAt: z.string(),
+  startedBy: z.string(),
+  startedByName: z.string(),
+  /** Another active responsible exists, so the outgoing one can complete it. */
+  successorReady: z.boolean(),
+  /** Contacts with personal data or linked to the outgoing responsible, not yet confirmed. */
+  contactsToReview: z.array(z.uuid()),
+  confirmedContacts: z.array(z.uuid()),
+})
 export const summarySchema = z.object({
   id: z.uuid(),
   name: z.string(),
@@ -114,6 +126,8 @@ export const summarySchema = z.object({
   role: roleSchema.nullable(),
   pending: z.number(),
   unrepresented: z.boolean(),
+  /** A handover is in progress (shown to representatives and operators). */
+  handover: z.boolean().default(false),
 })
 export const detailSchema = summarySchema.extend({
   revision: z.number().int(),
@@ -126,6 +140,7 @@ export const detailSchema = summarySchema.extend({
   collaboration: z
     .object({ open: z.boolean(), contactId: z.uuid().nullable() })
     .default({ open: false, contactId: null }),
+  handoverState: handoverSchema.nullable().default(null),
   members: z.array(memberSchema),
   requests: z.array(requestSchema),
   events: z.array(eventSchema),
@@ -206,6 +221,11 @@ export const commandSchema = z.discriminatedUnion("action", [
   // Non-public contacts are saved at once; public ones go into the working profile, which the responsible submits.
   z.object({ ...base, action: z.literal("contacts"), contacts: z.array(contactSchema).max(40) }),
   z.object({ ...base, action: z.literal("collaboration"), open: z.boolean(), contactId: z.uuid().nullable() }),
+  // Handover: the outgoing responsible opens it, confirms the personal contacts, and completes it (optionally leaving).
+  z.object({ ...base, action: z.literal("handoverStart") }),
+  z.object({ ...base, action: z.literal("handoverConfirm"), contactIds: z.array(z.uuid()).max(60) }),
+  z.object({ ...base, action: z.literal("handoverComplete"), leave: z.boolean() }),
+  z.object({ ...base, action: z.literal("handoverCancel") }),
   z.object({ ...base, action: z.literal("leave"), reason }),
   z.object({ ...base, action: z.literal("revoke"), sub: z.string().min(1).max(200), reason }),
 ])
@@ -401,6 +421,7 @@ export const homeActionKinds = [
   "event_changes",
   "event_to_submit",
   "event_draft",
+  "handover_open",
 ] as const
 export const homeSchema = z.object({
   operator: z.boolean(),
