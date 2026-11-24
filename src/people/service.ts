@@ -376,7 +376,7 @@ export function createPeopleService(options: PeopleOptions) {
    */
   function absorb(u: UnitOfWork, p: Person, other: Person, actor: string) {
     const s = u.state
-    for (const a of assignmentsOf(s, other.id)) {
+    for (const a of assignmentsOf(s, other.id, true)) {
       const mine = a.endedOn ? null : current(s, p.id, conceptOf(a))
       if (mine) {
         a.fields = Object.keys(a.fields).length ? a.fields : mine.fields

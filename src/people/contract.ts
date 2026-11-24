@@ -9,7 +9,7 @@ import { z } from "zod"
  * The teams People knows. A team can only be assigned once PoliNetwork Auth binds a role to it
  * (`team:<id>:member` / `team:<id>:lead`); see `TeamSummary.assignable`.
  */
-export const TEAM_IDS = ["it", "hr", "design", "intl", "events"] as const
+export const TEAM_IDS = ["it", "hr", "design", "events"] as const
 
 export const teamIdSchema = z.enum(TEAM_IDS)
 export type TeamId = z.infer<typeof teamIdSchema>
@@ -249,17 +249,6 @@ export const TEAMS = {
         options: ["Figma", "Illustrator", "Photoshop", "After Effects", "InDesign", "Premiere"],
       },
       { key: "portfolio", label: "Portfolio", kind: "text" },
-    ],
-  },
-  intl: {
-    name: "International",
-    fields: [
-      {
-        key: "languages",
-        label: "Languages",
-        kind: "multi",
-        options: ["English", "Spanish", "French", "German", "Chinese", "Portuguese"],
-      },
     ],
   },
   events: {

@@ -40,15 +40,19 @@ export function requireOwn(s: PeopleState, v: Viewer) {
 
 const order = (a: Assignment) =>
   [a.since, C.ASSIGNMENT_KINDS.indexOf(a.kind), a.team ?? "", a.endedOn ?? "9999-12-31", a.id].join("|")
-/** A person's assignments, oldest first; on the same day admin, then Capo Admin, then teams, ended ones first. */
-export function assignmentsOf(s: PeopleState, personId: string) {
+/** A person's assignments, oldest first, with retired teams included only for internal record maintenance. */
+export function assignmentsOf(s: PeopleState, personId: string, includeRetiredTeams = false) {
   return Object.values(s.assignments)
-    .filter((a) => a.personId === personId)
+    .filter(
+      (a) =>
+        a.personId === personId &&
+        (includeRetiredTeams || a.kind !== "team" || C.teamIdSchema.safeParse(a.team).success)
+    )
     .sort((a, b) => order(a).localeCompare(order(b)))
 }
 /** The current assignment of a concept: shown as current, even while Auth hasn't confirmed it. */
 export function current(s: PeopleState, personId: string, concept: Concept) {
-  return assignmentsOf(s, personId).find((a) => !a.endedOn && conceptOf(a) === concept) ?? null
+  return assignmentsOf(s, personId, true).find((a) => !a.endedOn && conceptOf(a) === concept) ?? null
 }
 /** Current and in effect: not a start still waiting for Auth. */
 export const confirmed = (a: Assignment) => !a.endedOn && !(a.change === "start" && a.status === "sent")
