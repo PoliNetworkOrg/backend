@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { schema } from "@/db/schema"
 import { assignments, persons } from "@/db/schema/people"
+import { personRecordSchema } from "@/people/contract"
 import { createPeopleService } from "@/people/service"
 import { createPeoplePgStore } from "@/people/store-pg"
 import type { Viewer } from "@/people/types"
@@ -107,6 +108,27 @@ try {
 
   // Linking HR's record to that account folds the automatic one into it, in one transaction.
   const automaticId = anna?.id as string
+  const retiredId = crypto.randomUUID()
+  await db.insert(assignments).values({
+    id: retiredId,
+    personId: automaticId,
+    kind: "team",
+    team: "intl",
+    teamRole: "member",
+    since: "2026-10-01",
+    assignedBy: "hr",
+    change: "start",
+    status: "pending",
+  })
+  assert.deepEqual(
+    (await people.listTeams(hr)).map((team) => team.id),
+    ["it", "hr", "design", "events"]
+  )
+  const beforeLink = personRecordSchema.parse(await people.getPerson(hr, { id: automaticId }))
+  assert.deepEqual(
+    beforeLink.assignments.map((a) => a.team),
+    ["it", "it"]
+  )
   const { id: hrAnna } = await people.createPerson(hr, input("Anna"))
   // As a member: the automatic record already leads IT, and an older answer from Auth must not undo that.
   await people.addTeamMember(hr, { teamId: "it", personId: hrAnna, role: "member", since: "2026-10-01", fields: {} })
@@ -115,6 +137,7 @@ try {
   assert.equal(absorbed.assignments.filter((a) => !a.endedOn).length, 1)
   assert.ok(absorbed.activity.some((a) => a.text === "Created from a role held in PoliNetwork Auth"))
   assert.equal((await db.select().from(persons).where(eq(persons.id, automaticId))).length, 0)
+  assert.equal((await db.select().from(assignments).where(eq(assignments.id, retiredId)))[0].personId, hrAnna)
   checked.push("an automatic record is absorbed by the record linked to its account")
 
   await assert.rejects(
