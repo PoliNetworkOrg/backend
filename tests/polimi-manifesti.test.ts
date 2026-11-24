@@ -4,6 +4,7 @@ import {
   type CourseEntry,
   coursesMigrationSql,
   diffCourseFiles,
+  languagesOf,
   parseAcademicYear,
   parseCourseDetails,
   parseCourseList,
@@ -84,6 +85,21 @@ describe("Politecnico manifesti", () => {
     })
     expect(parseCourseDetails(page("school-auic-2026.html"))).toMatchObject({ code: 1030, school: "auic" })
     expect(parseCourseDetails("<html><body>Nothing here</body></html>")).toBeNull()
+  })
+
+  it("reads the languages from a name, a pair or a note", () => {
+    expect(languagesOf("Italiano")).toEqual(["Italiano"])
+    expect(
+      languagesOf(
+        "(¹) Italiano/Inglese (¹) Il corso di laurea offre alcuni piani di studio preventivamente approvati in lingua italiana e altri in lingua inglese."
+      )
+    ).toEqual(["Italiano", "Inglese"])
+    expect(
+      languagesOf(
+        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+      )
+    ).toEqual(["Inglese"])
+    expect(languagesOf("")).toEqual([])
   })
 
   it("recognises the four schools", () => {

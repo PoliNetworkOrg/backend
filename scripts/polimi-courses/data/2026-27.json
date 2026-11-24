@@ -32,7 +32,10 @@
         "Mantova",
         "Piacenza"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2,
@@ -90,7 +93,10 @@
         "Mantova",
         "Piacenza"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         3
       ],
@@ -167,7 +173,7 @@
         "Mantova"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -186,7 +192,7 @@
         "Lecco"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -204,7 +210,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2
@@ -221,7 +230,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2
@@ -239,7 +251,7 @@
         "Piacenza"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -258,7 +270,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -277,7 +289,7 @@
         "Piacenza"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -296,7 +308,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -315,7 +327,7 @@
         "Mantova"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -333,7 +345,7 @@
         "Lecco"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -350,7 +362,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -366,7 +381,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -382,7 +400,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -398,7 +419,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -415,7 +439,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -433,7 +457,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -451,7 +475,7 @@
         "Piacenza"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -469,7 +493,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -659,7 +683,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -677,7 +701,10 @@
       "campuses": [
         "Milano Bovisa"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2
@@ -695,7 +722,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -714,7 +741,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -732,7 +759,10 @@
       "campuses": [
         "Milano Bovisa"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2
@@ -749,7 +779,10 @@
       "campuses": [
         "Milano Bovisa"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2
@@ -767,7 +800,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -786,7 +819,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -803,7 +836,10 @@
       "campuses": [
         "Milano Bovisa"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -820,7 +856,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -838,7 +874,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -855,7 +891,10 @@
       "campuses": [
         "Milano Bovisa"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -871,7 +910,10 @@
       "campuses": [
         "Milano Bovisa"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -888,7 +930,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -905,7 +947,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2,
@@ -943,7 +988,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         3
       ],
@@ -996,7 +1044,7 @@
         "Lecco"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1014,7 +1062,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2
@@ -1032,7 +1083,10 @@
         "Milano Leonardo",
         "Piacenza"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         1,
         2
@@ -1050,7 +1104,7 @@
         "Lecco"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -1067,7 +1121,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -1084,7 +1141,10 @@
         "Milano Leonardo",
         "Piacenza"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -1565,7 +1625,10 @@
       "campuses": [
         "Lecco"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         3
       ],
@@ -1763,7 +1826,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1782,7 +1845,7 @@
         "Cremona"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1801,7 +1864,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1820,7 +1883,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1839,7 +1902,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1858,7 +1921,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1877,7 +1940,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1896,7 +1959,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1916,7 +1979,7 @@
         "Piacenza"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1935,7 +1998,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1954,7 +2017,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1973,7 +2036,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -1992,7 +2055,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2011,7 +2074,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2030,7 +2093,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2049,7 +2112,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2068,7 +2131,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2088,7 +2151,7 @@
         "Piacenza"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2107,7 +2170,7 @@
         "Lecco"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2126,7 +2189,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2145,7 +2208,7 @@
         "Cremona"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2164,7 +2227,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2183,7 +2246,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2202,7 +2265,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         1,
@@ -2221,7 +2284,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2239,7 +2302,7 @@
         "Cremona"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2257,7 +2320,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2274,7 +2337,10 @@
       "campuses": [
         "Milano Leonardo"
       ],
-      "languages": [],
+      "languages": [
+        "Italiano",
+        "Inglese"
+      ],
       "activeYears": [
         2
       ],
@@ -2291,7 +2357,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2309,7 +2375,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2327,7 +2393,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2345,7 +2411,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2364,7 +2430,7 @@
         "Piacenza"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2382,7 +2448,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2400,7 +2466,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2418,7 +2484,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2436,7 +2502,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2454,7 +2520,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2472,7 +2538,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2490,7 +2556,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2508,7 +2574,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2527,7 +2593,7 @@
         "Piacenza"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2545,7 +2611,7 @@
         "Lecco"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2563,7 +2629,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2581,7 +2647,7 @@
         "Cremona"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2599,7 +2665,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2617,7 +2683,7 @@
         "Milano Bovisa"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2
@@ -2635,7 +2701,7 @@
         "Milano Leonardo"
       ],
       "languages": [
-        "Il corso di Laurea Magistrale è erogato in lingua inglese ma il manifesto soddisfa i requisiti della nota MIUR del 11/07/2018 e il parere CUN del 23/10/2018."
+        "Inglese"
       ],
       "activeYears": [
         2

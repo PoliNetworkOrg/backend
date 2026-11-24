@@ -125,12 +125,24 @@ export function parseCourseDetails(html: string): CourseDetails | null {
     school,
     level: levelOf(level),
     campuses: list(fields.get("Sede del corso")),
-    languages: list(fields.get("Lingua/e ufficiali")),
+    // "Lingua/e ufficiali", sometimes with a footnote mark, and a value that can be a sentence.
+    languages: languagesOf([...fields].find(([label]) => label.startsWith("Lingua"))?.[1] ?? ""),
     activeYears: list(fields.get("Anni di Corso Attivi"))
       .map(Number)
       .filter((year) => Number.isInteger(year)),
     degreeClass: fields.get("Classe di Laurea") ?? "",
   }
+}
+
+/**
+ * The languages a course page's language field names: "Italiano", "Italiano/Inglese (¹) …", or a note like "Il corso
+ * … è erogato in lingua inglese ma …".
+ */
+export function languagesOf(text: string): string[] {
+  const languages: string[] = []
+  if (/italian/i.test(text)) languages.push("Italiano")
+  if (/ingles|english/i.test(text)) languages.push("Inglese")
+  return languages
 }
 
 /** The school a course page names, e.g. "Ingegneria Industriale e dell'Informazione" (the site starts some with a URL). */
