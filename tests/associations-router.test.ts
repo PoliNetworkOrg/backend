@@ -51,7 +51,18 @@ describe("Association API policies", () => {
       context([], { kind: "user", sub: "stranger", client: "admin", telegramId: null })
     )
     await expect(stranger.get({ id })).rejects.toMatchObject({ code: "NOT_FOUND" })
-    expect(await stranger.directory()).toEqual([{ id, name: "Association", revision: 1 }])
+    expect(await stranger.directory()).toEqual([
+      {
+        id,
+        name: "Association",
+        revision: 1,
+        acronym: "A",
+        programmes: [],
+        campuses: [],
+        crossProgramme: false,
+        contacts: [],
+      },
+    ])
     expect((await router.createCaller(context(["web:content:write"])).list()).operator).toBe(false)
     expect((await router.createCaller(context(["admin:access", "web:content:write"])).list()).operator).toBe(true)
   })

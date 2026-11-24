@@ -71,7 +71,15 @@ export function createAssociationRouter(
         return { url: uploaded.url }
       }),
     list: user.output(C.dashboardSchema).query(({ ctx }) => service.list(ctx.viewer)),
-    directory: user.output(C.directorySchema).query(() => service.directory()),
+    directory: user.output(C.directorySchema).query(({ ctx }) => service.directory(ctx.viewer)),
+    catalogue: user.output(C.catalogueSchema).query(({ ctx }) => service.catalogue(ctx.viewer)),
+    saveCatalogue: user
+      .input(C.catalogueEntrySchema)
+      .output(z.object({ ok: z.literal(true) }))
+      .mutation(async ({ ctx, input }) => {
+        await service.saveCatalogue(ctx.viewer, input)
+        return { ok: true as const }
+      }),
     get: user
       .input(C.refSchema)
       .output(C.detailSchema)
@@ -95,10 +103,10 @@ export function createAssociationRouter(
     lookup: user
       .input(C.refSchema)
       .output(z.object({ id: z.uuid(), name: z.string(), revision: z.number() }))
-      .query(async ({ input }) => {
-        const item = (await service.directory()).find((r) => r.id === input.id)
+      .query(async ({ ctx, input }) => {
+        const item = (await service.directory(ctx.viewer)).find((r) => r.id === input.id)
         if (!item) throw new TRPCError({ code: "NOT_FOUND" })
-        return item
+        return { id: item.id, name: item.name, revision: item.revision }
       }),
   })
 }

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { TRPCError } from "@trpc/server"
 import type { z } from "zod"
-import type { Command, createSchema, Event, Member, Profile, Request } from "./contract"
+import type { CatalogueEntry, Command, Contact, createSchema, Event, Member, Profile, Request } from "./contract"
 
 export type Viewer = { sub: string; name: string; operator: boolean; email?: string }
 export type Invitation = { requestId: string; hash: string; expiresAt: string }
@@ -20,6 +20,8 @@ export type Record = {
   invitations: Invitation[]
   notes: string
   commands: string[]
+  /** Contacts visible to other associations or to PoliNetwork only; public ones live in the profile. */
+  contacts: Contact[]
 }
 export type Mail = { id: string; to: string; subject: string; text: string }
 export type Store = {
@@ -31,6 +33,8 @@ export type Store = {
   create(record: Record, commandId: string, actor: string): Promise<string>
   transfer<T>(from: string, to: string, operation: (source: Record, destination: Record) => T): Promise<T>
   change<T>(id: string, operation: (record: Record, mail: Mail[]) => T): Promise<T>
+  catalogue(): Promise<CatalogueEntry[]>
+  saveCatalogue(entry: CatalogueEntry, actor: string): Promise<void>
 }
 function fail(
   code: "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "BAD_REQUEST" | "TOO_MANY_REQUESTS",
@@ -40,6 +44,75 @@ function fail(
 }
 const MAX_COMMAND_KEYS = 200
 const hash = (token: string) => createHash("sha256").update(token).digest("hex")
+/** Fills fields added after the first release, so records written by it read like current ones. */
+export function normalizeProfile(p: Profile): Profile {
+  return {
+    ...p,
+    programmes: p.programmes ?? [],
+    campuses: p.campuses ?? [],
+    crossProgramme: p.crossProgramme ?? false,
+    contacts: p.contacts ?? [],
+  }
+}
+export function normalizeRecord(r: Record): Record {
+  r.profile = normalizeProfile(r.profile)
+  if (r.published) r.published = normalizeProfile(r.published)
+  for (const q of r.requests) if (q.profile) q.profile = normalizeProfile(q.profile)
+  r.contacts ??= []
+  return r
+}
+const openContent = (r: Record) =>
+  r.requests.find((q) => q.kind === "content" && ["draft", "changes", "submitted"].includes(q.status))
+const sameContacts = (a: Contact[], b: Contact[]) => JSON.stringify(a) === JSON.stringify(b)
+/** Contacts whose linked representative no longer has access, in the working profile or among the non-public ones. */
+function staleContacts(r: Record) {
+  const working = openContent(r)?.profile ?? r.profile
+  return [...working.contacts, ...r.contacts].filter(
+    (c) => c.holderSub && !r.members.some((m) => m.sub === c.holderSub && m.active)
+  )
+}
+/** New programmes and campuses must be active catalogue entries; ones already on the record may stay after retirement. */
+function checkCatalogue(p: Profile, previous: Profile | null, catalogue: CatalogueEntry[]) {
+  if (p.crossProgramme && p.programmes.length)
+    fail("BAD_REQUEST", "A cross-programme association does not list degree programmes")
+  for (const [kind, slugs, before] of [
+    ["programme", p.programmes, previous?.programmes ?? []],
+    ["campus", p.campuses, previous?.campuses ?? []],
+  ] as const) {
+    if (new Set(slugs).size !== slugs.length) fail("BAD_REQUEST", "Each programme and campus can be listed once")
+    for (const slug of slugs) {
+      const entry = catalogue.find((e) => e.kind === kind && e.slug === slug)
+      if (!entry || (!entry.active && !before.includes(slug)))
+        fail("BAD_REQUEST", `Choose ${kind === "programme" ? "programmes" : "campuses"} from the PoliNetwork catalogue`)
+    }
+  }
+}
+function checkContacts(r: Record, contacts: Contact[]) {
+  if (new Set(contacts.map((c) => c.id)).size !== contacts.length) fail("BAD_REQUEST", "Duplicate contact")
+  if (contacts.some((c) => c.holderSub && !r.members.some((m) => m.sub === c.holderSub)))
+    fail("BAD_REQUEST", "Link a contact only to one of the association's representatives")
+}
+/** History detail for contact changes: labels and visibility only, never names or phone numbers. */
+function describeContacts(before: Contact[], after: Contact[]) {
+  const name = (c: Contact) => `${c.label} (${c.visibility})`
+  const added = after.filter((c) => !before.some((b) => b.id === c.id)).map(name)
+  const removed = before.filter((c) => !after.some((a) => a.id === c.id)).map(name)
+  const changed = after
+    .filter((c) => before.some((b) => b.id === c.id && JSON.stringify(b) !== JSON.stringify(c)))
+    .map(name)
+  return [
+    added.length ? `Aggiunti: ${added.join(", ")}` : "",
+    changed.length ? `Modificati: ${changed.join(", ")}` : "",
+    removed.length ? `Rimossi: ${removed.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join(". ")
+}
+function flagContactsOf(r: Record, v: Viewer, sub: string) {
+  const working = openContent(r)?.profile ?? r.profile
+  const linked = [...working.contacts, ...r.contacts].filter((c) => c.holderSub === sub)
+  if (linked.length) event(r, v, "Contacts to update", linked.map((c) => c.label).join(", "))
+}
 const activeMember = (r: Record, v: Viewer) => r.members.find((m) => m.sub === v.sub && m.active)
 const accessible = (r: Record, v: Viewer) =>
   v.operator ||
@@ -109,6 +182,8 @@ export function present(r: Record, v: Viewer) {
         ? r.profile
         : (r.published ?? { ...r.profile, descriptionIt: "", descriptionEn: "", email: "", links: [], logo: null }),
     publishedProfile: r.published,
+    contacts: v.operator || member ? r.contacts : [],
+    staleContacts: v.operator || member ? staleContacts(r).map((c) => c.id) : [],
     members: v.operator || member ? r.members : [],
     requests,
     events: r.events.filter(
@@ -135,10 +210,34 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
         ),
       }
     },
-    async directory() {
-      return (await store.list())
-        .filter((r) => r.registered && r.status === "active")
-        .map((r) => ({ id: r.id, name: r.profile.name, revision: r.revision }))
+    async directory(v: Viewer) {
+      const records = (await store.list()).filter((r) => r.registered && r.status === "active")
+      // Representatives of an active association see the contacts other associations share with associations.
+      const representative = v.operator || records.some((r) => !!activeMember(r, v))
+      return records.map((r) => {
+        const own = v.operator || !!activeMember(r, v)
+        const shown = own ? r.profile : (r.published ?? r.profile)
+        return {
+          id: r.id,
+          name: r.profile.name,
+          revision: r.revision,
+          acronym: shown.acronym,
+          programmes: shown.programmes,
+          campuses: shown.campuses,
+          crossProgramme: shown.crossProgramme,
+          contacts: [
+            ...(own ? r.profile.contacts : (r.published?.contacts ?? [])),
+            ...r.contacts.filter((c) => own || (representative && c.visibility === "associations")),
+          ],
+        }
+      })
+    },
+    async catalogue(v: Viewer) {
+      return (await store.catalogue()).filter((e) => v.operator || e.active)
+    },
+    async saveCatalogue(v: Viewer, entry: CatalogueEntry) {
+      operator(v)
+      await store.saveCatalogue(entry, v.sub)
     },
     async get(v: Viewer, id: string) {
       const r = await store.get(id)
@@ -146,6 +245,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
       return present(r, v)
     },
     async create(v: Viewer, input: z.infer<typeof createSchema>) {
+      checkCatalogue(input.profile, null, await store.catalogue())
       const q = request(v, "registration", input.explanation, input.profile)
       q.status = input.submit ? "submitted" : "draft"
       q.targetSub = v.operator ? null : v.sub
@@ -166,6 +266,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
         invitations: [],
         notes: "",
         commands: [],
+        contacts: [],
       }
       if (v.operator && input.submit) {
         r.registered = true
@@ -225,6 +326,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
         if ((await store.recentAccessRequests(v.sub, since)) >= 20)
           fail("TOO_MANY_REQUESTS", "Too many access requests today. Contact PoliNetwork.")
       }
+      const catalogue = c.action === "save" || c.action === "submit" ? await store.catalogue() : []
       return store.change(c.id, (r, mail) => {
         // Recheck authorization before idempotency: a former representative cannot reuse commands to read the record.
         if (c.action !== "access" && !accessible(r, v)) fail("NOT_FOUND", "Association not found")
@@ -253,6 +355,8 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
             q = request(v, "content", c.explanation, c.profile)
             r.requests.push(q)
           }
+          checkCatalogue(c.profile, r.published ?? r.profile, catalogue)
+          checkContacts(r, c.profile.contacts)
           q.profile = c.profile
           q.explanation = c.explanation
           q.updatedAt = new Date().toISOString()
@@ -275,6 +379,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
             if (!["draft", "changes"].includes(q.status)) fail("CONFLICT", "This request cannot be submitted")
             if (!q.explanation.trim()) fail("BAD_REQUEST", "Explain the request before submitting")
             if (q.kind === "content" && q.profile) validatePublication(q.profile)
+            if (q.profile) checkCatalogue(q.profile, r.published ?? r.profile, catalogue)
             q.status = "submitted"
           } else {
             if (!["draft", "changes", "submitted"].includes(q.status))
@@ -366,6 +471,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
               if (q.targetSub && target) {
                 target.role = q.role
                 target.active = !q.remove
+                if (q.remove) flagContactsOf(r, v, target.sub)
               } else if (q.targetSub)
                 r.members.push({ sub: q.targetSub, name: q.targetName ?? q.targetSub, role: q.role, active: true })
             }
@@ -397,6 +503,31 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
           operator(v)
           r.notes = c.note
           event(r, v, "Internal note updated")
+        } else if (c.action === "contacts") {
+          if (!r.registered || !writable(r, v)) fail("FORBIDDEN", "You cannot edit this association")
+          checkContacts(r, c.contacts)
+          // SAFETY: filtered to `visibility === "public"`, the one difference between the two contact types.
+          const shown = c.contacts.filter((x) => x.visibility === "public") as Profile["contacts"]
+          const hidden = c.contacts.filter((x) => x.visibility !== "public")
+          const open = openContent(r)
+          const working = open?.profile ?? r.profile
+          if (!sameContacts(working.contacts, shown)) {
+            if (open?.status === "submitted")
+              fail("CONFLICT", "Withdraw the submitted profile before changing public contacts")
+            if (open?.profile) open.profile = { ...open.profile, contacts: shown }
+            else
+              r.requests.push(
+                request(v, "content", "Aggiornamento dei contatti pubblici", { ...r.profile, contacts: shown })
+              )
+            // SAFETY: the branch above either updated the open content request or pushed a new one.
+            const q = openContent(r) as Request
+            q.updatedAt = new Date().toISOString()
+            event(r, v, "Public contacts proposed", describeContacts(working.contacts, shown), q.id)
+          }
+          if (!sameContacts(r.contacts, hidden)) {
+            event(r, v, "Contacts updated", describeContacts(r.contacts, hidden))
+            r.contacts = hidden
+          }
         } else if (c.action === "leave" || c.action === "revoke") {
           if (c.action === "revoke") operator(v)
           const member = r.members.find((m) => m.sub === (c.action === "leave" ? v.sub : c.sub) && m.active)
@@ -415,6 +546,7 @@ export function createAssociationService(store: Store, dashboardUrl: string) {
               r.invitations = r.invitations.filter((i) => i.requestId !== pending.id)
             }
           event(r, v, c.action === "leave" ? "Representative left" : "Representative revoked", c.reason)
+          flagContactsOf(r, v, member.sub)
         }
         r.commands.push(commandKey)
         // Retries only matter for a short window; keep the aggregate from growing without bound.

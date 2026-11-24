@@ -295,6 +295,13 @@
       "when": 1795480148411,
       "tag": "0041_association_jsonb_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795480218303,
+      "tag": "0042_association_catalogue",
+      "breakpoints": true
     }
   ]
 }

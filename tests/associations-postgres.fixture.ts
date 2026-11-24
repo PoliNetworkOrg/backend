@@ -6,10 +6,12 @@ import { join } from "node:path"
 import { SQL } from "bun"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
+import { publicAssociations } from "@/associations/public"
 import { createAssociationService } from "@/associations/service"
 import { createAssociationStore } from "@/associations/store-pg"
 import { schema } from "@/db/schema"
-import { associationMail, associationRegistry } from "@/db/schema/web/association-portal"
+import { groupLabels } from "@/db/schema/common/group-labels"
+import { associationCatalogue, associationMail, associationRegistry } from "@/db/schema/web/association-portal"
 import { associations } from "@/db/schema/web/associations"
 
 const connection = {
@@ -58,7 +60,37 @@ try {
   await client.unsafe(
     `UPDATE web_association_registry SET state = to_jsonb(state::text) WHERE id = (SELECT min(id::text)::uuid FROM web_association_registry)`
   )
+  await db
+    .insert(groupLabels)
+    .values(
+      [
+        "didattica.design.triennale.design-della-moda.25-26",
+        "didattica.design.triennale.design-della-moda.26-27",
+        "didattica.design",
+        "ita",
+        "bovisa",
+        "extra.affitti",
+      ].map((label) => ({ label, createdBySub: "legacy" }))
+    )
   await migrate(db, { migrationsFolder: "./drizzle" })
+  // 0042: one programme per course across cohorts, the six campuses, and backfilled JSON on every record.
+  const catalogueRows = await db.select().from(associationCatalogue)
+  assert.deepEqual(
+    catalogueRows.filter((e) => e.kind === "programme").map((e) => [e.slug, e.nameIt, e.nameEn]),
+    [["didattica.design.triennale.design-della-moda", "Design Della Moda (triennale)", "Design Della Moda (bachelor)"]]
+  )
+  assert.deepEqual(
+    catalogueRows
+      .filter((e) => e.kind === "campus")
+      .map((e) => e.slug)
+      .sort(),
+    ["bovisa", "cremona", "lecco", "leonardo", "mantova", "piacenza"]
+  )
+  for (const row of await db.select().from(associationRegistry)) {
+    assert.deepEqual(row.state.contacts, [])
+    for (const p of [row.state.profile, row.state.published])
+      assert.deepEqual([p?.programmes, p?.campuses, p?.crossProgramme, p?.contacts], [[], [], false, []])
+  }
   const objects = async () =>
     (await client.unsafe(`SELECT DISTINCT jsonb_typeof(state) AS t FROM web_association_registry`)).map(
       (r: { t: string }) => r.t
@@ -91,6 +123,10 @@ try {
     email: "",
     logo: null,
     links: [],
+    programmes: [],
+    campuses: ["leonardo"],
+    crossProgramme: false,
+    contacts: [],
   }
   const commandId = randomUUID()
   const [a, b] = await Promise.all([
@@ -158,6 +194,56 @@ try {
   assert.equal((await service.invitation(token)).associationName, "New")
   assert.deepEqual(await objects(), ["object"])
   assert((await store.published()).some((r) => r.id === a.id))
+  // Contacts: the public one goes through review, the others are saved at once and never reach the website.
+  const contact = (visibility: "public" | "associations" | "polinetwork") => ({
+    id: randomUUID(),
+    function: "events" as const,
+    label: visibility,
+    email: `${visibility}@example.org`,
+    name: visibility === "polinetwork" ? "Personal Name" : "",
+    phone: "",
+    visibility,
+    holderSub: null,
+  })
+  let latest = await service.get(user, a.id)
+  await service.command(user, {
+    id: a.id,
+    revision: latest.revision,
+    commandId: randomUUID(),
+    action: "contacts",
+    contacts: [contact("public"), contact("associations"), contact("polinetwork")],
+  })
+  latest = await service.get(user, a.id)
+  const contactDraft = latest.requests.filter((q) => q.kind === "content").at(-1)
+  assert(contactDraft?.status === "draft")
+  await service.command(user, {
+    id: a.id,
+    revision: latest.revision,
+    commandId: randomUUID(),
+    action: "submit",
+    requestId: contactDraft.id,
+  })
+  latest = await service.get(staff, a.id)
+  await service.command(staff, {
+    id: a.id,
+    revision: latest.revision,
+    commandId: randomUUID(),
+    action: "review",
+    requestId: contactDraft.id,
+    decision: "approve",
+    reason: "OK",
+  })
+  const site = (await publicAssociations(store)).find((p) => p.name === "New")
+  assert.deepEqual(site?.campuses, [{ slug: "leonardo", nameIt: "Milano Leonardo", nameEn: "Milan Leonardo" }])
+  assert.deepEqual(
+    site?.contacts?.map((c) => c.label),
+    ["public"]
+  )
+  assert.equal(JSON.stringify(await publicAssociations(store)).includes("Personal Name"), false)
+  const visible = async (viewer: { sub: string; name: string; operator: boolean }) =>
+    ((await service.directory(viewer)).find((r) => r.id === a.id)?.contacts ?? []).map((c) => c.label).sort()
+  assert.deepEqual(await visible({ sub: "nobody", name: "Nobody", operator: false }), ["public"])
+  assert.deepEqual(await visible(staff), ["associations", "polinetwork", "public"])
   // A new service instance sees persisted publication, roles and history.
   const restarted = createAssociationService(createAssociationStore(db), "https://admin.example.org")
   const persisted = await restarted.get(user, a.id)
@@ -183,6 +269,9 @@ try {
         "restart",
         "unpublish without deletion",
         "jsonb objects and invitation lookup",
+        "catalogue seed",
+        "registry backfill",
+        "contact visibility",
       ],
     })
   )

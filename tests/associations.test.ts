@@ -143,7 +143,7 @@ describe("Association registry and scoped review", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" })
     await h.command(staff, id, { action: "status", status: "archived", hide: true, reason: "Closed" })
     expect((await h.service.get(staff, id)).events.length).toBeGreaterThan(2)
-    expect(await h.service.directory()).toEqual([])
+    expect(await h.service.directory(owner)).toEqual([])
   })
   it("rejects stale writes and makes retried commands idempotent", async () => {
     const h = harness()
