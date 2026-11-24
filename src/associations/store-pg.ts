@@ -1,25 +1,45 @@
 import { TRPCError } from "@trpc/server"
-import { eq, inArray, sql } from "drizzle-orm"
+import { asc, eq, inArray, sql } from "drizzle-orm"
 import type { DB } from "@/db"
-import { associationMail, associationRegistry } from "@/db/schema/web/association-portal"
+import { associationCatalogue, associationMail, associationRegistry } from "@/db/schema/web/association-portal"
 import { associations } from "@/db/schema/web/associations"
-import type { Mail, Record, Store } from "./service"
+import { type Mail, normalizeRecord, type Record, type Store } from "./service"
 
 export function createAssociationStore(db: typeof DB): Store {
   return {
+    async catalogue() {
+      return (
+        await db
+          .select()
+          .from(associationCatalogue)
+          .orderBy(asc(associationCatalogue.kind), asc(associationCatalogue.nameIt))
+      ).map(({ kind, slug, nameIt, nameEn, active }) => ({ kind, slug, nameIt, nameEn, active }))
+    },
+    async saveCatalogue(entry, actor) {
+      const values = { ...entry, updatedBySub: actor, updatedAt: new Date() }
+      await db
+        .insert(associationCatalogue)
+        .values(values)
+        .onConflictDoUpdate({ target: [associationCatalogue.kind, associationCatalogue.slug], set: values })
+    },
     async list() {
-      return (await db.select().from(associationRegistry).orderBy(associationRegistry.id)).map((row) => row.state)
+      return (await db.select().from(associationRegistry).orderBy(associationRegistry.id)).map((row) =>
+        normalizeRecord(row.state)
+      )
     },
     async get(id) {
       const [row] = await db.select().from(associationRegistry).where(eq(associationRegistry.id, id))
-      return row?.state ?? null
+      return row ? normalizeRecord(row.state) : null
     },
     async byInvitation(hash) {
       const [row] = await db
         .select()
         .from(associationRegistry)
-        .where(sql`${associationRegistry.state}->'invitations' @> ${JSON.stringify([{ hash }])}::jsonb`)
-      return row?.state ?? null
+        // Built in SQL: a JSON text parameter cast to jsonb arrives from Bun SQL as a jsonb string and matches nothing.
+        .where(
+          sql`${associationRegistry.state}->'invitations' @> jsonb_build_array(jsonb_build_object('hash', ${hash}::text))`
+        )
+      return row ? normalizeRecord(row.state) : null
     },
     async published() {
       const rows = await db
@@ -28,7 +48,7 @@ export function createAssociationStore(db: typeof DB): Store {
         .where(
           sql`(${associationRegistry.state}->>'registered')::boolean AND jsonb_typeof(${associationRegistry.state}->'published') = 'object'`
         )
-      return rows.map((row) => row.state)
+      return rows.map((row) => normalizeRecord(row.state))
     },
     async recentAccessRequests(sub, since) {
       const [{ count }] = await db
@@ -77,8 +97,10 @@ export function createAssociationStore(db: typeof DB): Store {
           .where(inArray(associationRegistry.id, [from, to]))
           .orderBy(associationRegistry.id)
           .for("update")
-        const source = rows.find((r) => r.id === from)?.state
-        const destination = rows.find((r) => r.id === to)?.state
+        const sourceRow = rows.find((r) => r.id === from)
+        const destinationRow = rows.find((r) => r.id === to)
+        const source = sourceRow && normalizeRecord(sourceRow.state)
+        const destination = destinationRow && normalizeRecord(destinationRow.state)
         if (!source || !destination) throw new TRPCError({ code: "NOT_FOUND" })
         const result = operation(source, destination)
         for (const state of [source, destination])
@@ -90,7 +112,7 @@ export function createAssociationStore(db: typeof DB): Store {
       return db.transaction(async (tx) => {
         const [row] = await tx.select().from(associationRegistry).where(eq(associationRegistry.id, id)).for("update")
         if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Association not found" })
-        const state = row.state
+        const state = normalizeRecord(row.state)
         const mail: Mail[] = []
         const result = operation(state, mail)
         // Preserve the old numeric public IDs and API shape. Only an approved version is copied into the old catalog.

@@ -1,7 +1,8 @@
 import { TRPCError } from "@trpc/server"
 import z from "zod"
-import { associationStore } from "@/associations"
-import { httpUrl, linkSchema } from "@/associations/contract"
+import { associationEventStore, associationStore } from "@/associations"
+import { contactFunction, linkSchema } from "@/associations/contract"
+import { publicAssociations, publicEvents } from "@/associations/public"
 import { dashboard, publicData } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 
@@ -26,43 +27,50 @@ const associationSchema = z.object({
   logo: z.string().nullable(),
   links: associationLinksSchema,
   extraLinks: z.array(linkSchema).optional(),
+  // Added with programmes, campuses and contacts; optional so older clients and SDKs keep working.
+  programmes: z.array(z.object({ slug: z.string(), nameIt: z.string(), nameEn: z.string() })).optional(),
+  campuses: z.array(z.object({ slug: z.string(), nameIt: z.string(), nameEn: z.string() })).optional(),
+  crossProgramme: z.boolean().optional(),
+  contacts: z
+    .array(
+      z.object({
+        function: contactFunction,
+        label: z.string(),
+        email: z.string(),
+        name: z.string(),
+        phone: z.string(),
+      })
+    )
+    .optional(),
+})
+
+const named = z.object({ slug: z.string(), nameIt: z.string(), nameEn: z.string() })
+const upcomingEventSchema = z.object({
+  id: z.uuid(),
+  /** The association's public id, as in `getAllAssociations`. */
+  associationId: z.number(),
+  associationName: z.string(),
+  title: z.string(),
+  descriptionIt: z.string(),
+  descriptionEn: z.string(),
+  startsAt: z.string(),
+  endsAt: z.string().nullable(),
+  online: z.boolean(),
+  venue: z.string(),
+  campus: named.nullable(),
+  link: z.string().nullable(),
+  poster: z.string().nullable(),
 })
 
 export default createTRPCRouter({
+  /** Approved association events that are not over yet, soonest first. */
+  getUpcomingEvents: policy(publicData)
+    .output(z.array(upcomingEventSchema))
+    .query(() => publicEvents(associationStore, associationEventStore)),
+
   getAllAssociations: policy(publicData)
     .output(z.array(associationSchema))
-    .query(async () => {
-      const records = await associationStore.published()
-      return records
-        .filter((r) => r.status !== "archived" && r.legacyId !== null)
-        .sort((a, b) => (a.legacyId ?? 0) - (b.legacyId ?? 0))
-        .map((r) => {
-          const p = r.published as NonNullable<typeof r.published>
-          // Public output must never fail for the whole list because of one odd stored value.
-          const links = p.links.filter((l) => linkSchema.safeParse(l).success)
-          const first = (key: string) => links.find((l) => l.platform === key)?.url ?? null
-          return {
-            id: r.legacyId as number,
-            name: p.name,
-            descriptionIt: p.descriptionIt,
-            descriptionEn: p.descriptionEn,
-            logo: p.logo && httpUrl.safeParse(p.logo).success ? p.logo : null,
-            links: {
-              email: p.email && z.email().safeParse(p.email).success ? p.email : null,
-              website: first("website"),
-              facebook: first("facebook"),
-              instagram: first("instagram"),
-              tiktok: first("tiktok"),
-              x: first("x"),
-              youtube: first("youtube"),
-              telegram: first("telegram"),
-              linkedin: first("linkedin"),
-              spotify: first("spotify"),
-            },
-            extraLinks: links,
-          }
-        })
-    }),
+    .query(() => publicAssociations(associationStore)),
 
   addAssociation: policy(dashboard("web:content:write"))
     .input(z.unknown())

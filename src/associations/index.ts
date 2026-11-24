@@ -1,15 +1,34 @@
 import { and, eq, isNotNull, isNull, lte, sql } from "drizzle-orm"
 import { DB } from "@/db"
-import { associationMail } from "@/db/schema/web/association-portal"
+import { associationCommandKey, associationMail } from "@/db/schema/web/association-portal"
 import { sendAssociationEmail } from "@/emails/mailer"
 import { env } from "@/env"
 import { idp } from "@/idp"
 import { logger } from "@/logger"
+import { createCreditService } from "./credits"
+import { createCreditStore } from "./credits-pg"
+import { createEventService } from "./events"
+import { createEventStore } from "./events-pg"
+import { createHomeService } from "./home"
+import { createPromotionService } from "./promotions"
+import { createPromotionStore } from "./promotions-pg"
 import { createAssociationService } from "./service"
 import { createAssociationStore } from "./store-pg"
 
+const dashboardUrl = env.ESIGN_DASHBOARD_URL.replace(/\/$/, "")
 export const associationStore = createAssociationStore(DB)
-export const associationPortal = createAssociationService(associationStore, env.ESIGN_DASHBOARD_URL.replace(/\/$/, ""))
+export const associationPortal = createAssociationService(associationStore, dashboardUrl)
+const promotionStore = createPromotionStore(DB)
+export const associationEventStore = createEventStore(DB)
+export const associationEvents = createEventService(associationEventStore, associationStore, dashboardUrl)
+export const associationPromotions = createPromotionService(
+  promotionStore,
+  associationStore,
+  dashboardUrl,
+  async (id) => (await associationEventStore.event(id))?.associationId ?? null
+)
+export const associationHome = createHomeService(associationStore, promotionStore, associationEventStore)
+export const associationCredits = createCreditService(createCreditStore(DB), associationStore, promotionStore)
 
 const LEASE_MS = 5 * 60_000
 const MAX_ATTEMPTS = 20
@@ -23,6 +42,10 @@ const RETENTION_MS = 30 * 86_400_000
 export async function deliverAssociationMail() {
   await DB.delete(associationMail).where(
     and(isNotNull(associationMail.sentAt), lte(associationMail.sentAt, new Date(Date.now() - RETENTION_MS)))
+  )
+  // Retries only matter for a short window, like the registry's bounded command keys.
+  await DB.delete(associationCommandKey).where(
+    lte(associationCommandKey.createdAt, new Date(Date.now() - RETENTION_MS))
   )
   for (let n = 0; n < 20; n++) {
     const row = await DB.transaction(async (tx) => {
@@ -44,13 +67,20 @@ export async function deliverAssociationMail() {
       await sendAssociationEmail(row.mail)
       // Erase the invitation URL from the outbox after delivery; only the hash remains in the registry.
       await DB.update(associationMail)
-        .set({ sentAt: new Date(), mail: { ...row.mail, text: "Delivered" } })
+        .set({
+          sentAt: new Date(),
+          mail: { id: row.mail.id, to: row.mail.to, subject: row.mail.subject, text: "Delivered" },
+        })
         .where(eq(associationMail.id, row.id))
     } catch (error) {
       logger.error({ error, mailId: row.id }, "Association notification delivery failed")
       if (row.attempts + 1 >= MAX_ATTEMPTS)
         await DB.update(associationMail)
-          .set({ sentAt: new Date(), attempts: row.attempts + 1, mail: { ...row.mail, text: "Undeliverable" } })
+          .set({
+            sentAt: new Date(),
+            attempts: row.attempts + 1,
+            mail: { id: row.mail.id, to: row.mail.to, subject: row.mail.subject, text: "Undeliverable" },
+          })
           .where(eq(associationMail.id, row.id))
       else
         await DB.update(associationMail)

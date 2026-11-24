@@ -4,20 +4,47 @@ import { uploadBlob } from "@/azure/blob"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
+import type { createCreditService } from "./credits"
+import type { createEventService } from "./events"
+import type { createHomeService } from "./home"
+import type { createPromotionService } from "./promotions"
 import type { createAssociationService } from "./service"
 
 const uploads = new Map<string, number[]>()
 function limitUploads(sub: string) {
   const now = Date.now()
   const recent = (uploads.get(sub) ?? []).filter((t) => t > now - 3600_000)
-  if (recent.length >= 20)
-    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many logo uploads. Try later." })
+  if (recent.length >= 20) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Too many uploads. Try later." })
   uploads.set(sub, [...recent, now])
+}
+const imageForm = (maxBytes: number) =>
+  z
+    .instanceof(FormData)
+    .transform((fd) => ({ id: fd.get("id"), file: fd.get("file") }))
+    .pipe(z.object({ id: z.uuid(), file: z.file().min(1).max(maxBytes).mime(["image/png", "image/jpeg"]) }))
+/** Checks the bytes, not just the declared type, and stores the image in the same Blob container as logos. */
+async function storeImage(file: File, message: string) {
+  const bytes = Buffer.from(await file.arrayBuffer())
+  const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
+  if ((!png && !jpeg) || (png ? file.type !== "image/png" : file.type !== "image/jpeg"))
+    throw new TRPCError({ code: "BAD_REQUEST", message })
+  const uploaded = await uploadBlob(bytes, png ? "png" : "jpg", png ? "image/png" : "image/jpeg")
+  return { url: uploaded.url }
+}
+
+function need<T>(part: T | undefined): T {
+  if (!part) throw new TRPCError({ code: "NOT_IMPLEMENTED", message: "Not available" })
+  return part
 }
 
 export function createAssociationRouter(
   service: ReturnType<typeof createAssociationService>,
-  identity: (sub: string) => Promise<{ name: string; email?: string }> = async (sub) => ({ name: sub })
+  identity: (sub: string) => Promise<{ name: string; email?: string }> = async (sub) => ({ name: sub }),
+  promotions?: ReturnType<typeof createPromotionService>,
+  home?: ReturnType<typeof createHomeService>,
+  events?: ReturnType<typeof createEventService>,
+  credits?: ReturnType<typeof createCreditService>
 ) {
   // Being authenticated admits an applicant; membership is checked afresh by the service, never trusted from input.
   const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
@@ -36,21 +63,7 @@ export function createAssociationRouter(
   })
   return createTRPCRouter({
     uploadLogo: user
-      .input(
-        z
-          .instanceof(FormData)
-          .transform((fd) => ({ id: fd.get("id"), file: fd.get("file") }))
-          .pipe(
-            z.object({
-              id: z.uuid(),
-              file: z
-                .file()
-                .min(1)
-                .max(1024 * 1024)
-                .mime(["image/png", "image/jpeg"]),
-            })
-          )
-      )
+      .input(imageForm(1024 * 1024))
       .output(z.object({ url: C.httpUrl }))
       .mutation(async ({ ctx, input }) => {
         const record = await service.get(ctx.viewer, input.id)
@@ -62,16 +75,29 @@ export function createAssociationRouter(
         )
           throw new TRPCError({ code: "FORBIDDEN" })
         limitUploads(ctx.viewer.sub)
-        const bytes = Buffer.from(await input.file.arrayBuffer())
-        const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-        const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255
-        if ((!png && !jpeg) || (png ? input.file.type !== "image/png" : input.file.type !== "image/jpeg"))
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Choose a valid PNG or JPEG logo" })
-        const uploaded = await uploadBlob(bytes, png ? "png" : "jpg", png ? "image/png" : "image/jpeg")
-        return { url: uploaded.url }
+        return storeImage(input.file, "Choose a valid PNG or JPEG logo")
+      }),
+    /** A poster for a promotion request or an event: `id` is the association; representatives only. */
+    uploadPoster: user
+      .input(imageForm(5 * 1024 * 1024))
+      .output(z.object({ url: C.httpUrl }))
+      .mutation(async ({ ctx, input }) => {
+        const record = await service.get(ctx.viewer, input.id)
+        if (!record.role || record.status !== "active") throw new TRPCError({ code: "FORBIDDEN" })
+        limitUploads(ctx.viewer.sub)
+        return storeImage(input.file, "Choose a valid PNG or JPEG poster")
       }),
     list: user.output(C.dashboardSchema).query(({ ctx }) => service.list(ctx.viewer)),
-    directory: user.output(C.directorySchema).query(() => service.directory()),
+    home: user.output(C.homeSchema).query(({ ctx }) => need(home).home(ctx.viewer)),
+    directory: user.output(C.directorySchema).query(({ ctx }) => service.directory(ctx.viewer)),
+    catalogue: user.output(C.catalogueSchema).query(({ ctx }) => service.catalogue(ctx.viewer)),
+    saveCatalogue: user
+      .input(C.catalogueEntrySchema)
+      .output(z.object({ ok: z.literal(true) }))
+      .mutation(async ({ ctx, input }) => {
+        await service.saveCatalogue(ctx.viewer, input)
+        return { ok: true as const }
+      }),
     get: user
       .input(C.refSchema)
       .output(C.detailSchema)
@@ -92,13 +118,79 @@ export function createAssociationRouter(
       .input(C.inviteSchema)
       .output(C.refSchema)
       .mutation(({ ctx, input }) => service.accept(ctx.viewer, input.token)),
+    promotions: createTRPCRouter({
+      list: user
+        .input(C.refSchema)
+        .output(C.promotionListSchema)
+        .query(({ ctx, input }) => need(promotions).list(ctx.viewer, input.id)),
+      get: user
+        .input(C.refSchema)
+        .output(C.promotionSchema)
+        .query(({ ctx, input }) => need(promotions).get(ctx.viewer, input.id)),
+      queue: user
+        .input(C.promotionQueueSchema)
+        .output(C.promotionListSchema)
+        .query(({ ctx, input }) => need(promotions).queue(ctx.viewer, input)),
+      create: user
+        .input(C.promotionCreateSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(promotions).create(ctx.viewer, input)),
+      command: user
+        .input(C.promotionCommandSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(promotions).command(ctx.viewer, input)),
+    }),
+    events: createTRPCRouter({
+      list: user
+        .input(C.refSchema)
+        .output(C.calendarEventListSchema)
+        .query(({ ctx, input }) => need(events).list(ctx.viewer, input.id)),
+      get: user
+        .input(C.refSchema)
+        .output(C.calendarEventSchema)
+        .query(({ ctx, input }) => need(events).get(ctx.viewer, input.id)),
+      queue: user
+        .input(C.calendarEventQueueSchema)
+        .output(C.calendarEventListSchema)
+        .query(({ ctx, input }) => need(events).queue(ctx.viewer, input)),
+      create: user
+        .input(C.calendarEventCreateSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(events).create(ctx.viewer, input)),
+      command: user
+        .input(C.calendarEventCommandSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(events).command(ctx.viewer, input)),
+    }),
+    credits: createTRPCRouter({
+      account: user
+        .input(C.refSchema)
+        .output(C.creditAccountSchema)
+        .query(({ ctx, input }) => need(credits).account(ctx.viewer, input.id)),
+      config: user.output(C.creditConfigSchema).query(({ ctx }) => need(credits).config(ctx.viewer)),
+      saveConfig: user
+        .input(C.creditConfigSchema)
+        .output(z.object({ ok: z.literal(true) }))
+        .mutation(async ({ ctx, input }) => {
+          await need(credits).saveConfig(ctx.viewer, input)
+          return { ok: true as const }
+        }),
+      operate: user
+        .input(C.creditOperationSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(credits).operate(ctx.viewer, input)),
+      semester: user
+        .input(C.creditSemesterSchema)
+        .output(z.object({ granted: z.number().int() }))
+        .mutation(({ ctx, input }) => need(credits).semester(ctx.viewer, input)),
+    }),
     lookup: user
       .input(C.refSchema)
       .output(z.object({ id: z.uuid(), name: z.string(), revision: z.number() }))
-      .query(async ({ input }) => {
-        const item = (await service.directory()).find((r) => r.id === input.id)
+      .query(async ({ ctx, input }) => {
+        const item = (await service.directory(ctx.viewer)).find((r) => r.id === input.id)
         if (!item) throw new TRPCError({ code: "NOT_FOUND" })
-        return item
+        return { id: item.id, name: item.name, revision: item.revision }
       }),
   })
 }

@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto"
-import type { Command, Profile } from "@/associations/contract"
+import {
+  type CalendarEventCommand,
+  type CatalogueEntry,
+  type Command,
+  type Profile,
+  type PromotionCommand,
+  RRI_CREDIT_RULES,
+} from "@/associations/contract"
+import type { CreditStore, Ledger, NewCreditEntry, StoredCreditEntry } from "@/associations/credits"
+import { type CalendarEvent, createEventService, type EventStore } from "@/associations/events"
+import { createPromotionService, type Promotion, type PromotionStore } from "@/associations/promotions"
 import { createAssociationService, type Mail, type Record, type Store, type Viewer } from "@/associations/service"
 
 export const owner: Viewer = { sub: "owner", name: "Owner", email: "owner@example.org", operator: false }
@@ -13,12 +23,44 @@ export const profile: Profile = {
   email: "info@example.org",
   logo: null,
   links: [{ platform: "telegram", label: "Canale", url: "https://t.me/example" }],
+  programmes: [],
+  campuses: [],
+  crossProgramme: false,
+  contacts: [],
+}
+export const programme = "didattica.ingegneria-industriale-informazione.triennale.ingegneria-informatica"
+export function seedCatalogue(): CatalogueEntry[] {
+  return [
+    {
+      kind: "programme",
+      slug: programme,
+      nameIt: "Ingegneria Informatica",
+      nameEn: "Computer Engineering",
+      active: true,
+    },
+    {
+      kind: "programme",
+      slug: "didattica.design.triennale.design-della-moda",
+      nameIt: "Design della Moda",
+      nameEn: "Fashion Design",
+      active: false,
+    },
+    { kind: "campus", slug: "leonardo", nameIt: "Milano Leonardo", nameEn: "Milan Leonardo", active: true },
+    { kind: "campus", slug: "bovisa", nameIt: "Milano Bovisa", nameEn: "Milan Bovisa", active: true },
+  ]
 }
 export function harness() {
   const rows = new Map<string, Record>()
   const creation = new Map<string, string>()
   const mails: Mail[] = []
+  const catalogue = seedCatalogue()
   const store: Store = {
+    catalogue: async () => structuredClone(catalogue),
+    async saveCatalogue(entry) {
+      const index = catalogue.findIndex((e) => e.kind === entry.kind && e.slug === entry.slug)
+      if (index >= 0) catalogue[index] = entry
+      else catalogue.push(entry)
+    },
     list: async () => structuredClone([...rows.values()]),
     get: async (id) => structuredClone(rows.get(id) ?? null),
     byInvitation: async (hash) =>
@@ -71,5 +113,213 @@ export function harness() {
     await command(staff, id, { action: "review", requestId, decision: "approve", reason: "Verified official contact" })
     return id
   }
-  return { service, rows, mails, command, registered }
+  return { service, rows, mails, command, registered, catalogue }
+}
+
+/** In-memory promotion store over a registry harness, with the same key and locking semantics as the SQL store. */
+/** In-memory credit ledger and rules, shared by the promotion harness; entries are kept only if the operation succeeds. */
+export function creditHarness(h: ReturnType<typeof harness>) {
+  const state = { config: structuredClone(RRI_CREDIT_RULES), entries: [] as StoredCreditEntry[] }
+  const keys = new Set<string>()
+  let clock = Date.now()
+  function ledgerFor(associationId: string) {
+    const posted: NewCreditEntry[] = []
+    const ledger: Ledger = {
+      config: structuredClone(state.config),
+      entries: structuredClone(state.entries.filter((e) => e.associationId === associationId)),
+      post: (entry) => {
+        posted.push(entry)
+      },
+    }
+    const flush = () => {
+      for (const e of posted) {
+        // The same guarantees as the SQL unique indexes.
+        if (e.kind === "debit" && state.entries.some((x) => x.kind === "debit" && x.promotionId === e.promotionId))
+          throw new Error("duplicate debit")
+        if (e.reversesId && state.entries.some((x) => x.reversesId === e.reversesId))
+          throw new Error("duplicate reversal")
+        state.entries.push({ ...e, id: randomUUID(), associationId, createdAt: new Date(clock++).toISOString() })
+      }
+    }
+    return { ledger, flush }
+  }
+  const store: CreditStore = {
+    config: async () => structuredClone(state.config),
+    async saveConfig(config) {
+      state.config = structuredClone(config)
+    },
+    entries: async (associationId) => structuredClone(state.entries.filter((e) => e.associationId === associationId)),
+    async post(associationId, key, operation) {
+      if (keys.has(key)) return associationId
+      const { ledger, flush } = ledgerFor(associationId)
+      operation(ledger, structuredClone(h.rows.get(associationId) as Record))
+      flush()
+      keys.add(key)
+      return associationId
+    },
+    async semester(input, author, ids) {
+      let granted = 0
+      for (const associationId of ids) {
+        const { ledger, flush } = ledgerFor(associationId)
+        if (ledger.entries.some((e) => e.kind === "credit" && e.period === input.period)) continue
+        const balance = ledger.entries.reduce((sum, e) => sum + e.amount, 0)
+        if (input.resetUnused && balance > 0)
+          ledger.post({
+            kind: "adjustment",
+            amount: -balance,
+            reason: "scaduti",
+            authorSub: author.sub,
+            authorName: author.name,
+            promotionId: null,
+            reversesId: null,
+            period: null,
+          })
+        ledger.post({
+          kind: "credit",
+          amount: input.amount,
+          reason: input.reason,
+          authorSub: author.sub,
+          authorName: author.name,
+          promotionId: null,
+          reversesId: null,
+          period: input.period,
+        })
+        flush()
+        granted++
+      }
+      return granted
+    },
+  }
+  return { state, store, ledgerFor }
+}
+
+export function promotionHarness(
+  h: ReturnType<typeof harness>,
+  eventAssociation?: (eventId: string) => Promise<string | null>,
+  credits = creditHarness(h)
+) {
+  const rows = new Map<string, Promotion>()
+  const keys = new Map<string, string>()
+  const mails: Mail[] = []
+  const store: PromotionStore = {
+    async promotions(filter) {
+      const day = (p: Promotion) => p.scheduledAt?.slice(0, 10) ?? p.content.desiredDate ?? ""
+      return structuredClone(
+        [...rows.values()].filter(
+          (p) =>
+            (!filter.associationId || p.associationId === filter.associationId) &&
+            (!filter.status || p.status === filter.status) &&
+            (!filter.from || day(p) >= filter.from) &&
+            (!filter.to || (day(p) && day(p) <= filter.to))
+        )
+      )
+    },
+    promotion: async (id) => structuredClone(rows.get(id) ?? null),
+    async createPromotion(associationId, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const record = h.rows.get(associationId)
+      if (!record) throw new Error("missing association")
+      const mail: Mail[] = []
+      const p = operation(structuredClone(record), mail)
+      rows.set(p.id, structuredClone(p))
+      keys.set(key, p.id)
+      mails.push(...mail)
+      return p.id
+    },
+    async changePromotion(id, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const stored = rows.get(id)
+      if (!stored) throw new Error("missing promotion")
+      const p = structuredClone(stored)
+      const mail: Mail[] = []
+      const { ledger, flush } = credits.ledgerFor(p.associationId)
+      operation(p, structuredClone(h.rows.get(p.associationId) as Record), mail, ledger)
+      flush()
+      rows.set(id, p)
+      keys.set(key, id)
+      mails.push(...mail)
+      return id
+    },
+  }
+  const service = createPromotionService(
+    store,
+    { get: async (id) => structuredClone(h.rows.get(id) ?? null), catalogue: async () => structuredClone(h.catalogue) },
+    "https://admin.example.org",
+    eventAssociation
+  )
+  async function command(
+    v: Viewer,
+    id: string,
+    action: PromotionCommand extends infer T
+      ? T extends PromotionCommand
+        ? Omit<T, "id" | "revision" | "commandId">
+        : never
+      : never
+  ) {
+    const revision = rows.get(id)?.revision ?? 0
+    return service.command(v, { ...action, id, revision, commandId: randomUUID() } as PromotionCommand)
+  }
+  return { service, store, rows, mails, command, credits }
+}
+
+/** In-memory event store over a registry harness, with the same key semantics as the SQL store. */
+export function eventHarness(h: ReturnType<typeof harness>) {
+  const rows = new Map<string, CalendarEvent>()
+  const keys = new Map<string, string>()
+  const mails: Mail[] = []
+  const store: EventStore = {
+    async events(filter) {
+      const day = (e: CalendarEvent) => e.content.startsAt?.slice(0, 10) ?? ""
+      const over = (e: CalendarEvent) =>
+        Date.parse(e.content.endsAt ?? e.content.startsAt ?? "") + (e.content.endsAt ? 0 : 86_400_000) < Date.now()
+      return structuredClone(
+        [...rows.values()].filter(
+          (e) =>
+            (!filter.associationId || e.associationId === filter.associationId) &&
+            (!filter.status || e.status === filter.status) &&
+            (!filter.from || day(e) >= filter.from) &&
+            (!filter.to || (day(e) && day(e) <= filter.to)) &&
+            (!filter.upcoming || !over(e))
+        )
+      )
+    },
+    event: async (id) => structuredClone(rows.get(id) ?? null),
+    async createEvent(associationId, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const mail: Mail[] = []
+      const e = operation(structuredClone(h.rows.get(associationId) as Record), mail)
+      rows.set(e.id, structuredClone(e))
+      keys.set(key, e.id)
+      mails.push(...mail)
+      return e.id
+    },
+    async changeEvent(id, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const e = structuredClone(rows.get(id) as CalendarEvent)
+      const mail: Mail[] = []
+      operation(e, structuredClone(h.rows.get(e.associationId) as Record), mail)
+      rows.set(id, e)
+      keys.set(key, id)
+      mails.push(...mail)
+      return id
+    },
+  }
+  const service = createEventService(
+    store,
+    { get: async (id) => structuredClone(h.rows.get(id) ?? null), catalogue: async () => structuredClone(h.catalogue) },
+    "https://admin.example.org"
+  )
+  async function command(
+    v: Viewer,
+    id: string,
+    action: CalendarEventCommand extends infer T
+      ? T extends CalendarEventCommand
+        ? Omit<T, "id" | "revision" | "commandId">
+        : never
+      : never
+  ) {
+    const revision = rows.get(id)?.revision ?? 0
+    return service.command(v, { ...action, id, revision, commandId: randomUUID() } as CalendarEventCommand)
+  }
+  return { service, store, rows, mails, command }
 }

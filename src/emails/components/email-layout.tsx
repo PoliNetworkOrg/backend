@@ -58,18 +58,22 @@ export function MailAction({ href, children }: { href: string; children: ReactNo
   )
 }
 
+/**
+ * `kind` picks a drawn header image; without one (`heading` instead) the header is the title as text, for
+ * notifications that have no artwork of their own (association portal).
+ */
 export function EmailLayout({
   kind,
+  heading,
   preview,
   children,
   footer,
 }: {
-  kind: EmailHeaderKind
   preview: string
   children: ReactNode
   footer?: ReactNode
-}) {
-  const title = EMAIL_HEADERS[kind]
+} & ({ kind: EmailHeaderKind; heading?: never } | { kind?: never; heading: string })) {
+  const title = kind ? EMAIL_HEADERS[kind] : heading
   const height = kind === "request-completed" || kind === "request-delivery-failed" ? 222 : 183
   return (
     <Html lang="it">
@@ -101,26 +105,43 @@ export function EmailLayout({
                   <tbody>
                     <tr>
                       <td style={{ padding: 0, borderRadius: "19px 19px 0 0", overflow: "hidden" }}>
-                        <Heading
-                          as="h1"
-                          style={{ margin: 0, fontSize: 32, lineHeight: "39px", fontWeight: 500, color: "#020617" }}
-                        >
-                          <Img
-                            className="email-header"
-                            src={`cid:${headerCid(kind)}`}
-                            alt={`PoliNetwork — ${title}`}
-                            width={518}
-                            height={height}
+                        {kind ? (
+                          <Heading
+                            as="h1"
+                            style={{ margin: 0, fontSize: 32, lineHeight: "39px", fontWeight: 500, color: "#020617" }}
+                          >
+                            <Img
+                              className="email-header"
+                              src={`cid:${headerCid(kind)}`}
+                              alt={`PoliNetwork — ${title}`}
+                              width={518}
+                              height={height}
+                              style={{
+                                display: "block",
+                                border: 0,
+                                width: "100%",
+                                maxWidth: 518,
+                                height: "auto",
+                                borderRadius: "19px 19px 0 0",
+                              }}
+                            />
+                          </Heading>
+                        ) : (
+                          <Heading
+                            as="h1"
                             style={{
-                              display: "block",
-                              border: 0,
-                              width: "100%",
-                              maxWidth: 518,
-                              height: "auto",
-                              borderRadius: "19px 19px 0 0",
+                              margin: 0,
+                              padding: "28px 28px 0",
+                              fontFamily: textFont,
+                              fontSize: 26,
+                              lineHeight: "33px",
+                              fontWeight: 500,
+                              color: "#020617",
                             }}
-                          />
-                        </Heading>
+                          >
+                            {title}
+                          </Heading>
+                        )}
                       </td>
                     </tr>
                     <tr>

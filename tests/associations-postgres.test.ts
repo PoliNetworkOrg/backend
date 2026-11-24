@@ -9,7 +9,7 @@ it.skipIf(!process.env.SEED_TEST_DB_PORT)(
       env: process.env,
       timeout: 60000,
     })
-    expect(JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}").checked).toHaveLength(7)
+    expect(JSON.parse(stdout.trim().split("\n").at(-1) ?? "{}").checked).toHaveLength(14)
   },
   65000
 )
