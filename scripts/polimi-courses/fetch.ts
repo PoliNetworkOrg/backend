@@ -167,7 +167,12 @@ for (const code of [...inactive].sort((a, b) => a - b)) {
 
 const file: CourseFile = courseFileSchema.parse({ academicYear: year, courses: sortCourses(entries) })
 const path = join(dataDir, fileName(year))
-await writeFile(path, `${JSON.stringify(file, null, 2)}\n`)
+// Lists of strings and numbers on one line, as the repo's formatter (Biome) writes them.
+const json = JSON.stringify(file, null, 2).replace(
+  /\[\n\s*([^[\]{}]*?)\n\s*\]/g,
+  (_, items: string) => `[${items.replace(/,\n\s*/g, ", ")}]`
+)
+await writeFile(path, `${json}\n`)
 
 const active = file.courses.filter((c) => c.active)
 console.log(

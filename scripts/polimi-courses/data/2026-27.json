@@ -7,17 +7,9 @@
       "level": "bachelor",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-23 - Scienze e tecniche dell'edilizia",
       "active": true
     },
@@ -27,20 +19,9 @@
       "level": "bachelor",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo",
-        "Mantova",
-        "Piacenza"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo", "Mantova", "Piacenza"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-17 - Scienze dell'architettura",
       "active": true
     },
@@ -50,17 +31,9 @@
       "level": "bachelor",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-21 - Scienze della pianificazione territoriale, urbanistica, paesaggistica e ambientale",
       "active": true
     },
@@ -70,15 +43,9 @@
       "level": "bachelor",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-23 - Scienze e tecniche dell'edilizia",
       "active": true
     },
@@ -88,18 +55,9 @@
       "level": "bachelor",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo",
-        "Mantova",
-        "Piacenza"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo", "Mantova", "Piacenza"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [3],
       "degreeClass": "L-17 - Scienze dell'architettura",
       "active": true
     },
@@ -109,15 +67,9 @@
       "level": "bachelor",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-21 - Scienze della pianificazione territoriale, urbanistica, paesaggistica e ambientale",
       "active": true
     },
@@ -127,19 +79,9 @@
       "level": "single-cycle",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3,
-        4,
-        5
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3, 4, 5],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": true
     },
@@ -149,17 +91,9 @@
       "level": "single-cycle",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3,
-        4,
-        5
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Italiano"],
+      "activeYears": [3, 4, 5],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": true
     },
@@ -169,16 +103,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Mantova"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Mantova"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": true
     },
@@ -188,16 +115,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
       "active": true
     },
@@ -207,17 +127,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": true
     },
@@ -227,17 +139,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
       "active": true
     },
@@ -247,16 +151,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-3 - Architettura del paesaggio",
       "active": true
     },
@@ -266,16 +163,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
       "active": true
     },
@@ -285,16 +175,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": true
     },
@@ -304,16 +187,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-48 - Pianificazione territoriale urbanistica e ambientale",
       "active": true
     },
@@ -323,15 +199,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Mantova"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Mantova"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": false
     },
@@ -341,15 +211,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
       "active": false
     },
@@ -359,16 +223,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": false
     },
@@ -378,16 +235,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": false
     },
@@ -397,16 +247,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": false
     },
@@ -416,16 +259,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
       "active": false
     },
@@ -435,15 +271,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-3 - Architettura del paesaggio",
       "active": false
     },
@@ -453,15 +283,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-24 - Ingegneria dei sistemi edilizi",
       "active": false
     },
@@ -471,15 +295,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-4 - Architettura e ingegneria edile-architettura",
       "active": false
     },
@@ -489,15 +307,9 @@
       "level": "master",
       "school": "auic",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-48 - Pianificazione territoriale urbanistica e ambientale",
       "active": false
     },
@@ -507,17 +319,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -527,17 +331,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -547,17 +343,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -567,17 +355,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -587,17 +367,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -607,15 +379,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -625,15 +391,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -643,15 +403,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -661,15 +415,9 @@
       "level": "bachelor",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-4 - Disegno industriale",
       "active": true
     },
@@ -679,16 +427,9 @@
       "level": "master",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-12 - Design",
       "active": true
     },
@@ -698,17 +439,9 @@
       "level": "master",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-12 - Design",
       "active": true
     },
@@ -718,16 +451,9 @@
       "level": "master",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-12 - Design",
       "active": true
     },
@@ -737,16 +463,9 @@
       "level": "master",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-12 - Design",
       "active": true
     },
@@ -756,17 +475,9 @@
       "level": "master",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-12 - Design",
       "active": true
     },
@@ -776,17 +487,9 @@
       "level": "master",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-12 - Design",
       "active": true
     },
@@ -796,16 +499,9 @@
       "level": "master",
       "school": "design",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-12 - Design",
       "active": true
     },
@@ -815,15 +511,9 @@
       "level": "master",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-12 - Design",
       "active": false
     },
@@ -833,16 +523,9 @@
       "level": "master",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-12 - Design",
       "active": false
     },
@@ -852,15 +535,9 @@
       "level": "master",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-12 - Design",
       "active": false
     },
@@ -870,15 +547,9 @@
       "level": "master",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-12 - Design",
       "active": false
     },
@@ -888,16 +559,9 @@
       "level": "master",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-12 - Design",
       "active": false
     },
@@ -907,16 +571,9 @@
       "level": "master",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-12 - Design",
       "active": false
     },
@@ -926,15 +583,9 @@
       "level": "master",
       "school": "design",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-12 - Design",
       "active": false
     },
@@ -944,18 +595,9 @@
       "level": "bachelor",
       "school": "icat",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-7 - Ingegneria civile e ambientale",
       "active": true
     },
@@ -965,17 +607,9 @@
       "level": "bachelor",
       "school": "icat",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-7 - Ingegneria civile e ambientale",
       "active": true
     },
@@ -985,16 +619,9 @@
       "level": "bachelor",
       "school": "icat",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [3],
       "degreeClass": "L-7 - Ingegneria civile e ambientale",
       "active": true
     },
@@ -1004,15 +631,9 @@
       "level": "bachelor",
       "school": "icat",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-7 - Ingegneria civile e ambientale",
       "active": true
     },
@@ -1022,15 +643,9 @@
       "level": "bachelor",
       "school": "icat",
       "regulation": "270",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-7 - Ingegneria civile e ambientale",
       "active": false
     },
@@ -1040,16 +655,9 @@
       "level": "master",
       "school": "icat",
       "regulation": "96/23",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-23 - Ingegneria civile",
       "active": true
     },
@@ -1059,17 +667,9 @@
       "level": "master",
       "school": "icat",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-23 - Ingegneria civile",
       "active": true
     },
@@ -1079,18 +679,9 @@
       "level": "master",
       "school": "icat",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo",
-        "Piacenza"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo", "Piacenza"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-35 - Ingegneria per l'ambiente e il territorio",
       "active": true
     },
@@ -1100,15 +691,9 @@
       "level": "master",
       "school": "icat",
       "regulation": "270",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-23 - Ingegneria civile",
       "active": false
     },
@@ -1118,16 +703,9 @@
       "level": "master",
       "school": "icat",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-23 - Ingegneria civile",
       "active": false
     },
@@ -1137,17 +715,9 @@
       "level": "master",
       "school": "icat",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo",
-        "Piacenza"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo", "Piacenza"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-35 - Ingegneria per l'ambiente e il territorio",
       "active": false
     },
@@ -1157,15 +727,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1175,15 +739,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1
-      ],
+      "campuses": ["Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [1],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1193,17 +751,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1213,17 +763,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "",
       "active": true
     },
@@ -1233,17 +775,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1253,17 +787,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1273,17 +799,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "",
       "active": true
     },
@@ -1293,17 +811,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1313,17 +823,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1333,17 +835,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-8 - Ingegneria dell'informazione",
       "active": true
     },
@@ -1353,17 +847,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1373,17 +859,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "",
       "active": true
     },
@@ -1393,17 +871,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "",
       "active": true
     },
@@ -1413,17 +883,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Cremona"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Cremona"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "",
       "active": true
     },
@@ -1433,18 +895,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo",
-        "Cremona"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo", "Cremona"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-8 - Ingegneria dell'informazione",
       "active": true
     },
@@ -1454,17 +907,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "",
       "active": true
     },
@@ -1474,17 +919,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1494,17 +931,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Piacenza"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        1,
-        2,
-        3
-      ],
+      "campuses": ["Piacenza"],
+      "languages": ["Italiano"],
+      "activeYears": [1, 2, 3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1514,15 +943,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Cremona"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1
-      ],
+      "campuses": ["Cremona"],
+      "languages": ["Inglese"],
+      "activeYears": [1],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1532,15 +955,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1550,15 +967,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "",
       "active": true
     },
@@ -1568,15 +979,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1586,15 +991,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1604,15 +1003,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "",
       "active": true
     },
@@ -1622,16 +1015,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1641,15 +1027,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1659,15 +1039,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-8 - Ingegneria dell'informazione",
       "active": true
     },
@@ -1677,15 +1051,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1695,15 +1063,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "",
       "active": true
     },
@@ -1713,15 +1075,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "",
       "active": true
     },
@@ -1731,15 +1087,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Cremona"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Cremona"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "",
       "active": true
     },
@@ -1749,16 +1099,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo",
-        "Cremona"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo", "Cremona"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-8 - Ingegneria dell'informazione",
       "active": true
     },
@@ -1768,15 +1111,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "",
       "active": true
     },
@@ -1786,15 +1123,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1804,15 +1135,9 @@
       "level": "bachelor",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Piacenza"
-      ],
-      "languages": [
-        "Italiano"
-      ],
-      "activeYears": [
-        3
-      ],
+      "campuses": ["Piacenza"],
+      "languages": ["Italiano"],
+      "activeYears": [3],
       "degreeClass": "L-9 - Ingegneria industriale",
       "active": true
     },
@@ -1822,16 +1147,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
       "active": true
     },
@@ -1841,16 +1159,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Cremona"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Cremona"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-26 - Ingegneria della sicurezza",
       "active": true
     },
@@ -1860,16 +1171,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-25 - Ingegneria dell'automazione",
       "active": true
     },
@@ -1879,16 +1183,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-21 - Ingegneria biomedica",
       "active": true
     },
@@ -1898,16 +1195,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-22 - Ingegneria chimica",
       "active": true
     },
@@ -1917,16 +1207,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-32 - Ingegneria informatica",
       "active": true
     },
@@ -1936,16 +1219,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-28 - Ingegneria elettrica",
       "active": true
     },
@@ -1955,16 +1231,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-29 - Ingegneria elettronica",
       "active": true
     },
@@ -1974,17 +1243,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa",
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa", "Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
       "active": true
     },
@@ -1994,16 +1255,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
       "active": true
     },
@@ -2013,16 +1267,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-22 - Ingegneria chimica",
       "active": true
     },
@@ -2032,16 +1279,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "",
       "active": true
     },
@@ -2051,16 +1291,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-32 - Ingegneria informatica",
       "active": true
     },
@@ -2070,16 +1303,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-26 - Ingegneria della sicurezza",
       "active": true
     },
@@ -2089,16 +1315,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-31 - Ingegneria gestionale",
       "active": true
     },
@@ -2108,16 +1327,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-53 - Ingegneria dei materiali",
       "active": true
     },
@@ -2127,16 +1339,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
       "active": true
     },
@@ -2146,17 +1351,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa",
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa", "Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-33 - Ingegneria meccanica",
       "active": true
     },
@@ -2166,16 +1363,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-33 - Ingegneria meccanica",
       "active": true
     },
@@ -2185,16 +1375,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-26 - Ingegneria della sicurezza",
       "active": true
     },
@@ -2204,16 +1387,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Cremona"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Cremona"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-32 - Ingegneria informatica",
       "active": true
     },
@@ -2223,16 +1399,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
       "active": true
     },
@@ -2242,16 +1411,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
       "active": true
     },
@@ -2261,16 +1423,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "96/23",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        1,
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [1, 2],
       "degreeClass": "LM-27 - Ingegneria delle telecomunicazioni",
       "active": true
     },
@@ -2280,15 +1435,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
       "active": false
     },
@@ -2298,15 +1447,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Cremona"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Cremona"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-26 - Ingegneria della sicurezza",
       "active": false
     },
@@ -2316,15 +1459,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-25 - Ingegneria dell'automazione",
       "active": false
     },
@@ -2334,16 +1471,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Italiano",
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Italiano", "Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-21 - Ingegneria biomedica",
       "active": false
     },
@@ -2353,15 +1483,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-22 - Ingegneria chimica",
       "active": false
     },
@@ -2371,15 +1495,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-32 - Ingegneria informatica",
       "active": false
     },
@@ -2389,15 +1507,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-28 - Ingegneria elettrica",
       "active": false
     },
@@ -2407,15 +1519,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-29 - Ingegneria elettronica",
       "active": false
     },
@@ -2425,16 +1531,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa",
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa", "Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
       "active": false
     },
@@ -2444,15 +1543,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
       "active": false
     },
@@ -2462,15 +1555,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-22 - Ingegneria chimica",
       "active": false
     },
@@ -2480,15 +1567,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "",
       "active": false
     },
@@ -2498,15 +1579,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-32 - Ingegneria informatica",
       "active": false
     },
@@ -2516,15 +1591,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-26 - Ingegneria della sicurezza",
       "active": false
     },
@@ -2534,15 +1603,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-31 - Ingegneria gestionale",
       "active": false
     },
@@ -2552,15 +1615,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-53 - Ingegneria dei materiali",
       "active": false
     },
@@ -2570,15 +1627,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-44 - Modellistica matematico-fisica per l'ingegneria",
       "active": false
     },
@@ -2588,16 +1639,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa",
-        "Piacenza"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa", "Piacenza"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-33 - Ingegneria meccanica",
       "active": false
     },
@@ -2607,15 +1651,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Lecco"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Lecco"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-33 - Ingegneria meccanica",
       "active": false
     },
@@ -2625,15 +1663,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-26 - Ingegneria della sicurezza",
       "active": false
     },
@@ -2643,15 +1675,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Cremona"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Cremona"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-32 - Ingegneria informatica",
       "active": false
     },
@@ -2661,15 +1687,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-30 - Ingegneria energetica e nucleare",
       "active": false
     },
@@ -2679,15 +1699,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Bovisa"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Bovisa"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-20 - Ingegneria aerospaziale e astronautica",
       "active": false
     },
@@ -2697,15 +1711,9 @@
       "level": "master",
       "school": "3i",
       "regulation": "270",
-      "campuses": [
-        "Milano Leonardo"
-      ],
-      "languages": [
-        "Inglese"
-      ],
-      "activeYears": [
-        2
-      ],
+      "campuses": ["Milano Leonardo"],
+      "languages": ["Inglese"],
+      "activeYears": [2],
       "degreeClass": "LM-27 - Ingegneria delle telecomunicazioni",
       "active": false
     }
