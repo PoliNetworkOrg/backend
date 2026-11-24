@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import type { CatalogueEntry, Command, Profile, PromotionCommand } from "@/associations/contract"
+import type { CalendarEventCommand, CatalogueEntry, Command, Profile, PromotionCommand } from "@/associations/contract"
+import { type CalendarEvent, createEventService, type EventStore } from "@/associations/events"
 import { createPromotionService, type Promotion, type PromotionStore } from "@/associations/promotions"
 import { createAssociationService, type Mail, type Record, type Store, type Viewer } from "@/associations/service"
 
@@ -108,7 +109,10 @@ export function harness() {
 }
 
 /** In-memory promotion store over a registry harness, with the same key and locking semantics as the SQL store. */
-export function promotionHarness(h: ReturnType<typeof harness>) {
+export function promotionHarness(
+  h: ReturnType<typeof harness>,
+  eventAssociation?: (eventId: string) => Promise<string | null>
+) {
   const rows = new Map<string, Promotion>()
   const keys = new Map<string, string>()
   const mails: Mail[] = []
@@ -153,7 +157,8 @@ export function promotionHarness(h: ReturnType<typeof harness>) {
   const service = createPromotionService(
     store,
     { get: async (id) => structuredClone(h.rows.get(id) ?? null), catalogue: async () => structuredClone(h.catalogue) },
-    "https://admin.example.org"
+    "https://admin.example.org",
+    eventAssociation
   )
   async function command(
     v: Viewer,
@@ -168,4 +173,66 @@ export function promotionHarness(h: ReturnType<typeof harness>) {
     return service.command(v, { ...action, id, revision, commandId: randomUUID() } as PromotionCommand)
   }
   return { service, rows, mails, command }
+}
+
+/** In-memory event store over a registry harness, with the same key semantics as the SQL store. */
+export function eventHarness(h: ReturnType<typeof harness>) {
+  const rows = new Map<string, CalendarEvent>()
+  const keys = new Map<string, string>()
+  const mails: Mail[] = []
+  const store: EventStore = {
+    async events(filter) {
+      const day = (e: CalendarEvent) => e.content.startsAt?.slice(0, 10) ?? ""
+      const over = (e: CalendarEvent) =>
+        Date.parse(e.content.endsAt ?? e.content.startsAt ?? "") + (e.content.endsAt ? 0 : 86_400_000) < Date.now()
+      return structuredClone(
+        [...rows.values()].filter(
+          (e) =>
+            (!filter.associationId || e.associationId === filter.associationId) &&
+            (!filter.status || e.status === filter.status) &&
+            (!filter.from || day(e) >= filter.from) &&
+            (!filter.to || (day(e) && day(e) <= filter.to)) &&
+            (!filter.upcoming || !over(e))
+        )
+      )
+    },
+    event: async (id) => structuredClone(rows.get(id) ?? null),
+    async createEvent(associationId, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const mail: Mail[] = []
+      const e = operation(structuredClone(h.rows.get(associationId) as Record), mail)
+      rows.set(e.id, structuredClone(e))
+      keys.set(key, e.id)
+      mails.push(...mail)
+      return e.id
+    },
+    async changeEvent(id, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const e = structuredClone(rows.get(id) as CalendarEvent)
+      const mail: Mail[] = []
+      operation(e, structuredClone(h.rows.get(e.associationId) as Record), mail)
+      rows.set(id, e)
+      keys.set(key, id)
+      mails.push(...mail)
+      return id
+    },
+  }
+  const service = createEventService(
+    store,
+    { get: async (id) => structuredClone(h.rows.get(id) ?? null), catalogue: async () => structuredClone(h.catalogue) },
+    "https://admin.example.org"
+  )
+  async function command(
+    v: Viewer,
+    id: string,
+    action: CalendarEventCommand extends infer T
+      ? T extends CalendarEventCommand
+        ? Omit<T, "id" | "revision" | "commandId">
+        : never
+      : never
+  ) {
+    const revision = rows.get(id)?.revision ?? 0
+    return service.command(v, { ...action, id, revision, commandId: randomUUID() } as CalendarEventCommand)
+  }
+  return { service, store, rows, mails, command }
 }

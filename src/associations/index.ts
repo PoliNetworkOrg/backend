@@ -5,6 +5,8 @@ import { sendAssociationEmail } from "@/emails/mailer"
 import { env } from "@/env"
 import { idp } from "@/idp"
 import { logger } from "@/logger"
+import { createEventService } from "./events"
+import { createEventStore } from "./events-pg"
 import { createHomeService } from "./home"
 import { createPromotionService } from "./promotions"
 import { createPromotionStore } from "./promotions-pg"
@@ -15,8 +17,15 @@ const dashboardUrl = env.ESIGN_DASHBOARD_URL.replace(/\/$/, "")
 export const associationStore = createAssociationStore(DB)
 export const associationPortal = createAssociationService(associationStore, dashboardUrl)
 const promotionStore = createPromotionStore(DB)
-export const associationPromotions = createPromotionService(promotionStore, associationStore, dashboardUrl)
-export const associationHome = createHomeService(associationStore, promotionStore)
+export const associationEventStore = createEventStore(DB)
+export const associationEvents = createEventService(associationEventStore, associationStore, dashboardUrl)
+export const associationPromotions = createPromotionService(
+  promotionStore,
+  associationStore,
+  dashboardUrl,
+  async (id) => (await associationEventStore.event(id))?.associationId ?? null
+)
+export const associationHome = createHomeService(associationStore, promotionStore, associationEventStore)
 
 const LEASE_MS = 5 * 60_000
 const MAX_ATTEMPTS = 20

@@ -11,7 +11,7 @@ import {
 import type { Promotion, PromotionStore } from "./promotions"
 import { type Mail, normalizeRecord } from "./service"
 
-type Tx = Parameters<Parameters<typeof DB.transaction>[0]>[0]
+export type Tx = Parameters<Parameters<typeof DB.transaction>[0]>[0]
 type Row = typeof associationPromotion.$inferSelect
 type TransitionRow = typeof associationPromotionTransition.$inferSelect
 
@@ -22,7 +22,8 @@ function toPromotion(row: Row, transitions: TransitionRow[]): Promotion {
     associationId: row.associationId,
     status: row.status,
     revision: row.revision,
-    content: row.content,
+    // Rows written before events existed have no `eventId`.
+    content: { ...row.content, eventId: row.content.eventId ?? null },
     createdBy: row.createdBy,
     createdByName: row.createdByName,
     notify: row.notify,
@@ -83,13 +84,13 @@ const transitionRows = (p: Promotion, known: Set<string>) =>
     }))
 
 /** Shared lock on the association: membership cannot change underneath, other requests can proceed. */
-async function lockAssociation(tx: Tx, id: string) {
+export async function lockAssociation(tx: Tx, id: string) {
   const [row] = await tx.select().from(associationRegistry).where(eq(associationRegistry.id, id)).for("share")
   if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Association not found" })
   return normalizeRecord(row.state)
 }
 /** Records the key; `false` when it was already used (possibly by a concurrent retry, which this waits for). */
-async function claimKey(tx: Tx, key: string, result: string) {
+export async function claimKey(tx: Tx, key: string, result: string) {
   const inserted = await tx
     .insert(associationCommandKey)
     .values({ key, result })
@@ -97,11 +98,11 @@ async function claimKey(tx: Tx, key: string, result: string) {
     .returning({ key: associationCommandKey.key })
   return inserted.length > 0
 }
-async function usedKey(tx: Tx | typeof DB, key: string) {
+export async function usedKey(tx: Tx | typeof DB, key: string) {
   const [row] = await tx.select().from(associationCommandKey).where(eq(associationCommandKey.key, key))
   return row?.result
 }
-async function queueMail(tx: Tx, mail: Mail[]) {
+export async function queueMail(tx: Tx, mail: Mail[]) {
   if (mail.length) await tx.insert(associationMail).values(mail.map((m) => ({ id: m.id, mail: m })))
 }
 

@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { httpUrl, linkSchema, publicContactSchema } from "./contract"
+import type { EventStore } from "./events"
 import type { Store } from "./service"
 
 /** The website's view of the registry: approved, published snapshots only, never working drafts, notes or members. */
@@ -46,4 +47,40 @@ export async function publicAssociations(store: Pick<Store, "published" | "catal
           .map(({ function: fn, label, email, name, phone }) => ({ function: fn, label, email, name, phone })),
       }
     })
+}
+
+/**
+ * Approved events that are not over yet, for the website's calendar. Only events of associations whose profile is
+ * published, so every event links to a profile on the site; never drafts, notes or representatives.
+ */
+export async function publicEvents(store: Pick<Store, "published" | "catalogue">, events: Pick<EventStore, "events">) {
+  const [records, catalogue, upcoming] = await Promise.all([
+    store.published(),
+    store.catalogue(),
+    events.events({ status: "approved", upcoming: true }),
+  ])
+  const listed = new Map(records.filter((r) => r.status !== "archived" && r.legacyId !== null).map((r) => [r.id, r]))
+  return upcoming.flatMap((e) => {
+    const r = listed.get(e.associationId)
+    const c = e.content
+    if (!r?.published || !c.startsAt) return []
+    const campus = c.campus ? catalogue.find((x) => x.kind === "campus" && x.slug === c.campus) : undefined
+    return [
+      {
+        id: e.id,
+        associationId: r.legacyId as number,
+        associationName: r.published.name,
+        title: c.title,
+        descriptionIt: c.descriptionIt,
+        descriptionEn: c.descriptionEn,
+        startsAt: c.startsAt,
+        endsAt: c.endsAt,
+        online: c.online,
+        venue: c.venue,
+        campus: campus ? { slug: campus.slug, nameIt: campus.nameIt, nameEn: campus.nameEn } : null,
+        link: c.link && httpUrl.safeParse(c.link).success ? c.link : null,
+        poster: c.poster && httpUrl.safeParse(c.poster).success ? c.poster : null,
+      },
+    ]
+  })
 }

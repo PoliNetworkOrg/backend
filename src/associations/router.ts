@@ -4,6 +4,7 @@ import { uploadBlob } from "@/azure/blob"
 import { SCOPE } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 import * as C from "./contract"
+import type { createEventService } from "./events"
 import type { createHomeService } from "./home"
 import type { createPromotionService } from "./promotions"
 import type { createAssociationService } from "./service"
@@ -40,7 +41,8 @@ export function createAssociationRouter(
   service: ReturnType<typeof createAssociationService>,
   identity: (sub: string) => Promise<{ name: string; email?: string }> = async (sub) => ({ name: sub }),
   promotions?: ReturnType<typeof createPromotionService>,
-  home?: ReturnType<typeof createHomeService>
+  home?: ReturnType<typeof createHomeService>,
+  events?: ReturnType<typeof createEventService>
 ) {
   // Being authenticated admits an applicant; membership is checked afresh by the service, never trusted from input.
   const user = policy({ user: { scope: SCOPE.admin } }).use(async ({ ctx, next }) => {
@@ -135,6 +137,28 @@ export function createAssociationRouter(
         .input(C.promotionCommandSchema)
         .output(C.refSchema)
         .mutation(({ ctx, input }) => need(promotions).command(ctx.viewer, input)),
+    }),
+    events: createTRPCRouter({
+      list: user
+        .input(C.refSchema)
+        .output(C.calendarEventListSchema)
+        .query(({ ctx, input }) => need(events).list(ctx.viewer, input.id)),
+      get: user
+        .input(C.refSchema)
+        .output(C.calendarEventSchema)
+        .query(({ ctx, input }) => need(events).get(ctx.viewer, input.id)),
+      queue: user
+        .input(C.calendarEventQueueSchema)
+        .output(C.calendarEventListSchema)
+        .query(({ ctx, input }) => need(events).queue(ctx.viewer, input)),
+      create: user
+        .input(C.calendarEventCreateSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(events).create(ctx.viewer, input)),
+      command: user
+        .input(C.calendarEventCommandSchema)
+        .output(C.refSchema)
+        .mutation(({ ctx, input }) => need(events).command(ctx.viewer, input)),
     }),
     lookup: user
       .input(C.refSchema)

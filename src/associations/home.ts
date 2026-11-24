@@ -1,5 +1,6 @@
 import type { z } from "zod"
 import type { homeActionKinds, homeSchema } from "./contract"
+import type { EventStore } from "./events"
 import type { Promotion, PromotionStore } from "./promotions"
 import { activeMember, type Record, type Store, type Viewer } from "./service"
 
@@ -18,13 +19,7 @@ const openContent = (r: Record) =>
 export function createHomeService(
   store: Pick<Store, "list">,
   promotions: Pick<PromotionStore, "promotions">,
-  extra: (
-    v: Viewer,
-    records: Record[]
-  ) => Promise<{ actions: Action[]; counters: Partial<Home["counters"]> }> = async () => ({
-    actions: [],
-    counters: {},
-  })
+  events: Pick<EventStore, "events"> = { events: async () => [] }
 ) {
   return {
     async home(v: Viewer): Promise<Home> {
@@ -84,9 +79,20 @@ export function createHomeService(
           else if (p.status === "published" && p.publishedAt && Date.now() - Date.parse(p.publishedAt) < 3 * DAY)
             item("promotion_published", p.publishedAt, false)
         }
+        for (const e of await events.events({ associationId: r.id })) {
+          const title = e.content.title || "Evento senza titolo"
+          if (e.status === "changes_requested")
+            push(r, { kind: "event_changes", targetId: e.id, title, at: e.updatedAt, urgent: true })
+          else if (e.status === "draft" && (responsible || e.createdBy === v.sub))
+            push(r, {
+              kind: responsible ? "event_to_submit" : "event_draft",
+              targetId: e.id,
+              title,
+              at: e.updatedAt,
+              urgent: false,
+            })
+        }
       }
-      const more = await extra(v, records)
-      actions.push(...more.actions)
 
       let counters: Home["counters"] | null = null
       if (v.operator) {
@@ -96,9 +102,8 @@ export function createHomeService(
           profiles: submitted.filter((q) => q.kind === "content" || q.kind === "registration").length,
           access: submitted.filter((q) => q.kind === "access" || q.kind === "membership").length,
           promotions: queue.length,
-          events: 0,
+          events: (await events.events({ status: "submitted" })).length,
           handovers: 0,
-          ...more.counters,
         }
       }
       actions.sort((a, b) => Number(b.urgent) - Number(a.urgent) || (a.at ?? "9999").localeCompare(b.at ?? "9999"))

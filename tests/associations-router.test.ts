@@ -61,6 +61,7 @@ describe("Association API policies", () => {
         campuses: [],
         crossProgramme: false,
         contacts: [],
+        collaboration: { open: false, contactId: null },
       },
     ])
     expect((await router.createCaller(context(["web:content:write"])).list()).operator).toBe(false)

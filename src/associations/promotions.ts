@@ -159,8 +159,15 @@ export function presentPromotion(p: Promotion, r: Record, v: Viewer) {
 export function createPromotionService(
   store: PromotionStore,
   registry: { get(id: string): Promise<Record | null>; catalogue(): Promise<CatalogueEntry[]> },
-  dashboardUrl: string
+  dashboardUrl: string,
+  /** The association an event belongs to, so a request can promote only its own association's events. */
+  eventAssociation: (eventId: string) => Promise<string | null> = async () => null
 ) {
+  const eventOwner = async (content: PromotionContent) =>
+    content.eventId ? await eventAssociation(content.eventId) : null
+  const checkEvent = (content: PromotionContent, owner: string | null, r: Record) => {
+    if (content.eventId && owner !== r.id) fail("BAD_REQUEST", "Choose an event of this association")
+  }
   const mailFor = (p: Promotion, r: Record, v: Viewer, mail: Mail[], what: string, note: string) => {
     const url = `${dashboardUrl}/dashboard/associations/promotions/${p.id}`
     const label = promotionStatusLabel[p.status]
@@ -214,9 +221,11 @@ export function createPromotionService(
     },
     async create(v: Viewer, input: z.infer<typeof promotionCreateSchema>) {
       const catalogue = await registry.catalogue()
+      const owner = await eventOwner(input.content)
       const id = await store.createPromotion(input.associationId, `${v.sub}:${input.commandId}`, (r) => {
         if (!member(r, v)) fail("FORBIDDEN", "Only the association's representatives can prepare a request")
         checkContent(input.content, catalogue, false)
+        checkEvent(input.content, owner, r)
         const now = new Date().toISOString()
         const p: Promotion = {
           id: randomUUID(),
@@ -243,6 +252,7 @@ export function createPromotionService(
     },
     async command(v: Viewer, c: PromotionCommand) {
       const catalogue = c.action === "save" || c.action === "submit" ? await registry.catalogue() : []
+      const owner = c.action === "save" ? await eventOwner(c.content) : null
       const id = await store.changePromotion(c.id, `${v.sub}:${c.commandId}`, (p, r, mail) => {
         // Authorization is checked under the locks, before anything else: a revoked representative cannot act.
         if (!readable(r, v)) fail("NOT_FOUND", "Promotion request not found")
@@ -263,6 +273,7 @@ export function createPromotionService(
           case "save":
             if (!view.canEdit) fail("FORBIDDEN", "You cannot edit this request")
             checkContent(c.content, catalogue, false)
+            checkEvent(c.content, owner, r)
             p.content = c.content
             break
           case "submit":

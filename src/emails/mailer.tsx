@@ -7,6 +7,7 @@ import { logger } from "@/logger"
 import type { FeeMailKind, SociMail } from "@/soci/types"
 import { renderEmail } from "./render"
 import type { SecretSantaEmailRequest } from "./secret-santa-routes"
+import AssociationEventEmail, { type AssociationEventProps } from "./templates/association-event"
 import AssociationPromotionEmail, { type AssociationPromotionProps } from "./templates/association-promotion"
 import BirthdayEmail, { birthdaySubject } from "./templates/birthday"
 import FeeConfirmedEmail, { feeConfirmedSubject } from "./templates/fee-confirmed"
@@ -253,6 +254,9 @@ function associationComponent(mail: AssociationMail): JSX.Element {
   // SAFETY: the registry service writes these props for exactly this template kind (`promotions.ts`).
   if (mail.template?.kind === "association-promotion")
     return <AssociationPromotionEmail {...(mail.template.props as unknown as AssociationPromotionProps)} />
+  // SAFETY: written by `events.ts` for exactly this template kind.
+  if (mail.template?.kind === "association-event")
+    return <AssociationEventEmail {...(mail.template.props as unknown as AssociationEventProps)} />
   return (
     <div>
       <h1>{mail.subject}</h1>

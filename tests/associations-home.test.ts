@@ -17,6 +17,7 @@ const content: PromotionContent = {
   audience: { everyone: true, programmes: [], campuses: [] },
   desiredDate: tomorrow,
   deadline: null,
+  eventId: null,
 }
 
 async function setup() {

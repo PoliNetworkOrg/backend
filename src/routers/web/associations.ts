@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server"
 import z from "zod"
-import { associationStore } from "@/associations"
+import { associationEventStore, associationStore } from "@/associations"
 import { contactFunction, linkSchema } from "@/associations/contract"
-import { publicAssociations } from "@/associations/public"
+import { publicAssociations, publicEvents } from "@/associations/public"
 import { dashboard, publicData } from "@/idp/policies"
 import { createTRPCRouter, policy } from "@/trpc"
 
@@ -44,7 +44,30 @@ const associationSchema = z.object({
     .optional(),
 })
 
+const named = z.object({ slug: z.string(), nameIt: z.string(), nameEn: z.string() })
+const upcomingEventSchema = z.object({
+  id: z.uuid(),
+  /** The association's public id, as in `getAllAssociations`. */
+  associationId: z.number(),
+  associationName: z.string(),
+  title: z.string(),
+  descriptionIt: z.string(),
+  descriptionEn: z.string(),
+  startsAt: z.string(),
+  endsAt: z.string().nullable(),
+  online: z.boolean(),
+  venue: z.string(),
+  campus: named.nullable(),
+  link: z.string().nullable(),
+  poster: z.string().nullable(),
+})
+
 export default createTRPCRouter({
+  /** Approved association events that are not over yet, soonest first. */
+  getUpcomingEvents: policy(publicData)
+    .output(z.array(upcomingEventSchema))
+    .query(() => publicEvents(associationStore, associationEventStore)),
+
   getAllAssociations: policy(publicData)
     .output(z.array(associationSchema))
     .query(() => publicAssociations(associationStore)),

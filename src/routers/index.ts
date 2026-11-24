@@ -1,4 +1,10 @@
-import { associationHome, associationIdentity, associationPortal, associationPromotions } from "@/associations"
+import {
+  associationEvents,
+  associationHome,
+  associationIdentity,
+  associationPortal,
+  associationPromotions,
+} from "@/associations"
 import { createAssociationRouter } from "@/associations/router"
 import { createTRPCRouter } from "@/trpc"
 import { azureRouter } from "./azure"
@@ -22,7 +28,8 @@ export const appRouter = createTRPCRouter({
     associationPortal,
     associationIdentity,
     associationPromotions,
-    associationHome
+    associationHome,
+    associationEvents
   ),
   azure: azureRouter,
   esign: esignRouter,

@@ -309,6 +309,13 @@
       "when": 1795482801657,
       "tag": "0043_association_promotions",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795486207758,
+      "tag": "0044_association_events",
+      "breakpoints": true
     }
   ]
 }

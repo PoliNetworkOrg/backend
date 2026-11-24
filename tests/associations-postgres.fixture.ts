@@ -4,17 +4,22 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SQL } from "bun"
+import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
+import { createEventService } from "@/associations/events"
+import { createEventStore } from "@/associations/events-pg"
 import { createPromotionService } from "@/associations/promotions"
 import { createPromotionStore } from "@/associations/promotions-pg"
-import { publicAssociations } from "@/associations/public"
+import { publicAssociations, publicEvents } from "@/associations/public"
 import { createAssociationService } from "@/associations/service"
 import { createAssociationStore } from "@/associations/store-pg"
 import { schema } from "@/db/schema"
 import { groupLabels } from "@/db/schema/common/group-labels"
 import {
   associationCatalogue,
+  associationEvent,
+  associationEventTransition,
   associationMail,
   associationPromotion,
   associationPromotionTransition,
@@ -261,6 +266,7 @@ try {
     audience: { everyone: true, programmes: [], campuses: [] },
     desiredDate: day,
     deadline: null,
+    eventId: null,
   }
   const createKey = randomUUID()
   const [p1, p2] = await Promise.all([
@@ -298,6 +304,52 @@ try {
     (m) => m.mail.template?.kind === "association-promotion"
   )
   assert.equal(promotionMail?.mail.to, "new@example.org")
+  // Events: approval publishes them in SQL, past ones drop out, transitions are append-only.
+  const eventStore = createEventStore(db)
+  const events = createEventService(eventStore, store, "https://admin.example.org")
+  const starts = new Date(Date.now() + 3 * 86_400_000).toISOString()
+  const created = await events.create(userWithMail, {
+    associationId: a.id,
+    content: {
+      title: "Serata",
+      descriptionIt: "IT",
+      descriptionEn: "EN",
+      startsAt: starts,
+      endsAt: null,
+      online: true,
+      venue: "",
+      campus: null,
+      link: "",
+      poster: null,
+    },
+    commandId: randomUUID(),
+  })
+  await events.command(userWithMail, { id: created.id, revision: 0, commandId: randomUUID(), action: "submit" })
+  assert.equal((await publicEvents(store, eventStore)).length, 0)
+  await events.command(staff, { id: created.id, revision: 1, commandId: randomUUID(), action: "approve", note: "" })
+  const calendar = await publicEvents(store, eventStore)
+  assert.deepEqual(
+    calendar.map((e) => [e.title, e.associationName, e.startsAt]),
+    [["Serata", "New", starts]]
+  )
+  await db
+    .update(associationEvent)
+    .set({ startsAt: new Date(Date.now() - 3 * 86_400_000) })
+    .where(eq(associationEvent.id, created.id))
+  assert.equal((await publicEvents(store, eventStore)).length, 0, "past events leave the calendar")
+  let eventAppendOnly = false
+  try {
+    await db.delete(associationEventTransition)
+  } catch {
+    eventAppendOnly = true
+  }
+  assert(eventAppendOnly, "event transitions must reject DELETE")
+  for (const row of await db.select().from(associationRegistry))
+    assert.deepEqual(row.state.collaboration ?? { open: false, contactId: null }, { open: false, contactId: null })
+  const [backfilled] = await client.unsafe(
+    `SELECT count(*)::int AS n FROM web_association_registry WHERE NOT state ? 'collaboration'`
+  )
+  assert.equal(backfilled.n, 0)
   const visible = async (viewer: { sub: string; name: string; operator: boolean }) =>
     ((await service.directory(viewer)).find((r) => r.id === a.id)?.contacts ?? []).map((c) => c.label).sort()
   assert.deepEqual(await visible({ sub: "nobody", name: "Nobody", operator: false }), ["public"])
@@ -331,6 +383,7 @@ try {
         "registry backfill",
         "contact visibility",
         "promotion idempotency and concurrent decisions",
+        "event publication and append-only transitions",
       ],
     })
   )

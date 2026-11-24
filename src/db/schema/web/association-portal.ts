@@ -12,7 +12,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core"
-import type { PromotionContent, PromotionStatus } from "@/associations/contract"
+import type { CalendarEventContent, EventStatus, PromotionContent, PromotionStatus } from "@/associations/contract"
 import type { Mail, Record } from "@/associations/service"
 import { createTable } from "../create-table"
 
@@ -113,3 +113,50 @@ export const associationCommandKey = createTable.web("association_command_key", 
   result: uuid().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
+
+const EVENT_STATUSES = "'draft', 'submitted', 'changes_requested', 'approved', 'rejected', 'withdrawn'"
+
+// Calendar events: public on the website once approved, linked to the association's profile.
+export const associationEvent = createTable.web(
+  "association_event",
+  {
+    id: uuid().primaryKey(),
+    associationId: uuid("association_id")
+      .notNull()
+      .references(() => associationRegistry.id),
+    status: varchar({ length: 24 }).$type<EventStatus>().notNull(),
+    revision: integer().notNull().default(0),
+    content: jsonObject<CalendarEventContent>().notNull(),
+    createdBy: text("created_by").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    notify: text().array().notNull(),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("web_association_event_association_idx").on(t.associationId),
+    index("web_association_event_calendar_idx").on(t.status, t.startsAt),
+    check("web_association_event_status", sql.raw(`status IN (${EVENT_STATUSES})`)),
+  ]
+)
+// Append-only, like the promotion transitions.
+export const associationEventTransition = createTable.web(
+  "association_event_transition",
+  {
+    id: uuid().primaryKey(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => associationEvent.id),
+    kind: varchar({ length: 16 }).$type<"transition" | "comment">().notNull(),
+    fromStatus: varchar("from_status", { length: 24 }).$type<EventStatus>(),
+    toStatus: varchar("to_status", { length: 24 }).$type<EventStatus>(),
+    actorSub: text("actor_sub").notNull(),
+    actorName: text("actor_name").notNull(),
+    note: text().notNull().default(""),
+    internal: boolean().notNull().default(false),
+    at: timestamp({ withTimezone: true }).notNull(),
+  },
+  (t) => [index("web_association_event_transition_event_idx").on(t.eventId, t.at)]
+)
