@@ -7,15 +7,17 @@ const report = {
   subject: "Documento non leggibile",
   description: "Aprendo il documento dal telefono compare una pagina vuota.",
 }
+const websiteClientId = "HCkNMsiTJqgEBKVfhUxGiADloWpYvbQa"
 const authorized: RequestAuth = {
   kind: "token",
-  actor: { kind: "service", client: "website" },
+  actor: { kind: "service", client: websiteClientId },
   scopes: new Set(["backend:public:read"]),
 }
-function setup(auth: RequestAuth = authorized) {
+function setup(auth: RequestAuth = authorized, config: { websiteClientId: string | undefined } = { websiteClientId }) {
   const send = vi.fn().mockResolvedValue(undefined)
-  const allow = vi.fn().mockResolvedValue(true)
-  return { send, allow, app: problemReportRoutes({ authenticate: async () => auth, send, allow }) }
+  const reserveSlot = vi.fn().mockResolvedValue(0)
+  const app = problemReportRoutes({ ...config, authenticate: async () => auth, send, reserveSlot })
+  return { send, reserveSlot, app }
 }
 const request = (data: unknown = report) => ({
   method: "POST",
@@ -23,22 +25,29 @@ const request = (data: unknown = report) => ({
   body: JSON.stringify(data),
 })
 describe("website problem reports", () => {
-  it("sends a valid report only after authorization and rate limiting", async () => {
-    const { app, send, allow } = setup()
+  it("sends a valid report from the configured OAuth client", async () => {
+    const { app, send, reserveSlot } = setup()
     expect((await app.request("/", request())).status).toBe(204)
     expect(send).toHaveBeenCalledExactlyOnceWith(report)
-    expect(allow).toHaveBeenCalledWith(report.email)
+    expect(reserveSlot).toHaveBeenCalledWith(report.email)
   })
   it("refuses unauthenticated callers and other service clients", async () => {
     for (const auth of [
       { kind: "rejected", status: 401, reason: "Missing" },
       { ...authorized, actor: { kind: "service", client: "bot" } },
+      { ...authorized, actor: { kind: "service", client: "website" } },
       { ...authorized, scopes: new Set() },
     ] as RequestAuth[]) {
       const { app, send } = setup(auth)
       expect([401, 403]).toContain((await app.request("/", request())).status)
       expect(send).not.toHaveBeenCalled()
     }
+  })
+  it("fails closed when the website client ID is not configured", async () => {
+    const { app, send, reserveSlot } = setup(authorized, { websiteClientId: undefined })
+    expect((await app.request("/", request())).status).toBe(503)
+    expect(reserveSlot).not.toHaveBeenCalled()
+    expect(send).not.toHaveBeenCalled()
   })
   it("rejects invalid email, header injection, small descriptions, recipient overrides and oversized bodies", async () => {
     const { app, send } = setup()
@@ -59,13 +68,17 @@ describe("website problem reports", () => {
     ).toBe(400)
     expect(send).not.toHaveBeenCalled()
   })
-  it("fails closed when the rate limiter is unavailable and refuses bursts", async () => {
-    const { app, send, allow } = setup()
-    allow.mockResolvedValueOnce(false)
+  it.each([25, 3420])("returns the retry delay of %i seconds reported by the limiter", async (retryAfter) => {
+    const { app, send, reserveSlot } = setup()
+    reserveSlot.mockResolvedValueOnce(retryAfter)
     const response = await app.request("/", request())
     expect(response.status).toBe(429)
-    expect(response.headers.get("retry-after")).toBe("60")
-    allow.mockRejectedValueOnce(new Error("Redis down"))
+    expect(response.headers.get("retry-after")).toBe(String(retryAfter))
+    expect(send).not.toHaveBeenCalled()
+  })
+  it("fails closed when the rate limiter is unavailable", async () => {
+    const { app, send, reserveSlot } = setup()
+    reserveSlot.mockRejectedValueOnce(new Error("Redis down"))
     expect((await app.request("/", request())).status).toBe(503)
     expect(send).not.toHaveBeenCalled()
   })

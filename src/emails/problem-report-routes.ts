@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import type { RequestAuth } from "@/idp/auth"
+import { SCOPE } from "@/idp/policies"
 
 export const problemReportSchema = z
   .object({
@@ -19,12 +20,14 @@ export type ProblemReport = z.infer<typeof problemReportSchema>
 
 /** Only the website's service token can invoke this fixed-recipient mail endpoint. */
 export function problemReportRoutes({
+  websiteClientId,
   authenticate,
-  allow,
+  reserveSlot,
   send,
 }: {
+  websiteClientId: string | undefined
   authenticate: (authorization?: string) => Promise<RequestAuth>
-  allow: (email: string) => Promise<boolean>
+  reserveSlot: (email: string) => Promise<number>
   send: (report: ProblemReport) => Promise<void>
 }) {
   const app = new Hono()
@@ -33,7 +36,8 @@ export function problemReportRoutes({
     c.header("Cache-Control", "no-store")
     const auth = await authenticate(c.req.header("authorization"))
     if (auth.kind === "rejected") return c.json({ error: "Unauthorized" }, auth.status)
-    if (auth.actor.kind !== "service" || auth.actor.client !== "website" || !auth.scopes.has("backend:public:read"))
+    if (!websiteClientId) return c.json({ error: "Report service unavailable" }, 503)
+    if (auth.actor.kind !== "service" || auth.actor.client !== websiteClientId || !auth.scopes.has(SCOPE.publicRead))
       return c.json({ error: "Forbidden" }, 403)
     let body: unknown
     try {
@@ -45,8 +49,9 @@ export function problemReportRoutes({
     const parsed = problemReportSchema.safeParse(body)
     if (!parsed.success) return c.json({ error: "Invalid report" }, 400)
     try {
-      if (!(await allow(parsed.data.email))) {
-        c.header("Retry-After", "60")
+      const retryAfter = await reserveSlot(parsed.data.email)
+      if (retryAfter > 0) {
+        c.header("Retry-After", String(retryAfter))
         return c.json({ error: "Too many reports" }, 429)
       }
     } catch {

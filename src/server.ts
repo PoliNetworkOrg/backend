@@ -78,10 +78,14 @@ app.route(
 app.route(
   "/internal/website/problem-reports",
   problemReportRoutes({
+    websiteClientId: env.OAUTH_WEBSITE_CLIENT_ID,
     authenticate: (authorization) => authenticateRequest({ authorization }),
-    allow: async (email) => {
+    reserveSlot: async (email) => {
       if (!redis.isReady) throw new Error("Report rate limiter unavailable")
-      return (await redis.eval(problemReportLimitScript, { keys: problemReportLimitKeys(email), arguments: [] })) === 1
+      const result = await redis.eval(problemReportLimitScript, { keys: problemReportLimitKeys(email), arguments: [] })
+      if (typeof result !== "number" || !Number.isSafeInteger(result) || result < 0)
+        throw new Error("Invalid report rate limiter response")
+      return result
     },
     send: sendProblemReportEmail,
   })

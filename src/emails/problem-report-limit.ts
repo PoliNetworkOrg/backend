@@ -1,14 +1,18 @@
 import { createHash } from "node:crypto"
 
-// Shared across backend instances. Rejected requests do not extend either window.
+// Returns 0 when a slot is reserved, or the remaining wait in seconds.
 export const problemReportLimitScript = `
-if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+local emailTTL = redis.call('PTTL', KEYS[1])
 local total = tonumber(redis.call('GET', KEYS[2]) or '0')
-if total >= 30 then return 0 end
+if total >= 30 then
+  local globalTTL = redis.call('PTTL', KEYS[2])
+  return math.max(1, math.ceil(math.max(emailTTL, globalTTL) / 1000))
+end
+if emailTTL ~= -2 then return math.max(1, math.ceil(emailTTL / 1000)) end
 redis.call('SET', KEYS[1], '1', 'EX', 60)
 local count = redis.call('INCR', KEYS[2])
 if count == 1 then redis.call('EXPIRE', KEYS[2], 3600) end
-return 1
+return 0
 `
 export function problemReportLimitKeys(email: string) {
   const digest = createHash("sha256").update(email.toLowerCase()).digest("hex")
