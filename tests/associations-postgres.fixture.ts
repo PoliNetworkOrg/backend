@@ -9,7 +9,7 @@ import { migrate } from "drizzle-orm/bun-sql/migrator"
 import { createAssociationService } from "@/associations/service"
 import { createAssociationStore } from "@/associations/store-pg"
 import { schema } from "@/db/schema"
-import { associationRegistry } from "@/db/schema/web/association-portal"
+import { associationMail, associationRegistry } from "@/db/schema/web/association-portal"
 import { associations } from "@/db/schema/web/associations"
 
 const connection = {
@@ -49,7 +49,21 @@ try {
         : {}),
     }))
   )
+  // Simulate a record written by the first release, which stored the state as a jsonb string.
+  journal.entries = JSON.parse(await readFile("drizzle/meta/_journal.json", "utf8")).entries.filter(
+    (e: { idx: number }) => e.idx < 41
+  )
+  await writeFile(journalPath, JSON.stringify(journal))
+  await migrate(db, { migrationsFolder: folder })
+  await client.unsafe(
+    `UPDATE web_association_registry SET state = to_jsonb(state::text) WHERE id = (SELECT min(id::text)::uuid FROM web_association_registry)`
+  )
   await migrate(db, { migrationsFolder: "./drizzle" })
+  const objects = async () =>
+    (await client.unsafe(`SELECT DISTINCT jsonb_typeof(state) AS t FROM web_association_registry`)).map(
+      (r: { t: string }) => r.t
+    )
+  assert.deepEqual(await objects(), ["object"])
   const store = createAssociationStore(db)
   const service = createAssociationService(store, "https://admin.example.org")
   const staff = { sub: "staff", name: "Staff", operator: true }
@@ -128,6 +142,22 @@ try {
     reason: "Approved",
   })
   assert.equal((await db.select().from(associations)).length, 4)
+  // App-written rows are jsonb objects, so JSON lookups (invitations, publication) find them.
+  const invited = await service.get(user, a.id)
+  await service.command(user, {
+    id: a.id,
+    revision: invited.revision,
+    commandId: randomUUID(),
+    action: "invite",
+    email: "invitee@example.org",
+    role: "collaborator",
+    explanation: "Board member",
+  })
+  const [invite] = await db.select().from(associationMail)
+  const token = new URL(invite.mail.text.split("\n").at(-1) ?? "").searchParams.get("token") ?? ""
+  assert.equal((await service.invitation(token)).associationName, "New")
+  assert.deepEqual(await objects(), ["object"])
+  assert((await store.published()).some((r) => r.id === a.id))
   // A new service instance sees persisted publication, roles and history.
   const restarted = createAssociationService(createAssociationStore(db), "https://admin.example.org")
   const persisted = await restarted.get(user, a.id)
@@ -152,6 +182,7 @@ try {
         "publication",
         "restart",
         "unpublish without deletion",
+        "jsonb objects and invitation lookup",
       ],
     })
   )

@@ -288,6 +288,13 @@
       "when": 1794926488991,
       "tag": "0040_association_portal",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795480148411,
+      "tag": "0041_association_jsonb_repair",
+      "breakpoints": true
     }
   ]
 }

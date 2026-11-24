@@ -18,7 +18,10 @@ export function createAssociationStore(db: typeof DB): Store {
       const [row] = await db
         .select()
         .from(associationRegistry)
-        .where(sql`${associationRegistry.state}->'invitations' @> ${JSON.stringify([{ hash }])}::jsonb`)
+        // Built in SQL: a JSON text parameter cast to jsonb arrives from Bun SQL as a jsonb string and matches nothing.
+        .where(
+          sql`${associationRegistry.state}->'invitations' @> jsonb_build_array(jsonb_build_object('hash', ${hash}::text))`
+        )
       return row?.state ?? null
     },
     async published() {
