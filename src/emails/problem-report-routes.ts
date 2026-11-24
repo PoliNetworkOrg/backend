@@ -35,7 +35,14 @@ export function problemReportRoutes({
     if (auth.kind === "rejected") return c.json({ error: "Unauthorized" }, auth.status)
     if (auth.actor.kind !== "service" || auth.actor.client !== "website" || !auth.scopes.has("backend:public:read"))
       return c.json({ error: "Forbidden" }, 403)
-    const parsed = problemReportSchema.safeParse(await c.req.json().catch(() => null))
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error
+      return c.json({ error: "Invalid report" }, 400)
+    }
+    const parsed = problemReportSchema.safeParse(body)
     if (!parsed.success) return c.json({ error: "Invalid report" }, 400)
     try {
       if (!(await allow(parsed.data.email))) {

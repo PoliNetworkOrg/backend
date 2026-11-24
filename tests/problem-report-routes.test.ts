@@ -52,6 +52,13 @@ describe("website problem reports", () => {
     expect((await app.request("/", request({ ...report, description: "x".repeat(25000) }))).status).toBe(413)
     expect(send).not.toHaveBeenCalled()
   })
+  it("rejects malformed JSON without sending email", async () => {
+    const { app, send } = setup()
+    expect(
+      (await app.request("/", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" })).status
+    ).toBe(400)
+    expect(send).not.toHaveBeenCalled()
+  })
   it("fails closed when the rate limiter is unavailable and refuses bursts", async () => {
     const { app, send, allow } = setup()
     allow.mockResolvedValueOnce(false)
