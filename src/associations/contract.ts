@@ -203,6 +203,120 @@ export const commandSchema = z.discriminatedUnion("action", [
 ])
 export const inviteSchema = z.object({ token: z.string().min(32).max(128) })
 export const invitationSchema = z.object({ associationName: z.string(), role: roleSchema, expiresAt: z.string() })
+// Promotion requests. Channels follow the RRI (art. 4.7): the PoliAssociazioni channel, a course's broadcast channel,
+// one exam or cohort group, a general group of a level, every group of a course, or another case PoliNetwork evaluates.
+export const promotionStatus = z.enum([
+  "draft",
+  "submitted",
+  "changes_requested",
+  "approved",
+  "scheduled",
+  "published",
+  "rejected",
+  "withdrawn",
+])
+export const promotionChannel = z.enum([
+  "poliassociazioni",
+  "course_broadcast",
+  "exam_group",
+  "level_group",
+  "course_groups",
+  "other",
+])
+/** Channels aimed at one degree programme's groups. */
+export const programmeChannels: readonly z.infer<typeof promotionChannel>[] = [
+  "course_broadcast",
+  "exam_group",
+  "course_groups",
+]
+const isoDate = z.iso.date()
+export const promotionChannelRequestSchema = z.object({
+  channel: promotionChannel,
+  programme: catalogueSlug.nullable().default(null),
+  // Which exam or cohort group, which level, or what the "other" case is.
+  note: z.string().trim().max(300).default(""),
+})
+export const promotionContentSchema = z.object({
+  title: z.string().trim().max(200),
+  text: z.string().trim().max(5000),
+  link: z.union([z.literal(""), httpUrl]),
+  poster: httpUrl.nullable(),
+  channels: z.array(promotionChannelRequestSchema).max(12),
+  audience: z.object({
+    everyone: z.boolean(),
+    programmes: z.array(catalogueSlug).max(40),
+    campuses: z.array(catalogueSlug).max(20),
+  }),
+  desiredDate: isoDate.nullable(),
+  deadline: isoDate.nullable(),
+})
+export const promotionTransitionSchema = z.object({
+  id: z.uuid(),
+  kind: z.enum(["transition", "comment"]),
+  from: promotionStatus.nullable(),
+  to: promotionStatus.nullable(),
+  at: z.string(),
+  actorName: z.string(),
+  note: z.string(),
+  /** Operator-only notes; never sent to representatives. */
+  internal: z.boolean(),
+})
+export const promotionSchema = z.object({
+  id: z.uuid(),
+  associationId: z.uuid(),
+  associationName: z.string(),
+  status: promotionStatus,
+  revision: z.number().int(),
+  content: promotionContentSchema,
+  createdByName: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  scheduledAt: z.string().nullable(),
+  scheduledChannel: promotionChannel.nullable(),
+  scheduledDetail: z.string(),
+  publishedUrl: z.string().nullable(),
+  publishedAt: z.string().nullable(),
+  transitions: z.array(promotionTransitionSchema),
+  canEdit: z.boolean(),
+  canSubmit: z.boolean(),
+  canWithdraw: z.boolean(),
+  operator: z.boolean(),
+})
+export const promotionListSchema = z.array(promotionSchema)
+export const promotionQueueSchema = z.object({
+  status: promotionStatus.optional(),
+  /** Desired or scheduled date, inclusive. */
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+})
+export const promotionCreateSchema = z.object({
+  associationId: z.uuid(),
+  content: promotionContentSchema,
+  commandId: z.uuid(),
+})
+const promotionBase = { id: z.uuid(), revision: z.number().int().nonnegative(), commandId: z.uuid() }
+export const promotionCommandSchema = z.discriminatedUnion("action", [
+  z.object({ ...promotionBase, action: z.literal("save"), content: promotionContentSchema }),
+  z.object({ ...promotionBase, action: z.literal("submit") }),
+  z.object({ ...promotionBase, action: z.literal("withdraw"), note: text }),
+  z.object({ ...promotionBase, action: z.literal("comment"), note: reason, internal: z.boolean() }),
+  z.object({ ...promotionBase, action: z.literal("changes"), note: reason }),
+  z.object({ ...promotionBase, action: z.literal("approve"), note: text }),
+  z.object({ ...promotionBase, action: z.literal("reject"), note: reason }),
+  z.object({
+    ...promotionBase,
+    action: z.literal("schedule"),
+    scheduledAt: z.iso.datetime({ offset: true }),
+    channel: promotionChannel,
+    detail: z.string().trim().max(300),
+    note: text,
+  }),
+  z.object({ ...promotionBase, action: z.literal("publish"), url: httpUrl, note: text }),
+])
+export type PromotionContent = z.infer<typeof promotionContentSchema>
+export type PromotionCommand = z.infer<typeof promotionCommandSchema>
+export type PromotionStatus = z.infer<typeof promotionStatus>
+export type PromotionTransition = z.infer<typeof promotionTransitionSchema>
 export type Profile = z.infer<typeof profileSchema>
 export type Request = z.infer<typeof requestSchema>
 export type Detail = z.infer<typeof detailSchema>

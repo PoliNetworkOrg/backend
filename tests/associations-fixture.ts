@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
-import type { CatalogueEntry, Command, Profile } from "@/associations/contract"
+import type { CatalogueEntry, Command, Profile, PromotionCommand } from "@/associations/contract"
+import { createPromotionService, type Promotion, type PromotionStore } from "@/associations/promotions"
 import { createAssociationService, type Mail, type Record, type Store, type Viewer } from "@/associations/service"
 
 export const owner: Viewer = { sub: "owner", name: "Owner", email: "owner@example.org", operator: false }
@@ -104,4 +105,67 @@ export function harness() {
     return id
   }
   return { service, rows, mails, command, registered, catalogue }
+}
+
+/** In-memory promotion store over a registry harness, with the same key and locking semantics as the SQL store. */
+export function promotionHarness(h: ReturnType<typeof harness>) {
+  const rows = new Map<string, Promotion>()
+  const keys = new Map<string, string>()
+  const mails: Mail[] = []
+  const store: PromotionStore = {
+    async promotions(filter) {
+      const day = (p: Promotion) => p.scheduledAt?.slice(0, 10) ?? p.content.desiredDate ?? ""
+      return structuredClone(
+        [...rows.values()].filter(
+          (p) =>
+            (!filter.associationId || p.associationId === filter.associationId) &&
+            (!filter.status || p.status === filter.status) &&
+            (!filter.from || day(p) >= filter.from) &&
+            (!filter.to || (day(p) && day(p) <= filter.to))
+        )
+      )
+    },
+    promotion: async (id) => structuredClone(rows.get(id) ?? null),
+    async createPromotion(associationId, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const record = h.rows.get(associationId)
+      if (!record) throw new Error("missing association")
+      const mail: Mail[] = []
+      const p = operation(structuredClone(record), mail)
+      rows.set(p.id, structuredClone(p))
+      keys.set(key, p.id)
+      mails.push(...mail)
+      return p.id
+    },
+    async changePromotion(id, key, operation) {
+      if (keys.has(key)) return keys.get(key) as string
+      const stored = rows.get(id)
+      if (!stored) throw new Error("missing promotion")
+      const p = structuredClone(stored)
+      const mail: Mail[] = []
+      operation(p, structuredClone(h.rows.get(p.associationId) as Record), mail)
+      rows.set(id, p)
+      keys.set(key, id)
+      mails.push(...mail)
+      return id
+    },
+  }
+  const service = createPromotionService(
+    store,
+    { get: async (id) => structuredClone(h.rows.get(id) ?? null), catalogue: async () => structuredClone(h.catalogue) },
+    "https://admin.example.org"
+  )
+  async function command(
+    v: Viewer,
+    id: string,
+    action: PromotionCommand extends infer T
+      ? T extends PromotionCommand
+        ? Omit<T, "id" | "revision" | "commandId">
+        : never
+      : never
+  ) {
+    const revision = rows.get(id)?.revision ?? 0
+    return service.command(v, { ...action, id, revision, commandId: randomUUID() } as PromotionCommand)
+  }
+  return { service, rows, mails, command }
 }

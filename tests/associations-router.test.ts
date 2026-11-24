@@ -1,7 +1,7 @@
 import type { Actor } from "@polinetwork/auth-kit"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { Context } from "@/trpc"
-import { harness, owner } from "./associations-fixture"
+import { harness, owner, promotionHarness } from "./associations-fixture"
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -65,5 +65,14 @@ describe("Association API policies", () => {
     ])
     expect((await router.createCaller(context(["web:content:write"])).list()).operator).toBe(false)
     expect((await router.createCaller(context(["admin:access", "web:content:write"])).list()).operator).toBe(true)
+  })
+  it("opens the promotion queue only to operators holding both permissions", async () => {
+    const h = harness()
+    await h.registered()
+    const router = makeRouter(h.service, undefined, promotionHarness(h).service)
+    await expect(router.createCaller(context(["web:content:write"])).promotions.queue({})).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    })
+    expect(await router.createCaller(context(["admin:access", "web:content:write"])).promotions.queue({})).toEqual([])
   })
 })

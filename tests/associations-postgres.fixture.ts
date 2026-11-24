@@ -6,12 +6,20 @@ import { join } from "node:path"
 import { SQL } from "bun"
 import { drizzle } from "drizzle-orm/bun-sql"
 import { migrate } from "drizzle-orm/bun-sql/migrator"
+import { createPromotionService } from "@/associations/promotions"
+import { createPromotionStore } from "@/associations/promotions-pg"
 import { publicAssociations } from "@/associations/public"
 import { createAssociationService } from "@/associations/service"
 import { createAssociationStore } from "@/associations/store-pg"
 import { schema } from "@/db/schema"
 import { groupLabels } from "@/db/schema/common/group-labels"
-import { associationCatalogue, associationMail, associationRegistry } from "@/db/schema/web/association-portal"
+import {
+  associationCatalogue,
+  associationMail,
+  associationPromotion,
+  associationPromotionTransition,
+  associationRegistry,
+} from "@/db/schema/web/association-portal"
 import { associations } from "@/db/schema/web/associations"
 
 const connection = {
@@ -240,6 +248,56 @@ try {
     ["public"]
   )
   assert.equal(JSON.stringify(await publicAssociations(store)).includes("Personal Name"), false)
+  // Promotion requests: concurrent decisions, retried commands, append-only transitions and the SQL queue.
+  const promotions = createPromotionService(createPromotionStore(db), store, "https://admin.example.org")
+  const userWithMail = { ...user, email: "new@example.org" }
+  const day = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
+  const promotionContent = {
+    title: "Evento",
+    text: "Testo",
+    link: "",
+    poster: null,
+    channels: [{ channel: "poliassociazioni" as const, programme: null, note: "" }],
+    audience: { everyone: true, programmes: [], campuses: [] },
+    desiredDate: day,
+    deadline: null,
+  }
+  const createKey = randomUUID()
+  const [p1, p2] = await Promise.all([
+    promotions.create(userWithMail, { associationId: a.id, content: promotionContent, commandId: createKey }),
+    promotions.create(userWithMail, { associationId: a.id, content: promotionContent, commandId: createKey }),
+  ])
+  assert.equal(p1.id, p2.id)
+  assert.equal((await db.select().from(associationPromotion)).length, 1)
+  const submitKey = randomUUID()
+  await Promise.all([
+    promotions.command(userWithMail, { id: p1.id, revision: 0, commandId: submitKey, action: "submit" }),
+    promotions.command(userWithMail, { id: p1.id, revision: 0, commandId: submitKey, action: "submit" }),
+  ])
+  const decisions = await Promise.allSettled([
+    promotions.command(staff, { id: p1.id, revision: 1, commandId: randomUUID(), action: "approve", note: "" }),
+    promotions.command(staff, { id: p1.id, revision: 1, commandId: randomUUID(), action: "reject", note: "No" }),
+  ])
+  assert.equal(decisions.filter((d) => d.status === "fulfilled").length, 1)
+  const decided = await promotions.get(staff, p1.id)
+  assert.equal(decided.transitions.filter((t) => t.to === "submitted").length, 1)
+  assert.equal(decided.transitions.filter((t) => t.to === "approved" || t.to === "rejected").length, 1)
+  let appendOnly = false
+  try {
+    await db.update(associationPromotionTransition).set({ note: "edited" })
+  } catch {
+    appendOnly = true
+  }
+  assert(appendOnly, "transitions must reject UPDATE")
+  assert.equal(
+    (await promotions.queue(staff, { from: day, to: day })).length,
+    1,
+    "the queue filters by the desired day in SQL"
+  )
+  const [promotionMail] = (await db.select().from(associationMail)).filter(
+    (m) => m.mail.template?.kind === "association-promotion"
+  )
+  assert.equal(promotionMail?.mail.to, "new@example.org")
   const visible = async (viewer: { sub: string; name: string; operator: boolean }) =>
     ((await service.directory(viewer)).find((r) => r.id === a.id)?.contacts ?? []).map((c) => c.label).sort()
   assert.deepEqual(await visible({ sub: "nobody", name: "Nobody", operator: false }), ["public"])
@@ -272,6 +330,7 @@ try {
         "catalogue seed",
         "registry backfill",
         "contact visibility",
+        "promotion idempotency and concurrent decisions",
       ],
     })
   )

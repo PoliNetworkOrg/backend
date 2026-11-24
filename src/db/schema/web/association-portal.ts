@@ -1,5 +1,18 @@
 import { sql } from "drizzle-orm"
-import { boolean, check, customType, integer, primaryKey, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core"
+import {
+  boolean,
+  check,
+  customType,
+  date,
+  index,
+  integer,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core"
+import type { PromotionContent, PromotionStatus } from "@/associations/contract"
 import type { Mail, Record } from "@/associations/service"
 import { createTable } from "../create-table"
 
@@ -41,3 +54,62 @@ export const associationCatalogue = createTable.web(
     check("web_association_catalogue_kind", sql`${t.kind} IN ('programme', 'campus')`),
   ]
 )
+
+const PROMOTION_STATUSES =
+  "'draft', 'submitted', 'changes_requested', 'approved', 'scheduled', 'published', 'rejected', 'withdrawn'"
+
+// Promotion requests have their own rows: many per association, queried across associations by operators.
+export const associationPromotion = createTable.web(
+  "association_promotion",
+  {
+    id: uuid().primaryKey(),
+    associationId: uuid("association_id")
+      .notNull()
+      .references(() => associationRegistry.id),
+    status: varchar({ length: 24 }).$type<PromotionStatus>().notNull(),
+    revision: integer().notNull().default(0),
+    content: jsonObject<PromotionContent>().notNull(),
+    createdBy: text("created_by").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    /** Addresses that hear about every transition (author, submitter). */
+    notify: text().array().notNull(),
+    desiredDate: date("desired_date"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    scheduledChannel: varchar("scheduled_channel", { length: 32 }),
+    scheduledDetail: text("scheduled_detail").notNull().default(""),
+    publishedUrl: text("published_url"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("web_association_promotion_association_idx").on(t.associationId),
+    index("web_association_promotion_queue_idx").on(t.status, t.desiredDate),
+    check("web_association_promotion_status", sql.raw(`status IN (${PROMOTION_STATUSES})`)),
+  ]
+)
+// Append-only (a trigger rejects UPDATE and DELETE): who moved a request, when, and why.
+export const associationPromotionTransition = createTable.web(
+  "association_promotion_transition",
+  {
+    id: uuid().primaryKey(),
+    promotionId: uuid("promotion_id")
+      .notNull()
+      .references(() => associationPromotion.id),
+    kind: varchar({ length: 16 }).$type<"transition" | "comment">().notNull(),
+    fromStatus: varchar("from_status", { length: 24 }).$type<PromotionStatus>(),
+    toStatus: varchar("to_status", { length: 24 }).$type<PromotionStatus>(),
+    actorSub: text("actor_sub").notNull(),
+    actorName: text("actor_name").notNull(),
+    note: text().notNull().default(""),
+    internal: boolean().notNull().default(false),
+    at: timestamp({ withTimezone: true }).notNull(),
+  },
+  (t) => [index("web_association_promotion_transition_promotion_idx").on(t.promotionId, t.at)]
+)
+// Per-account command keys for operations outside the registry aggregate: a retried command returns its first result.
+export const associationCommandKey = createTable.web("association_command_key", {
+  key: text().primaryKey(),
+  result: uuid().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+})

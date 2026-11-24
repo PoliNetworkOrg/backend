@@ -7,6 +7,7 @@ import { logger } from "@/logger"
 import type { FeeMailKind, SociMail } from "@/soci/types"
 import { renderEmail } from "./render"
 import type { SecretSantaEmailRequest } from "./secret-santa-routes"
+import AssociationPromotionEmail, { type AssociationPromotionProps } from "./templates/association-promotion"
 import BirthdayEmail, { birthdaySubject } from "./templates/birthday"
 import FeeConfirmedEmail, { feeConfirmedSubject } from "./templates/fee-confirmed"
 import FeeOpeningEmail, { feeOpeningSubject } from "./templates/fee-opening"
@@ -240,18 +241,29 @@ export async function sendRegulationDelegaEmail(
   })
 }
 
-export async function sendAssociationEmail(mail: { id: string; to: string; subject: string; text: string }) {
-  return sendEmail(
-    mail.to,
-    makeSubject(mail.subject),
+type AssociationMail = {
+  id: string
+  to: string
+  subject: string
+  text: string
+  template?: { kind: string; props: { [key: string]: string | null } }
+}
+/** Templates the association outbox can name; an unknown or missing one falls back to the plain text. */
+function associationComponent(mail: AssociationMail): JSX.Element {
+  // SAFETY: the registry service writes these props for exactly this template kind (`promotions.ts`).
+  if (mail.template?.kind === "association-promotion")
+    return <AssociationPromotionEmail {...(mail.template.props as unknown as AssociationPromotionProps)} />
+  return (
     <div>
       <h1>{mail.subject}</h1>
       <p style={{ whiteSpace: "pre-line" }}>{mail.text}</p>
-    </div>,
-    [],
-    {
-      throwOnError: true,
-      messageId: `<association-${mail.id}@polinetwork.org>`,
-    }
+    </div>
   )
+}
+
+export async function sendAssociationEmail(mail: AssociationMail) {
+  return sendEmail(mail.to, makeSubject(mail.subject), associationComponent(mail), [], {
+    throwOnError: true,
+    messageId: `<association-${mail.id}@polinetwork.org>`,
+  })
 }
