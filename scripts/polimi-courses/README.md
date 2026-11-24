@@ -43,5 +43,6 @@ bun scripts/polimi-courses/sql.ts scripts/polimi-courses/data/2027-28.json drizz
 Open a pull request with the file and the migration. The migration inserts new courses, updates existing ones by code
 and marks inactive every course the file doesn't list.
 
-`fetch.ts` exits with status 1 and lists the problems when a listed course's page can't be read, or a rankings-data
-code can't be found in any academic year since 2021.
+When a listed course's page can't be read, or a rankings-data code can't be read or found in any academic year since
+2021, `fetch.ts` lists the problems, exits with status 1 and leaves the year's file as it was: an incomplete list would
+mark the courses it missed inactive. The site answers 500 now and then, so running it again usually helps.

@@ -139,13 +139,20 @@ for (const code of [...inactive].sort((a, b) => a - b)) {
     entries.push({ ...kept, active: false })
     continue
   }
+  // The latest year that offered it. Only a page that answered and shows another course moves on to an older year:
+  // a failed request stops the lookup, so an older year's details never stand in for a newer one's.
   let found = false
+  let failed = false
   for (let y = year - 1; y >= 2021 && !found; y--) {
-    const html = await coursePage(code, y).catch((error: Error) => {
-      console.error(`${code} in ${y}: ${error.message}`)
-      return ""
-    })
-    const details = html ? parseCourseDetails(html) : null
+    let html: string
+    try {
+      html = await coursePage(code, y)
+    } catch (error) {
+      problems.push(`${code}: couldn't read its ${y} page (${(error as Error).message})`)
+      failed = true
+      break
+    }
+    const details = parseCourseDetails(html)
     if (details?.code !== code) continue
     const raw = html.match(/Ordinamento\s*([^<]+)</)?.[1] ?? ""
     entries.push({
@@ -162,7 +169,15 @@ for (const code of [...inactive].sort((a, b) => a - b)) {
     })
     found = true
   }
-  if (!found) problems.push(`${code}: in rankings-data, but no academic year since 2021 has its page`)
+  if (!found && !failed) problems.push(`${code}: in rankings-data, but no academic year since 2021 has its page`)
+}
+
+// An incomplete list would mark the courses it missed inactive: keep the reviewed file as it is.
+if (problems.length) {
+  console.log("\nProblems:")
+  for (const problem of problems) console.log(`  ${problem}`)
+  console.log(`\nDidn't write ${join(dataDir, fileName(year))}: run again, or fix the problems first.`)
+  process.exit(1)
 }
 
 const file: CourseFile = courseFileSchema.parse({ academicYear: year, courses: sortCourses(entries) })
@@ -187,9 +202,4 @@ if (previous) {
   for (const c of added) console.log(`  + ${c.code} ${c.name}`)
   for (const c of removed) console.log(`  - ${c.code} ${c.name}`)
   for (const c of changed) console.log(`  ~ ${c.code} ${c.name}: ${c.fields.join(", ")}`)
-}
-if (problems.length) {
-  console.log("\nProblems:")
-  for (const problem of problems) console.log(`  ${problem}`)
-  process.exitCode = 1
 }
