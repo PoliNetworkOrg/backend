@@ -93,7 +93,10 @@ function checkCatalogue(p: Profile, previous: Profile | null, catalogue: Catalog
     for (const slug of slugs) {
       const entry = catalogue.find((e) => e.kind === kind && e.slug === slug)
       if (!entry || (!entry.active && !before.includes(slug)))
-        fail("BAD_REQUEST", `Choose ${kind === "programme" ? "programmes" : "campuses"} from the PoliNetwork catalogue`)
+        fail(
+          "BAD_REQUEST",
+          kind === "programme" ? "Choose programmes from the catalogue" : "Choose campuses from the catalogue"
+        )
     }
   }
 }

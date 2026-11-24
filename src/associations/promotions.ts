@@ -257,8 +257,7 @@ export function createPromotionService(
           if (!v.operator) fail("FORBIDDEN", "PoliNetwork approval is required")
         }
         const from = (...allowed: PromotionStatus[]) => {
-          if (!allowed.includes(p.status))
-            fail("CONFLICT", `The request is ${promotionStatusLabel[p.status].toLowerCase()}`)
+          if (!allowed.includes(p.status)) fail("CONFLICT", "The request cannot take this step in its current state")
         }
         switch (c.action) {
           case "save":
