@@ -35,6 +35,11 @@ try {
   const title = "Le lezioni della prima settimana si tengono regolarmente?"
   const [retained] =
     await connection`INSERT INTO web_faqs (title_it, title_en, description_it, description_en, category_id, created_by_sub) VALUES (${title}, 'Retained English', 'Retained answer', 'Retained English answer', ${category.id}, 'retained') RETURNING id`
+  // Groups behind the seeded Telegram links: by public tag (Generale) and by the t.me/+ form of a joinchat link (Ripetizioni).
+  await connection`INSERT INTO tg_groups (telegram_id, title, tag, link) VALUES
+    (-1001, 'PoliGruppo', 'PoliGruppo', 'https://t.me/+general'),
+    (-1003, 'Ripetizioni Polimi', NULL, 'https://t.me/+l10OF3vF6fEzOTRk'),
+    (-1009, 'Unlinked', NULL, NULL)`
 
   Object.assign(process.env, {
     NODE_ENV: "test",
@@ -76,6 +81,56 @@ try {
   assert.equal(before.faqs[0].descriptionIt, "Retained answer")
   assert.equal(before.faqs[0].titleEn, "Retained English")
   assert.equal("modifiedBySub" in before.resources[0], false)
+
+  // Migration 0046 links the slots whose link names a known group and keeps the others' legacy links.
+  const telegram = Object.fromEntries(before.telegram.map((slot) => [slot.id, slot]))
+  assert.equal(telegram["telegram-1"].telegramGroup?.telegramId, -1001)
+  assert.equal(telegram["telegram-1"].href, "https://t.me/+general")
+  assert.equal(telegram["telegram-1"].title, "Generale")
+  assert.equal(telegram["telegram-3"].telegramGroup?.telegramId, -1003)
+  assert.equal(telegram["telegram-3"].href, "https://t.me/+l10OF3vF6fEzOTRk")
+  assert.equal(telegram["telegram-2"].telegramGroup, null)
+  assert.equal(telegram["telegram-2"].href, "https://t.me/polimatricole")
+  assert.deepEqual(
+    await connection`SELECT id, href FROM web_freshman_cards WHERE telegram_group_id IS NOT NULL ORDER BY id`,
+    [
+      { id: "telegram-1", href: "" },
+      { id: "telegram-3", href: "" },
+    ]
+  )
+
+  // An empty title shows the group's own, and follows it when the group is renamed.
+  await editor.updateTelegramCard({ id: "telegram-2", title: "", icon: "user", telegramGroupId: -1003 })
+  await connection`UPDATE tg_groups SET title = 'Ripetizioni', link = 'https://t.me/+rotated' WHERE telegram_id = -1003`
+  const linked = (await website.getContent()).telegram[1]
+  assert.deepEqual(
+    { title: linked.title, customTitle: linked.customTitle, href: linked.href },
+    { title: "Ripetizioni", customTitle: "", href: "https://t.me/+rotated" }
+  )
+  await assert.rejects(
+    editor.updateTelegramCard({ id: "telegram-2", title: "", icon: "user", telegramGroupId: -1009 }),
+    { code: "BAD_REQUEST" }
+  )
+  await assert.rejects(editor.updateTelegramCard({ id: "telegram-2", title: "", icon: "user", telegramGroupId: -1 }), {
+    code: "NOT_FOUND",
+  })
+  await assert.rejects(
+    editor.updateCard({ id: "telegram-2", title: "x", description: "", icon: "user", href: "https://t.me/x" }),
+    { code: "BAD_REQUEST" }
+  )
+  await assert.rejects(connection`UPDATE web_freshman_cards SET telegram_group_id = -1003 WHERE id = 'featured-1'`, {
+    constraint: "web_freshman_cards_telegram_group_check",
+  })
+  // Moving swaps the linked groups too; deleting a group leaves its slot without a link.
+  await editor.moveCard({ id: "telegram-1", direction: 1 })
+  const moved = (await website.getContent()).telegram
+  assert.deepEqual(
+    moved.slice(0, 2).map((slot) => slot.telegramGroup?.telegramId),
+    [-1003, -1001]
+  )
+  await connection`DELETE FROM tg_groups WHERE telegram_id = -1001`
+  const orphan = (await website.getContent()).telegram[1]
+  assert.deepEqual({ group: orphan.telegramGroup, href: orphan.href }, { group: null, href: "" })
 
   const card = before.resources[0]
   const fields = {
@@ -216,7 +271,7 @@ try {
   assert.equal((await connection`SELECT count(*)::int AS count FROM web_freshman_cards`)[0].count, 18)
   assert.equal((await connection`SELECT count(*)::int AS count FROM web_freshman_faqs`)[0].count, 5)
   console.log(
-    "PASS: migration FAQ reuse, fixed counts, public reads, durable writes, authorship, invalid inputs, concurrent swaps, catalog propagation and deletion protection"
+    "PASS: migration FAQ reuse, Telegram group links, fixed counts, public reads, durable writes, authorship, invalid inputs, concurrent swaps, catalog propagation and deletion protection"
   )
 } finally {
   await closeBackend?.()

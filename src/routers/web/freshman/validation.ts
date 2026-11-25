@@ -28,10 +28,22 @@ export const updateFreshmanCardInput = freshmanCardFields
   .extend({
     id: freshmanSlotId,
   })
-  .superRefine((input, ctx) => {
-    if (input.id.startsWith("telegram-") && input.href === "")
-      ctx.addIssue({ code: "custom", path: ["href"], message: "Enter a group link." })
+  .refine((input) => !input.id.startsWith("telegram-"), {
+    path: ["id"],
+    message: "A Telegram slot links a group: use updateTelegramCard.",
   })
+export const telegramSlotId = z
+  .string()
+  .refine((id) => freshmanSlots.some((slot) => slot.id === id && slot.section === "telegram"), "Unknown Telegram slot.")
+export const updateFreshmanTelegramCardInput = z
+  .object({
+    id: telegramSlotId,
+    /** Shown instead of the group's title; empty shows the group's title. */
+    title: z.string().trim().max(120),
+    icon: z.enum(freshmanIcons),
+    telegramGroupId: z.number().int(),
+  })
+  .strict()
 export const moveFreshmanCardInput = z
   .object({
     id: freshmanSlotId,
@@ -50,9 +62,17 @@ export const selectFreshmanFaqInput = z
   .strict()
 
 const publicCard = freshmanCardFields.extend({ id: z.string(), group: z.string() })
+const telegramCard = publicCard.extend({
+  /** The editor's name for the group; empty when `title` is the group's own title. */
+  customTitle: z.string(),
+  /** The linked group, whose invite link is `href`; null while the slot shows a legacy link (or none). */
+  telegramGroup: z
+    .object({ telegramId: z.number().int(), title: z.string(), link: z.string().nullable(), hide: z.boolean() })
+    .nullable(),
+})
 export const freshmanContentOutput = z.object({
   resources: z.array(publicCard).length(10),
-  telegram: z.array(publicCard).length(8),
+  telegram: z.array(telegramCard).length(8),
   faqs: z
     .array(
       z.object({

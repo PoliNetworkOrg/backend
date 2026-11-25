@@ -10,12 +10,14 @@ import {
   moveFreshmanCardInput,
   selectFreshmanFaqInput,
   updateFreshmanCardInput,
+  updateFreshmanTelegramCardInput,
 } from "@/routers/web/freshman/validation"
 import { createTRPCRouter, policy } from "@/trpc"
 
 const CARDS = SCHEMA.WEB.freshmanCards
 const FEATURED = SCHEMA.WEB.freshmanFaqs
 const FAQS = SCHEMA.WEB.faqs
+const GROUPS = SCHEMA.TG.groups
 
 export default createTRPCRouter({
   getContent: policy(publicData)
@@ -24,7 +26,13 @@ export default createTRPCRouter({
       // A repeatable snapshot prevents a multi-row swap from appearing partially applied.
       return DB.transaction(
         async (tx) => {
-          const cards = await tx.select().from(CARDS)
+          const cards = await tx
+            .select({
+              card: CARDS,
+              group: { telegramId: GROUPS.telegramId, title: GROUPS.title, link: GROUPS.link, hide: GROUPS.hide },
+            })
+            .from(CARDS)
+            .leftJoin(GROUPS, eq(CARDS.telegramGroupId, GROUPS.telegramId))
           const featured = await tx
             .select({
               faqId: FAQS.id,
@@ -36,23 +44,39 @@ export default createTRPCRouter({
             .from(FEATURED)
             .innerJoin(FAQS, eq(FEATURED.faqId, FAQS.id))
             .orderBy(asc(FEATURED.position))
-          const ordered = freshmanSlots.map((slot) => {
-            const card = cards.find((row) => row.id === slot.id)
-            if (!card)
+          const rows = freshmanSlots.map((slot) => {
+            const row = cards.find(({ card }) => card.id === slot.id)
+            if (!row)
               throw new TRPCError({
                 code: "INTERNAL_SERVER_ERROR",
                 message: "Freshman content is not initialized. Apply the database migration.",
               })
-            return {
+            return { slot, ...row }
+          })
+          const resources = rows
+            .filter(({ slot }) => slot.section === "resources")
+            .map(({ slot, card }) => ({
               id: slot.id,
               group: slot.group,
               title: card.title,
               description: card.description,
               icon: card.icon,
               href: card.href,
-            }
-          })
-          return { resources: ordered.slice(0, 10), telegram: ordered.slice(10), faqs: featured }
+            }))
+          const telegram = rows
+            .filter(({ slot }) => slot.section === "telegram")
+            .map(({ slot, card, group }) => ({
+              id: slot.id,
+              group: slot.group,
+              title: card.title || (group?.title ?? ""),
+              description: card.description,
+              icon: card.icon,
+              // A linked group is the only source of the slot's link; the stored one is a legacy fallback.
+              href: group ? (group.link ?? "") : card.href,
+              customTitle: card.title,
+              telegramGroup: group,
+            }))
+          return { resources, telegram, faqs: featured }
         },
         { isolationLevel: "repeatable read", accessMode: "read only" }
       )
@@ -69,6 +93,33 @@ export default createTRPCRouter({
         const [after] = await tx
           .update(CARDS)
           .set({ ...fields, ...modifiedByColumns(authorOf(ctx.actor)) })
+          .where(eq(CARDS.id, id))
+          .returning()
+        return { before, after }
+      })
+      ctx.audit.set({ target: { type: "web.freshmanCard", id }, before, after })
+      return { error: null }
+    }),
+
+  updateTelegramCard: policy(dashboard("web:content:write"))
+    .meta(audit.full())
+    .input(updateFreshmanTelegramCardInput)
+    .mutation(async ({ input, ctx }) => {
+      const { id, title, icon, telegramGroupId } = input
+      const { before, after } = await DB.transaction(async (tx) => {
+        const [before] = await tx.select().from(CARDS).where(eq(CARDS.id, id)).for("update")
+        if (!before) throw new TRPCError({ code: "NOT_FOUND", message: "The website slot is not initialized." })
+        const [group] = await tx
+          .select({ link: GROUPS.link })
+          .from(GROUPS)
+          .where(eq(GROUPS.telegramId, telegramGroupId))
+          .for("key share")
+        if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "This Telegram group is not in the database." })
+        if (!group.link)
+          throw new TRPCError({ code: "BAD_REQUEST", message: "This Telegram group has no invite link yet." })
+        const [after] = await tx
+          .update(CARDS)
+          .set({ title, icon, telegramGroupId, href: "", ...modifiedByColumns(authorOf(ctx.actor)) })
           .where(eq(CARDS.id, id))
           .returning()
         return { before, after }
@@ -103,6 +154,7 @@ export default createTRPCRouter({
           description: row.description,
           href: row.href,
           icon: row.icon,
+          telegramGroupId: row.telegramGroupId,
           ...author,
         })
         const first = await tx.update(CARDS).set(values(target)).where(eq(CARDS.id, current.id)).returning()

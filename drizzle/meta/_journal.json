@@ -323,6 +323,13 @@
       "when": 1795563193696,
       "tag": "0045_polimi_courses_2026_27",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1795569986150,
+      "tag": "0046_freshman_telegram_groups",
+      "breakpoints": true
     }
   ]
 }

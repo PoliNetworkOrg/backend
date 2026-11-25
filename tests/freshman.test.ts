@@ -5,6 +5,7 @@ import {
   moveFreshmanCardInput,
   selectFreshmanFaqInput,
   updateFreshmanCardInput,
+  updateFreshmanTelegramCardInput,
 } from "@/routers/web/freshman/validation"
 import type { Context } from "@/trpc"
 
@@ -24,7 +25,7 @@ vi.mock("@/audit/store", () => ({ writeAuditEvent: events.write }))
 const db = vi.hoisted(() => ({ transaction: vi.fn(), set: vi.fn(), update: vi.fn() }))
 vi.mock("@/db", async () => ({
   DB: { transaction: db.transaction, update: db.update },
-  SCHEMA: { WEB: (await import("@/db/schema/web")).schema },
+  SCHEMA: { WEB: (await import("@/db/schema/web")).schema, TG: (await import("@/db/schema/tg")).schema },
 }))
 
 import freshman from "@/routers/web/freshman"
@@ -82,8 +83,24 @@ describe("Freshman validation", () => {
     ]) {
       expect(updateFreshmanCardInput.safeParse({ id: "featured-1", ...fields, ...invalid }).success).toBe(false)
     }
-    expect(updateFreshmanCardInput.safeParse({ id: "telegram-1", ...fields, href: "" }).success).toBe(false)
+    expect(updateFreshmanCardInput.safeParse({ id: "telegram-1", ...fields, href: "https://t.me/x" }).success).toBe(
+      false
+    )
     expect(updateFreshmanCardInput.safeParse({ id: "guides-2", ...fields, href: "" }).success).toBe(true)
+  })
+
+  it("links a Telegram slot to a group by id, with an optional display name", () => {
+    const telegram = { id: "telegram-1", title: "", icon: "bell" as const, telegramGroupId: -1001 }
+    expect(updateFreshmanTelegramCardInput.parse({ ...telegram, title: "  Generale " }).title).toBe("Generale")
+    expect(updateFreshmanTelegramCardInput.safeParse(telegram).success).toBe(true)
+    for (const invalid of [
+      { id: "featured-1" },
+      { id: "telegram-9" },
+      { title: "x".repeat(121) },
+      { telegramGroupId: 1.5 },
+      { href: "https://t.me/x" },
+    ])
+      expect(updateFreshmanTelegramCardInput.safeParse({ ...telegram, ...invalid }).success).toBe(false)
   })
 
   it("requires an adjacent move and one of the five FAQ positions", () => {
@@ -100,7 +117,13 @@ describe("Freshman authorization", () => {
     const card = (id: string, group: string) => ({ id, group, ...fields })
     const output = {
       resources: freshmanSlots.filter((slot) => slot.section === "resources").map((slot) => card(slot.id, slot.group)),
-      telegram: freshmanSlots.filter((slot) => slot.section === "telegram").map((slot) => card(slot.id, slot.group)),
+      telegram: freshmanSlots
+        .filter((slot) => slot.section === "telegram")
+        .map((slot) => ({
+          ...card(slot.id, slot.group),
+          customTitle: "",
+          telegramGroup: { telegramId: -1001, title: "Title", link: "https://t.me/+abc", hide: false },
+        })),
       faqs: Array.from({ length: 5 }, (_, index) => ({
         faqId: index + 1,
         titleIt: "IT",
@@ -126,6 +149,9 @@ describe("Freshman authorization", () => {
   ])("denies all mutations without the exact editor boundary", async (ctx) => {
     const caller = freshman.createCaller(ctx)
     await expect(caller.updateCard({ id: "featured-1", ...fields })).rejects.toMatchObject({ code: "FORBIDDEN" })
+    await expect(
+      caller.updateTelegramCard({ id: "telegram-1", title: "", icon: "bell", telegramGroupId: -1001 })
+    ).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(caller.moveCard({ id: "featured-1", direction: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" })
     await expect(caller.selectFaq({ position: 0, faqId: 1 })).rejects.toMatchObject({ code: "FORBIDDEN" })
     expect(db.update).not.toHaveBeenCalled()
@@ -143,6 +169,48 @@ describe("Freshman authorization", () => {
         after: { id: "featured-1" },
       })
     )
+  })
+
+  it("links a Telegram slot to a group with an invite link and drops its legacy link", async () => {
+    const reads = [[{ id: "telegram-1", href: "https://t.me/old" }], [{ link: "https://t.me/+abc" }]]
+    db.transaction.mockImplementation(async (run) =>
+      run({
+        select: () => ({ from: () => ({ where: () => ({ for: async () => reads.shift() }) }) }),
+        update: db.update,
+      })
+    )
+    const input = { id: "telegram-1", title: "", icon: "bell" as const, telegramGroupId: -1001 }
+    await freshman.createCaller(context(editor, ["web:content:write"])).updateTelegramCard(input)
+    expect(db.set).toHaveBeenCalledWith({
+      title: "",
+      icon: "bell",
+      telegramGroupId: -1001,
+      href: "",
+      legacyModifiedByTgId: null,
+      modifiedBySub: "editor",
+    })
+    expect(events.write).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: "web.freshmanCard", targetId: "telegram-1" })
+    )
+  })
+
+  it.each([
+    [[], "NOT_FOUND"],
+    [[{ link: null }], "BAD_REQUEST"],
+  ])("refuses a group that is missing or has no invite link", async (group, code) => {
+    const reads = [[{ id: "telegram-1" }], group]
+    db.transaction.mockImplementation(async (run) =>
+      run({
+        select: () => ({ from: () => ({ where: () => ({ for: async () => reads.shift() }) }) }),
+        update: db.update,
+      })
+    )
+    await expect(
+      freshman
+        .createCaller(context(editor, ["web:content:write"]))
+        .updateTelegramCard({ id: "telegram-1", title: "", icon: "bell", telegramGroupId: -1001 })
+    ).rejects.toMatchObject({ code })
+    expect(db.update).not.toHaveBeenCalled()
   })
 
   it("records both rows of a card swap from the transaction results", async () => {
