@@ -6,6 +6,8 @@ on:
     branches:
       - main
       - toto04/semantic-releases
+  # Run by hand when GitHub drops a push event (as during its 2026-11-25 incident).
+  workflow_dispatch:
 
 concurrency:
   group: npm-release-${{ github.ref }}
