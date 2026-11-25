@@ -283,5 +283,9 @@ Signatures are checked against the CIE certification authorities of the Minister
 `web.freshman` exposes fixed-slot content for the website and authorized admin editors. Migration
 `0026_freshman_content` initializes 10 resources, 8 Telegram links and 5 existing/new FAQs, preserving matching
 catalog entries. Selected FAQs/categories must be replaced in Freshman before deleting them from the catalog.
+Each Telegram slot links a group from `tg_groups` (`updateTelegramCard`): the website gets the group's current invite
+link, and the group's title unless the editor set a display name. A slot whose group is deleted has no link until an
+editor picks another. Migration `0046_freshman_telegram_groups` linked the slots whose link matched a group's invite
+link or public tag; the others keep their old link until an editor picks a group.
 The development seed also initializes the card slots and selections; `--force` clears those selections before
 replacing the sample FAQ catalog.
