@@ -8,10 +8,12 @@ UPDATE "web_freshman_cards" AS "card"
 SET "telegram_group_id" = (
 	SELECT "group"."telegram_id"
 	FROM "tg_groups" AS "group"
-	WHERE lower(replace("group"."link", '/joinchat/', '/+')) = lower(replace(trim("card"."href"), '/joinchat/', '/+'))
-		OR ("group"."tag" IS NOT NULL
-			AND lower('https://t.me/' || ltrim("group"."tag", '@')) = lower(rtrim(trim("card"."href"), '/')))
-	ORDER BY coalesce("group"."link" = trim("card"."href"), false) DESC, "group"."hide", "group"."telegram_id"
+	-- Like updateTelegramCard, only a group with an invite link replaces the slot's link.
+	WHERE coalesce("group"."link", '') <> ''
+		AND (lower(replace("group"."link", '/joinchat/', '/+')) = lower(replace(trim("card"."href"), '/joinchat/', '/+'))
+			OR ("group"."tag" IS NOT NULL
+				AND lower('https://t.me/' || ltrim("group"."tag", '@')) = lower(rtrim(trim("card"."href"), '/'))))
+	ORDER BY ("group"."link" = trim("card"."href")) DESC, "group"."hide", "group"."telegram_id"
 	LIMIT 1
 )
 WHERE "card"."id" LIKE 'telegram-%';--> statement-breakpoint

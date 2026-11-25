@@ -39,7 +39,7 @@ try {
   await connection`INSERT INTO tg_groups (telegram_id, title, tag, link) VALUES
     (-1001, 'PoliGruppo', 'PoliGruppo', 'https://t.me/+general'),
     (-1003, 'Ripetizioni Polimi', NULL, 'https://t.me/+l10OF3vF6fEzOTRk'),
-    (-1009, 'Unlinked', NULL, NULL)`
+    (-1009, 'Unlinked', 'polimatricole', NULL)`
 
   Object.assign(process.env, {
     NODE_ENV: "test",
@@ -131,6 +131,10 @@ try {
   await connection`DELETE FROM tg_groups WHERE telegram_id = -1001`
   const orphan = (await website.getContent()).telegram[1]
   assert.deepEqual({ group: orphan.telegramGroup, href: orphan.href }, { group: null, href: "" })
+  // A slot without a display name whose group is deleted is still served, with an empty title.
+  await connection`DELETE FROM tg_groups WHERE telegram_id = -1003`
+  const unnamed = (await website.getContent()).telegram[0]
+  assert.deepEqual({ title: unnamed.title, href: unnamed.href }, { title: "", href: "" })
 
   const card = before.resources[0]
   const fields = {

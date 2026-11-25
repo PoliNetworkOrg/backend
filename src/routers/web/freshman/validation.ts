@@ -63,6 +63,8 @@ export const selectFreshmanFaqInput = z
 
 const publicCard = freshmanCardFields.extend({ id: z.string(), group: z.string() })
 const telegramCard = publicCard.extend({
+  /** The display name, else the group's title (Telegram allows longer ones); empty once an unnamed slot's group is deleted. */
+  title: z.string(),
   /** The editor's name for the group; empty when `title` is the group's own title. */
   customTitle: z.string(),
   /** The linked group, whose invite link is `href`; null while the slot shows a legacy link (or none). */
